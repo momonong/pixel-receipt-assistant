@@ -1,142 +1,166 @@
-# PixelReceipt AI (智慧細粒度記帳助理)
+# PixelReceipt AI
 
-專為 Google Pixel 生態打造的無伺服器（Serverless）智慧記帳應用。透過 Gemini 多模態語意辨識，解決傳統記帳軟體「無法自動拆解消費細項」、「無法精確歸屬促銷折讓」與「代墊拆帳繁瑣」的痛點，並自動將乾淨的結構化數據同步至個人的 Google 試算表。
+PixelReceipt AI 是以 **Google Pixel 10 Pro Fold** 為主要實機的原生 Android 智慧記帳 App。目標體驗是不必先開 App：使用者先用原廠相機拍照，再從 Android Sharesheet 分享進 App，或稍後透過系統 Photo Picker 補選多張圖片；App 將收據、價標與促銷牌整理成同一筆交易的 evidence inbox，最後交給使用者核對。
 
----
+目前狀態：**Phase 0 原生 Android／Foldable 基線與 Phase 1A evidence-first domain contracts 已完成**。專案可編譯並產生 debug APK；Unknown／provenance、多對多 evidence link、促銷適用品項、純函式定價、收據對帳、確認 gate、AI routing 與零售商 fallback port 都已落地。Sharesheet／Photo Picker、多圖 inbox UI、Room，以及 ML Kit、Firebase、OAuth、Sheets 的實際 adapters 仍是下一步，現在不能視為可用功能。
 
-## 核心設計理念
+## 核心原則
 
-* **細粒度單品記錄（Line-item Level）**：不只記總金額，每件商品（如：火鍋肉盤、洗髮精、牙刷）獨立成列，支援後續交叉分析。
-* **真實促銷扣抵還原**：自動解析「任選折扣」、「買一送一」與「全店折讓」，計算個別商品的實質取得單價與省下金額（`discount_saved`）。
-* **零伺服器維護成本**：Android 本端執行，直接透過 SDK 調用 Gemini API，以 Google 試算表作為雲端資料庫，無需自架後端與主機。
-* **品名自動標準化**：將實體店發票上的縮寫（如 `淨男士洗髮清爽`、`舒適辨型保濕架`）自動對齊通用分類（`洗髮精`、`刮鬍刀`）。
+- 每件商品各自成列；已知值保存來源，不確定的原價、折扣或適用範圍則明確保留 `Unknown`，不為了湊齊欄位而填零。
+- AI 只做分類、文字／欄位擷取、關聯候選與說明；金額、折扣分攤、拆帳和總額一致性全部由可重現、可測試的本機 deterministic pricing rules 判定。
+- 缺少證據時保留 `Unknown`，不把網路促銷候選或模型猜測偽裝成已發生的折扣。
+- Room 是 single source of truth；Google Sheets 是可重試的單向匯出端，不是第二個主資料庫。
+- `AiRouter` 的 SDK-neutral contract 與 local-first 選路已完成；未來接入 ML Kit Gemini Nano 與 Firebase AI Logic adapters 時，只有對「同一 case、同一批圖片內容、同一目的與指定雲端服務」明確同意後才可上雲，APK 不放可直接濫用的 Gemini API key。
+- UI 依目前 app window 調整，不以手機型號、外／內螢幕或固定方向猜測版面。
 
----
+## 已落地的技術基線
 
-## 系統架構
+| 項目 | 版本／選擇 |
+| --- | --- |
+| UI | Single activity、Jetpack Compose、Material 3 Adaptive supporting pane |
+| Architecture | UDF、ViewModel + StateFlow、domain ports、repository adapters |
+| Android | `compileSdk 37`、`targetSdk 37`；Phase 1 支援下限採 `minSdk 26` |
+| Build | AGP `9.4.0`、Gradle `9.7.1`、JDK `17` |
+| Kotlin | `2.4.10` |
+| Compose | BOM `2026.08.00` |
+| Material 3 Adaptive | `1.3.0` |
+| Coroutines | `1.11.0` |
 
-```
-[紙本消費明細 / 發票照片] ──┐
-                          ├──> [Pixel CameraX / 圖片選取]
-[語音輸入 / 刷卡推播文字] ──┘                 │
-                                              ▼
-                                 [Gemini Flash API (Structured Outputs)]
-                                 • 商家與縣市萃取
-                                 • 縮寫標準化與大/細分類
-                                 • 折扣關聯分攤與省錢額計算
-                                              │
-                                              ▼
-                                 [互動式確認介面 (Compose UI)]
-                                 • Checklist 勾選自用 vs 代墊
-                                 • 補齊折讓或確認品項
-                                              │
-                                              ▼
-                                 [同步入庫 (雙軌儲存)]
-                                 ├──> 本機端 SQLite (Room DB) 快速查詢與比對快取
-                                 └──> Google Sheets API (雲端明細扁平表)
+Gradle distribution 有固定 SHA-256，wrapper JAR 也已對照官方 checksum。暫定 application ID 是 `com.momonong.pixelreceipt`；設定 Firebase、OAuth、release signing 或 Play Console 前要先確認，之後不應任意更動。
 
-```
+## 架構摘要
 
----
-
-## 資料欄位規格 (Google Sheets Schema)
-
-每筆消費細項以一列（Row）為單位寫入試算表中的 `Raw_Transactions` 工作表：
-
-| 欄位名稱 | 類型 | 範例 | 說明 |
-| --- | --- | --- | --- |
-| `transaction_id` | String | `TX_20260902_001` | 該張發票或單次交易的唯一識別碼 |
-| `date` | Date | `2026-09-02` | 消費日期（YYYY-MM-DD） |
-| `merchant` | String | `全聯` | 標準化商家名稱 |
-| `city` | String | `臺南市` | 消費所屬縣市 |
-| `category` | String | `居家生活` | 消費大類（餐飲、居家生活、交通、娛樂等） |
-| `sub_category` | String | `牙刷` | 標準化商品細項標籤 |
-| `raw_name` | String | `高露潔齒縫潔淨` | 發票或明細上的原始文字 |
-| `standard_name` | String | `高露潔 齒縫潔淨牙刷 2入` | 辨識後的完整商品名稱 |
-| `quantity` | Integer | `2` | 購買數量 |
-| `original_price` | Decimal | `378.00` | 牌告未折原總價 |
-| `discount_saved` | Decimal | `189.00` | 該商品享受到的折扣或買一送一省下金額 |
-| `net_amount` | Decimal | `189.00` | 扣除促銷後的實付總額 |
-| `unit_price` | Decimal | `94.50` | 實質單價（`net_amount` / `quantity`） |
-| `is_personal` | Boolean | `FALSE` | 是否為個人自用消費 |
-| `split_party` | String | `室友` | 若為代墊，記錄代墊對象或平分註記 |
-| `my_expense` | Decimal | `0.00` | 最終計入個人生活預算的實際支出 |
-
----
-
-## Gemini 結構化輸出定義 (JSON Schema)
-
-發送圖片或明細文字至 Gemini API 時，指定使用以下 JSON Schema 解析：
-
-```json
-{
-  "type": "OBJECT",
-  "properties": {
-    "merchant": { "type": "STRING", "description": "商家標準化簡稱，如：全聯、萬客什鍋、7-Eleven" },
-    "city": { "type": "STRING", "description": "消費地點所屬縣市，若無明確地址則依店家分店資訊推斷" },
-    "transaction_date": { "type": "STRING", "description": "格式 YYYY-MM-DD" },
-    "total_invoice_amount": { "type": "NUMBER", "description": "整張發票最終付款金額" },
-    "items": {
-      "type": "ARRAY",
-      "items": {
-        "type": "OBJECT",
-        "properties": {
-          "raw_name": { "type": "STRING" },
-          "standard_name": { "type": "STRING" },
-          "category": { "type": "STRING" },
-          "sub_category": { "type": "STRING" },
-          "quantity": { "type": "INTEGER" },
-          "original_price": { "type": "NUMBER" },
-          "discount_saved": { "type": "NUMBER", "description": "若該品項有買一送一或任折，填入折扣正值，無則為 0" },
-          "net_amount": { "type": "NUMBER", "description": "折抵後的實際應付金額" }
-        },
-        "required": ["raw_name", "standard_name", "category", "sub_category", "quantity", "net_amount"]
-      }
-    }
-  },
-  "required": ["merchant", "total_invoice_amount", "items"]
-}
-
+```text
+原廠相機 → Android Sharesheet ─┐
+                              ├→ 多圖 evidence inbox（adapter/UI 待實作）
+系統 Photo Picker ────────────┘       │
+                                     ├→ ReceiptPage／PriceTag／PromotionSign／Other
+                                     ├→ Fact + provenance + EvidenceLink（domain 已完成）
+                                     └→ AiRouter（選路已完成；SDK adapters 待實作）
+                                         ├→ ML Kit Gemini Nano（支援時、前景執行）
+                                         └→ Firebase AI Logic（同批證據明確同意後）
+                                                   ↓
+                                    deterministic pricing + scoped adjustment
+                                                   ↓
+                                    Room（待實作）→ Review UI → Sheets（待實作）
 ```
 
----
+Domain 已將 AI recognition facts 與本機 `ReceiptDraft` 分開，模型不能指定本機 ID、revision、workflow stage 或帳務結果。`EvidenceAsset`／`EvidenceReference`／`EvidenceLink` 可表示一張促銷牌對多個收據品項，以及一個品項由多張圖片共同佐證；實際檔案匯入與 Room persistence 尚待 adapter 實作。資料寫入 contract 使用 revision + compare-and-set，避免 UI 與背景工作同時覆寫；exporter 只接收已驗證的 immutable batch。
 
-## 開發技術棧 (Tech Stack)
+完整依賴方向、狀態機、Foldable 行為與安全邊界請看 [架構文件](docs/ARCHITECTURE.md)。
 
-* **平台**：Android (Target SDK 34+，優化適配 Google Pixel)
-* **語言與架構**：Kotlin、MVVM Architecture、Jetpack Compose (UI)
-* **相機與影像**：CameraX、Google ML Kit (本機條碼/QR Code 快速解碼)
-* **AI 推論**：
-* 雲端：Google GenAI SDK for Android (`gemini-2.5-flash` / `gemini-1.5-flash`)
-* 端側輔助（規劃中）：Gemini Nano (透過 Android AICore)
+## 目錄
 
+```text
+app/src/main/java/com/momonong/pixelreceipt/
+├── app/                 Compose composition root
+├── core/ui/theme/       App theme
+├── domain/ai/           AI capability、consent 與 route contracts
+├── domain/model/        Evidence、Fact、Receipt、Promotion、Money
+├── domain/port/         Room／AI／Sheets 的介面邊界
+├── domain/rules/        促銷定價、matching validation 與對帳規則
+├── domain/usecase/      合法狀態轉換與 CAS 協調
+└── feature/home/        Adaptive UI、contract、ViewModel
+```
 
-* **資料儲存**：
-* 本地快取：Room (SQLite)
-* 雲端數據：Google Sheets API v4 (透過 Google OAuth 2.0 授權登入個人帳號)
+初期先保留單一 `:app` module；等 evidence ingestion、Room 與 service adapters 進入後，再依實際編譯隔離需求拆 module，避免過早模組化。
 
+## 圖片、折扣與查價策略（規劃）
 
+- 原廠相機是主要拍攝入口，不要求為了留證據先開 App。Sharesheet 接收 `ACTION_SEND`／`ACTION_SEND_MULTIPLE`；Photo Picker 用來補選既有圖片，匯入後立即複製到 app-private storage。
+- Evidence 類別為 `ReceiptPage`、`PriceTag`、`PromotionSign` 與 `Other`；尚未分類不是另一個 enum，而是 `Fact.Unknown`。分類與 matching 都可保存個別信心值及來源，不因模型高信心就視為事實。
+- 折扣以有 scope 的 adjustment 表示，例如單一品項、候選品項集合或整筆交易。無法確認適用品項、會員資格、支付方式、門市或日期時，保持 `Unknown` 並交給使用者確認。
+- 寶雅官方 [DM](https://www.poya.com.tw/dm/)、[活動](https://www.poya.com.tw/events/) 與[門市資料](https://www.poya.com.tw/store/)只能補充候選。現階段不依賴任何具契約或 SLA 的寶雅商品／實體店價格 API；線上價、全國 DM 或相似品名都不能自動當成該店該次交易的實際折扣。
+- 定價引擎只接受已擷取的事實與使用者確認資料，使用整數金額執行 deterministic functions；模型可以提出 function input，但不能自行寫入計算結果。
 
----
+Nano 不是所有符合 `minSdk 26` 的裝置都保證可用。`minSdk 26` 是 ML Kit Prompt API 的專案下限；實際仍須依裝置、Android／AICore、模型下載與 API availability 做 runtime check。Google 官方也明定 GenAI API inference 只能在 App 是頂層前景應用時執行；離開前景或模型未就緒時保留待處理狀態，再由使用者稍後重試，或針對該批 evidence 明確同意雲端分析。參考：[ML Kit GenAI overview](https://developers.google.com/ml-kit/genai)、[Prompt API setup](https://developers.google.com/ml-kit/genai/prompt/android/get-started)。
 
-## 開發里程碑與路線圖
+## Google Sheets 匯出欄位（規劃）
 
-### Phase 1: MVP 核心入庫 (當前目標)
+確認後的每個品項會匯出成 `Raw_Transactions` 的一列：
 
-* [ ] 建立 Android 專案與 Jetpack Compose 介面。
-* [ ] 整合 CameraX，支援拍照明細聯與發票證明聯。
-* [ ] 串接 Gemini Flash API，套用結構化 JSON Schema 解析品項、折讓與標準化名稱。
-* [ ] 實作單筆消費審查頁面（Checklist 勾選自用/代墊、平分計算）。
-* [ ] 串接 Google Sheets API，將明細寫入指定試算表。
+| 欄位 | 範例 | 說明 |
+| --- | --- | --- |
+| `transaction_id` | `TX_20260902_001` | 交易唯一識別碼 |
+| `line_item_id` | `LINE_001` | 品項唯一識別碼，支援冪等匯出 |
+| `date` | `2026-09-02` | 消費日期 |
+| `merchant` | `全聯` | 標準化商家 |
+| `city` | `臺南市` | 消費縣市 |
+| `category` | `居家生活` | 大分類 |
+| `sub_category` | `牙刷` | 細分類 |
+| `raw_name` | `高露潔齒縫潔淨` | 收據原始文字 |
+| `standard_name` | `高露潔 齒縫潔淨牙刷 2入` | 建議後經使用者確認的名稱 |
+| `quantity` | `2` | 數量 |
+| `original_price` | `378` 或空白 | 有證據的未折總額；未知時不得用實付額代填 |
+| `original_price_status` | `KNOWN` | `KNOWN`／`UNKNOWN`／`CONFLICTING`／`NOT_APPLICABLE` |
+| `discount_saved` | `189` 或空白 | 已確認折扣；未知與已知零折扣必須可區分 |
+| `discount_status` | `KNOWN` | 折扣事實狀態 |
+| `net_amount` | `189` | 實付總額 |
+| `unit_price` | `94.5` | 實質單價 |
+| `pricing_rule_version` | `pricing-v1` | 若由 deterministic engine 推導，保存規則版本 |
+| `evidence_asset_ids` | `asset_01,asset_02` | 支撐該列的本機證據 ID |
+| `is_personal` | `FALSE` | 是否為自用 |
+| `split_party` | `室友` | 代墊或分攤對象 |
+| `my_expense` | `0` | 計入個人預算的支出 |
 
-### Phase 2: 自動化與本機快取
+App 內部金額不使用 `Double`，而以幣別最小單位 `Long` 儲存；只有匯出 mapper 會依幣別格式化顯示值。`ReceiptExportRow` 也保留原價與折扣的 `Fact` 狀態，因此缺少價標時仍可匯出實付資料，而不會把未知折扣錯寫成 `0`。
 
-* [ ] 實作 `NotificationListenerService`，監聽特定銀行與 Google 錢包刷卡推播。
-* [ ] 建立本機 Room 資料庫快取（歷史品項映射表，降低重複 API 呼叫次數）。
-* [ ] 加入 Pixel 快捷開關（Quick Settings Tile），支援一鍵彈出浮動錄音輸入。
+## 建置與檢查
 
-### Phase 3: 消耗追蹤與採購決策
+需求：JDK 17、Android SDK Platform 37、Android Build Tools 36.0.0。
 
-* [ ] 試算表端整合 Looker Studio，產出縣市消費地圖與品類統計看板。
-* [ ] 根據歷史購買間隔，計算日常用品（洗沐、耗材）的預計消耗日與補貨警示。
-* [ ] 單品歷史價格索引（查詢特定品項在不同通路的歷史最低實付單價）。
+```bash
+./gradlew testDebugUnitTest lintDebug assembleDebug
+```
+
+輸出 APK：`app/build/outputs/apk/debug/app-debug.apk`
+
+目前 quality gate 包含嚴格 lint（warnings as errors）、domain／ViewModel JVM tests 和 APK 組裝。尚未連接實體 Pixel，因此外螢幕、展開、旋轉、分割視窗與 tabletop 相機行為仍需在對應功能完成後做 device test。
+
+## Roadmap
+
+### Phase 0：原生架構基線（完成）
+
+- [x] 建立可安裝的 Kotlin／Compose Android 專案與 Gradle wrapper。
+- [x] 加入 Material 3 Adaptive main/supporting pane 與 Window Size Class policy。
+- [x] 建立 UDF、ViewModel、domain model／ports／rules／use case 邊界。
+- [x] 建立精確金額驗證、workflow state、revision/CAS 與 idempotent export contract。
+- [x] 通過 unit tests、Android lint 與 debug APK build。
+
+### Phase 1A：Evidence-first domain contracts（本 branch 完成）
+
+- [x] `EvidenceAsset`／region／reference 與可審查的多對多 `EvidenceLink`。
+- [x] `Fact.Known`／`Unknown`／`Conflicting`／`NotApplicable` 及 observation-level provenance／confidence。
+- [x] Receipt line、scoped adjustment、promotion offer／application 與明確 line-to-product mapping。
+- [x] 固定價、組合價、買 X 送 Y、百分比、固定額、滿額折的 deterministic pricing engine。
+- [x] 收據 reconciliation、BigInteger overflow protection 與 unresolved data 的 confirmation gate。
+- [x] Local-first `AiRouter` contract；Nano 前景限制、capability check，以及綁定 case／圖片 SHA-256／purpose／analyzer／service 的 cloud consent。
+- [x] 無價標照片時的 `RetailPromotionLookup` port；外部活動只能回 candidate。
+
+### Phase 1B：Evidence-first 收據 MVP adapters（下一階段）
+
+- [ ] Room schema、migration tests 與 repository adapter。
+- [ ] 原廠相機 Sharesheet、Photo Picker、多圖 evidence inbox 與 app-private 圖片保存。
+- [ ] ReceiptPage／PriceTag／PromotionSign／Other classifier，以及 OCR／structured extraction adapter。
+- [ ] `MlKitNanoAnalyzer` 與 `FirebaseCloudAnalyzer` adapters；Firebase 路徑強制 App Check／Play Integrity。
+- [ ] 寶雅等 retailer source adapters，保存 URL、抓取時間與適用條件，僅產生 candidate。
+- [ ] WorkManager 唯一工作與重試策略；不得假設 Nano 能在背景執行。
+- [ ] 單筆交易 evidence／品項核對、折扣修正、自用／代墊與平分介面。
+- [ ] Google OAuth 最小權限與 Sheets 冪等匯出。
+
+### Phase 2：自動化
+
+- [ ] 銀行／Google Wallet 通知擷取的明確 opt-in 流程。
+- [ ] 歷史品項映射與低信心人工確認。
+- [ ] Quick Settings Tile 與快速輸入。
+
+### Phase 3：洞察
+
+- [ ] Looker Studio 品類／地區看板。
+- [ ] 日用品消耗與補貨提醒。
+- [ ] 單品跨通路歷史實付價格索引。
+
+## Git branch convention
+
+- 功能工作使用 `feat/<topic>`，例如 `feat/promotion-evidence-architecture`。
+- 每個 branch 聚焦單一可審查主題；修正與文件若屬於該功能，跟隨同一 branch。

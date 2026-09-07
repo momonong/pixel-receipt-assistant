@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PixelReceipt AI</string>
+    <string name="home_title">PixelReceipt AI</string>
+    <string name="home_subtitle">Pixel 10 Pro Fold 證據優先架構基線</string>
+    <string name="home_window_mode">目前視窗：%1$s</string>
+    <string name="detail_layout_mode">版面模式：%1$s</string>
+    <string name="bullet_item">• %1$s</string>
+
+    <string name="layout_compact">Compact</string>
+    <string name="layout_medium">Medium</string>
+    <string name="layout_expanded">Expanded</string>
+    <string name="layout_large">Large</string>
+    <string name="layout_extra_large">Extra large</string>
+
+    <string name="status_ready">骨架完成</string>
+    <string name="status_boundary_ready">邊界已定義</string>
+    <string name="status_next">下一階段</string>
+
+    <string name="layer_ui_title">Adaptive UI</string>
+    <string name="layer_ui_summary">Compose 依目前視窗在單欄與雙欄之間即時調整。</string>
+    <string name="layer_ui_detail_single_activity">Single activity + Jetpack Compose</string>
+    <string name="layer_ui_detail_supporting_pane">Material 3 Adaptive supporting pane</string>
+    <string name="layer_ui_detail_window_size">Window Size Class，不綁定機型或方向</string>
+    <string name="layer_ui_detail_edge_to_edge">Edge-to-edge 與安全 inset</string>
+
+    <string name="layer_domain_title">Domain rules</string>
+    <string name="layer_domain_summary">原始證據、未知值與推導結果分離；金額只由本機 Kotlin 規則決定。</string>
+    <string name="layer_domain_detail_money">金額使用最小貨幣單位 Long，不使用 Double</string>
+    <string name="layer_domain_detail_untrusted_ai">AI 只提出附來源的候選，Unknown 不會被改成 0</string>
+    <string name="layer_domain_detail_tests">跨品項與整單折扣以 scoped adjustment 對帳</string>
+    <string name="layer_domain_detail_independent">Domain 不依賴 Android、Firebase 或 Sheets 類型</string>
+
+    <string name="layer_data_title">Offline-first data</string>
+    <string name="layer_data_summary">多張收據、價標與促銷牌先進 Evidence Inbox；Room 將是唯一資料來源。</string>
+    <string name="layer_data_detail_save_first">原廠相機分享或 Photo Picker 匯入後先保存證據</string>
+    <string name="layer_data_detail_room_flow">UI 只觀察 Room Flow</string>
+    <string name="layer_data_detail_unique_work">圖片雜湊去重，分析與匯出保持可重試</string>
+    <string name="layer_data_detail_export_sink">Sheets 是單向匯出端，不是即時主資料庫</string>
+
+    <string name="layer_integrations_title">Secure integrations</string>
+    <string name="layer_integrations_summary">AiRouter 明確選擇本機 Gemini Nano 或經同意的 Firebase 雲端分析。</string>
+    <string name="layer_integrations_detail_no_api_key">APK 不內嵌 Gemini API key</string>
+    <string name="layer_integrations_detail_app_check">上雲需明確同意；Release 使用 Play Integrity App Check</string>
+    <string name="layer_integrations_detail_oauth">Sheets OAuth 採最小權限</string>
+    <string name="layer_integrations_detail_remote_config">官方促銷查詢只產生附來源候選，不直接改帳</string>
+</resources>
