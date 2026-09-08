@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -14,6 +15,7 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "0.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
@@ -35,6 +37,9 @@ android {
         compose = true
     }
 
+    testOptions.unitTests.isIncludeAndroidResources = true
+    sourceSets.getByName("test").resources.directories.add("schemas")
+
     lint {
         abortOnError = true
         checkReleaseBuilds = true
@@ -48,6 +53,8 @@ android {
         }
     }
 }
+
+ksp { arg("room.schemaLocation", "$projectDir/schemas") }
 
 dependencies {
     val composeBom = platform(libs.androidx.compose.bom)
@@ -69,4 +76,11 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit4)
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
+    implementation(libs.gson)
+    implementation(libs.androidx.exif)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
 }

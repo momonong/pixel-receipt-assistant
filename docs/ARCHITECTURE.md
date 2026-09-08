@@ -2,7 +2,7 @@
 
 ## 目標與範圍
 
-這個專案以 **Google Pixel 10 Pro Fold** 為主要實機，採原生 Android 架構，同時保持對一般 Android 手機與不同視窗尺寸的相容性。現在已完成可建置、可安裝的 Phase 0，以及 Phase 1A 的 evidence／Fact／promotion／pricing／AI routing domain contracts。原廠相機 Sharesheet、Photo Picker、多圖 inbox、Room、ML Kit、Firebase AI Logic 與 Google Sheets adapters 會在 Phase 1B 逐項接入；下圖的外部整合仍是目標架構，不代表已經可用。
+這個專案以 **Google Pixel 10 Pro Fold** 為主要實機，採原生 Android 架構，同時保持對一般 Android 手機與不同視窗尺寸的相容性。現在已完成可建置、可安裝的 Phase 0，以及 Phase 1A 的 evidence／Fact／promotion／pricing／AI routing domain contracts。本機 Sharesheet、Photo Picker、多圖 inbox 與 Room 已接入；ML Kit、Firebase AI Logic、核對記帳 UI 與 Google Sheets adapters 仍待實作。下圖的 AI 與外部整合是目標架構，不代表已經可用。
 
 App 支援下限採 `minSdk 26`。這只是安裝下限，不代表每台 Android 8+ 裝置都能執行 Gemini Nano；Nano 必須另外在 runtime 檢查裝置、Android／AICore、模型下載與個別 ML Kit GenAI API 的可用性。
 
@@ -50,7 +50,9 @@ com.momonong.pixelreceipt
 ├── domain/port/         Repository、Analyzer、Exporter 邊界
 ├── domain/rules/        Promotion pricing、matching validation 與 reconciliation
 ├── domain/usecase/      合法狀態轉換與 revision/CAS 協調
-└── feature/home/        UI contract、ViewModel、adaptive screen
+├── data/local/          Room entities／DAO、versioned codec、CAS repository
+├── data/ingestion/      私有圖片、驗證、去重、匯入協調
+└── feature/inbox/       草稿列表、多圖 inbox、預覽、ViewModel／StateFlow
 ```
 
 Phase 1A 的 evidence、matching、pricing 與 AI routing contracts 已沿用這些 package 邊界。Phase 1B adapters 也必須遵守相同依賴方向；是否拆 module 由實際編譯隔離需求決定。
@@ -65,11 +67,11 @@ Phase 1A 的 evidence、matching、pricing 與 AI routing contracts 已沿用這
 
 `AdaptiveLayoutPolicy` 使用官方寬度斷點：Compact `<600dp`、Medium `600–839dp`、Expanded `840–1199dp`、Large `1200–1599dp`、Extra large `>=1600dp`。
 
-## Evidence 匯入（Phase 1B 規劃）
+## Evidence 匯入（已實作）
 
 原廠相機是預設拍攝入口，使用者不需要先開 PixelReceipt。App 透過 Android Sharesheet 接收 `ACTION_SEND` 與 `ACTION_SEND_MULTIPLE`；若照片已經存在，透過系統 Photo Picker 一次補選一張或多張。兩條路徑都只取得使用者選定的媒體，不要求廣泛相簿權限。實作依據：[接收其他 App 分享的資料](https://developer.android.com/develop/ui/compose/sharing/receive)、[Android Photo Picker](https://developer.android.com/training/data-storage/shared/photo-picker)。
 
-收到分享的 URI 後，ingestion adapter 必須在讀取權限仍有效時，將內容串流複製到 app-private storage，再以 content hash 去重；不得把外部 `content://` URI 當成永久檔案位置。每張圖會建立獨立 `EvidenceAsset`，多張 evidence 可由使用者放入同一個 transaction case，也可以稍後移入、移出或重新分類。這些 domain types 已存在；URI copy、hashing 與 case UI 尚待 adapter 實作。
+收到分享的 URI 後，ingestion adapter 必須在讀取權限仍有效時，將內容串流複製到 app-private storage，再以 content hash 去重；不得把外部 `content://` URI 當成永久檔案位置。不同草稿的每張圖建立獨立 `EvidenceAsset`，同一草稿相同 hash 不重複建立 asset。外部分享始終建立新草稿；Photo Picker 可建立新草稿或向已選草稿補圖。移動、移除、分類與 derived artifacts 不在本次範圍。
 
 Evidence 類型至少包含：
 
@@ -78,7 +80,7 @@ Evidence 類型至少包含：
 - `PromotionSign`：促銷牌或區域活動牌，可能涵蓋多個品項與附帶條件。
 - `Other`：已確認為上述三類以外的圖片。
 
-「尚未可靠分類」以 `Fact.Unknown` 表示，不使用 `Other` 冒充。分類結果可帶來源、模型版本與 observation-level confidence，但仍只是 suggestion。原始檔 immutable；`EvidenceRegion` 可引用原圖區域。旋轉／降採樣 derived artifact 與 parent graph 是 Phase 1B persistence 工作，尚未落地。
+「尚未可靠分類」以 `Fact.Unknown` 表示，不使用 `Other` 冒充。分類結果可帶來源、模型版本與 observation-level confidence，但仍只是 suggestion。原始檔 immutable；`EvidenceRegion` 可引用原圖區域。EXIF 旋轉與降採樣只用於暫時預覽；不保存 derived artifact 或 parent graph。
 
 ## Evidence-first 資料流（Phase 1B adapters 規劃）
 
@@ -93,7 +95,7 @@ receipt lines ↔ observations ↔ promotion/price evidence（多對多）
         ↓
 deterministic pricing + reconciliation
         ↓
-Room (NeedsReview；允許 Unknown；adapter 待實作) → Adaptive review UI
+Room (NeedsReview；允許 Unknown；後續核對 UI 待實作) → Adaptive review UI
         ↓ 使用者確認 evidence、matching、adjustment 與 split
 Room (Confirmed / ExportPending)
         ↓
@@ -118,6 +120,53 @@ NeedsReview → Confirmed → ExportPending → Exported
 ```
 
 `NeedsReview` 不代表資料已完整；它可以合法包含 evidence、matching 或 adjustment 的 `Unknown`。`TransitionReceiptStage` 在進入 `Confirmed` 前必須取得 `ReceiptReconciler.Balanced` 或 `WithinTolerance`；incomplete receipt、未知 merchant／line name／quantity／total／line amount／adjustment amount／scope、pending promotion 或 validation issue 都會回 `ConfirmationBlocked`，且不寫入 repository。
+
+## Room 與檔案一致性
+
+`ReceiptApplication` 提供單一 database／repository／importer，ViewModel 只從 Room Flow 派生 StateFlow；UI 的選取與進度不是第二份草稿資料。Domain 不引用 Room／Android。`ReceiptDatabase` v1 保存：
+
+| Table | 用途 |
+| --- | --- |
+| `drafts` | ID、revision、建立時間、完整 versioned `ReceiptDraft` payload |
+| `blobs` | SHA-256 主鍵與原始 byte size；路徑由 hash 推導，不接收外部路徑 |
+| `evidence` | 草稿各自的 asset ID、blob FK、完整 evidence metadata／classification Fact |
+| `draft_evidence` | draft／asset 外鍵、同草稿唯一 asset 關聯及穩定 position |
+| `imports` | operation ID、目標／結果草稿 ID、running／completed／interrupted、逐張結果；不保存外部 URI |
+
+`DraftCodec` 是只用於 app-private DB 的 JSON format 1，使用固定 allowlist tag 保存所有 Fact 狀態、generic values、provenance、links、promotion 與整數 Money；不得拿來解析 AI／外部 JSON。草稿 evidence membership 與關聯表在同一 Room transaction 更新。金額不經過浮點數，原始 domain API／語意未更動。Gson 欄位名稱是持久化格式的一部分，ProGuard 已保留 domain model 欄位；未來欄位／enum／tag 變更必須提供 payload migration，不能直接改名。
+
+`createDraft` 僅接受 revision 0，重複 ID 回 Conflict；`compareAndSetDraft` 要求 next = expected + 1，使用 SQL revision 條件與 Room transaction 原子寫入 payload／關聯，缺少 evidence 會拒絕，不允許舊 revision 覆蓋新資料。匯入追加只允許 Captured 草稿，保留既有 Fact 與 stage；批次讀取期間如被其他寫入更新，整批回衝突並回滾新 metadata，不偷偷重套至較新版本。
+
+原圖處理順序為：串流至 UUID `.part` → SHA-256／格式／尺寸／解碼驗證 → sync 原始檔 → rename 至 hash 路徑 → 單次 Room transaction 保存 assets、draft membership、revision 與完成報告。既存 hash 重新核對 bytes／digest 後共用，不覆寫。不同交易僅共用 immutable blob，各有自己的 evidence ID／metadata，絕不以 hash 合併交易。
+
+每批 20 張、每張 20 MiB、整批讀取 100 MiB（含重複與失敗讀取）、單張 50 MP／單邊 20,000 px、圖片目錄總量 1 GiB。逐張串流／解碼，避免一次讀入多張原始圖。支援 JPEG／PNG／WebP，API 28+ 解碼拒絕 partial image；API 26/27 使用 BitmapFactory 與容器結尾完整性檢查，不能保證辨識每一種局部壓縮資料損傷。預覽最多 1600px，含 EXIF 方向處理；原圖完全保留。
+
+單一 importer Mutex 序列化匯入與垃圾清理；未來其他 process／worker 不可繞過此協調器發布或清理檔案。每批完成／失敗／取消後清理 `.part` 與無 `blobs` 記錄的檔案；啟動先把 running 批次標記 interrupted，再清理同類孤兒檔案。DB transaction 失敗不留下成功草稿；程序在 rename 與 commit 之間被殺掉只留下可回收檔案。程序在 commit 後被殺掉，Room 紀錄仍完整。復原不自動重讀來源 URI；使用者重選後同草稿依 hash 去重。成功記錄與使用者明確建立的空白草稿可區分，全部圖片失敗不建立新草稿。
+
+Activity 使用自己的 UUID（不信任分享 extras 裡的 ID），保存於 instance state；ViewModel 避免 Activity 重建重送，Room operation 主鍵阻止已完成／中斷批次重播。Photo Picker 的 target 在啟動時保存在 SavedStateHandle，避免選取途中切換草稿而加入錯誤交易；返回空集合不改 DB。API 舊版由 AndroidX 合約退回系統選取器，仍不需要廣泛相簿權限。使用者取消只撤回尚未提交的整批；已提交資料不撤銷。
+
+首次落地為 schema v1，已保存 KSP 輸出 `app/schemas/.../1.json`。此前無 Room schema／本機資料可遷移，不新增虛構的 v0 migration。測試用匯出的 DDL 建庫與既有資料，讓 Room 開啟時驗證 schema 並確認資料保留；另驗證缺少 migration 的版本失敗且原資料仍在。未來提高 DB version 時必須加入顯式 migration 與舊版資料 fixture，禁止 `fallbackToDestructiveMigration`。
+
+## 收據匯入驗證
+
+2026-09-07 本次在 Windows 以專案局部 Temurin JDK 17／SDK Platform 37.0 執行 `testDebugUnitTest lintDebug assembleDebug`：**113 tests、0 failures、0 errors、0 skipped；lint No issues found；debug APK 組裝成功**。其中本次新增 16 tests（codec 3、Room／ingestion 10、分享 Intent 3）。測試涵蓋完整 Fact/provenance 編碼、實際 Room/SQLite round-trip、schema DDL 相容性、缺少 migration 保護、CAS、混合有效與無效圖片、追加與跨交易去重、operation 重播、取消、資源上限、模擬 crash recovery 及分享 Intent 解析。Robolectric 的圖片測試使用 native graphics；主機測試不等同實體 Android 程序／權限或 UI 驗收。
+
+目前 `adb devices -l` 無連接裝置，未執行 Sharesheet／Photo Picker 實機、真正 Activity 旋轉、OS 撤銷 URI grant、force-stop 後 UI、Compact／Expanded／Fold／分割視窗整合驗證。對應手動步驟在 README。UI 可依 window size class 切換可捲動單／雙 pane，但尚不能宣稱實機視窗驗收通過。
+
+| 驗收項目 | 本次證據與狀態 |
+| --- | --- |
+| 1. 分享／Picker 建立可開啟草稿 | 分享 Intent 解析與 importer 主機測試通過；系統 Sharesheet／Picker UI 未驗證 |
+| 2. 既有草稿追加、不覆蓋 | Room 追加及原 membership／revision 測試通過；裝置 UI 未驗證 |
+| 3. 程序重啟仍可讀 | 關閉／重開實際 SQLite DB 與本機圖片解碼通過；OS force-stop 未驗證 |
+| 4. 外部權限失效仍可讀 | 本機 bytes／digest 完整性與不重讀來源的 operation replay 通過；OS URI grant 撤銷未驗證 |
+| 5. 去重與重建不重播 | 同草稿去重、跨草稿隔離、operation 冪等測試通過；Activity 旋轉／重建未驗證 |
+| 6. 混合成功失敗與重試 | 主機混合批次、整批重試／追加結果通過；裝置結果畫面未驗證 |
+| 7. Room domain round-trip／CAS | Fact／provenance codec、Room、schema 與舊 revision 拒寫測試通過 |
+| 8. 失敗／中斷沒有假成功草稿 | SQL failure rollback、取消、全失敗及模擬程序中斷恢復通過；真實程序中斷未驗證 |
+| 9. Compact／Expanded 操作 | UI 已實作；裝置／模擬器視窗驗收未驗證 |
+
+未測突然斷電／儲存硬體故障；原圖檔案有 sync，但不宣稱跨檔案與 SQLite 的硬體掉電原子性。來源 provider 若阻塞讀取，取消可能需要等待目前的讀取返回；沒有新增背景服務或 provider 的硬性 timeout 架構。
+
 
 ## 多對多 matching
 
