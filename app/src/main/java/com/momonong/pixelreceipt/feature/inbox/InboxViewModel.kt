@@ -21,6 +21,7 @@ class InboxViewModel(application: Application, private val saved: SavedStateHand
     private val graph = application as ReceiptApplication
     val images get() = graph.images
     val review = ReviewSession(graph.repository, saved, viewModelScope)
+    val extraction = ExtractionSession(graph.extraction, saved, viewModelScope, review::open)
     private val _error = MutableStateFlow<String?>(null)
     val error = _error.asStateFlow()
     private val _progress = MutableStateFlow<Pair<Int, Int>?>(null)
@@ -50,7 +51,7 @@ class InboxViewModel(application: Application, private val saved: SavedStateHand
     }
 
     fun select(id: String?) {
-        if (review.state.value.busy || review.state.value.base != null) return
+        if (extraction.state.value.busy || review.state.value.busy || review.state.value.base != null) return
         saved["selected"] = id
     }
     fun pickerLaunched() { saved["pickerTarget"] = selectedId.value }
@@ -62,6 +63,7 @@ class InboxViewModel(application: Application, private val saved: SavedStateHand
     fun showError(message: String) { _error.value = message }
 
     fun createDraft() {
+        if (extraction.state.value.busy) return
         if (_progress.value != null || review.state.value.busy || review.state.value.base != null) return
         viewModelScope.launch {
             try { select(graph.importer.createEmptyDraft()) } catch (error: Exception) {
@@ -73,6 +75,7 @@ class InboxViewModel(application: Application, private val saved: SavedStateHand
 
     private fun ingest(id: String, target: String?, uris: List<Uri>, source: EvidenceImportSource) {
         if (id in accepted) return
+        if (extraction.state.value.busy) { _error.value = "辨識中，請先完成或取消，再重新匯入圖片。"; return }
         if (review.state.value.base != null || review.state.value.busy) {
             _error.value = "請先離開人工核對，再重新分享或選取圖片。"
             return

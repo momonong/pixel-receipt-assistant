@@ -50,6 +50,7 @@ data class AnalyzedReceipt(
     val totalText: String?,
     val currencyCodeText: String?,
     val items: List<AnalyzedLineItem>,
+    val recognition: ReceiptRecognition? = null,
 )
 
 data class AnalyzedLineItem(

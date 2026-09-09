@@ -32,6 +32,9 @@ class MainActivity : ComponentActivity() {
         super.onSaveInstanceState(outState)
     }
 
+    override fun onResume() { super.onResume(); inbox.extraction.foreground(true) }
+    override fun onPause() { inbox.extraction.foreground(false); super.onPause() }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)

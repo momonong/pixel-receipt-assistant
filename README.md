@@ -2,7 +2,7 @@
 
 PixelReceipt AI 是以 **Google Pixel 10 Pro Fold** 為主要實機的原生 Android 智慧記帳 App。目標體驗是不必先開 App：使用者先用原廠相機拍照，再從 Android Sharesheet 分享進 App，或稍後透過系統 Photo Picker 補選多張圖片；App 將收據、價標與促銷牌整理成同一筆交易的 evidence inbox，最後交給使用者核對。
 
-目前已實作 **本機收據匯入、人工核對與確認記帳**：Sharesheet 單圖／多圖、Photo Picker、草稿列表、追加圖片與原圖預覽、交易／品項／人工調整編輯、CAS 保存，以及通過既有本機 gate 後保存 Confirmed。全程可不使用 AI。AI、OCR、Firebase、拆帳及 Sheets adapters 尚未實作；裝置驗收狀態見下方，不能以 JVM 測試代替實機驗證。
+目前已實作 **本機收據匯入、中文 OCR 自動擷取、人工核對與確認記帳**：Sharesheet 單圖／多圖、Photo Picker、草稿列表、追加圖片與原圖預覽、交易／品項／人工調整編輯、CAS 保存，以及通過既有本機 gate 後保存 Confirmed。可辨識照片自動帶入品項，也保留完整人工輸入。Gemini Nano、Firebase、拆帳及 Sheets adapters 尚未實作；裝置驗收狀態見下方，不能以 JVM 測試代替實機驗證。
 
 ## 核心原則
 
@@ -36,9 +36,9 @@ Gradle distribution 有固定 SHA-256，wrapper JAR 也已對照官方 checksum�
 系統 Photo Picker ────────────┘       │
                                      ├→ ReceiptPage／PriceTag／PromotionSign／Other
                                      ├→ Fact + provenance + EvidenceLink（domain 已完成）
-                                     └→ AiRouter（選路已完成；SDK adapters 待實作）
-                                         ├→ ML Kit Gemini Nano（支援時、前景執行）
-                                         └→ Firebase AI Logic（同批證據明確同意後）
+                                     └→ AiRouter → 本機 ML Kit 中文 OCR＋收據解析（已接入）
+                                         ├→ ML Kit Gemini Nano（未接入）
+                                         └→ Firebase AI Logic（未接入；須明確同意）
                                                    ↓
                                     deterministic pricing + scoped adjustment
                                                    ↓
@@ -178,7 +178,7 @@ $env:GRADLE_USER_HOME = "$PWD\.gradle\task-gradle-home"
 
 保存／確認遇 CAS 衝突時保留原輸入，顯示最新版摘要，禁止自動覆蓋；可保留畫面比對，或經對話框明確放棄輸入並重新載入，再重新核對。遇暫時性寫入失敗保留輸入供重試。人工核對中收到分享時會提示先離開，再重新分享。
 
-交易日期新增為 `Fact<String>`，舊 draft payload format 1 的缺省日期遷移為 `Unknown(NotObserved)`；讀取不修改 DB 或 revision，下次 CAS 寫入 format 2。SQL schema 仍為 v1，沒有新增 SQL 欄位，亦沒有 destructive fallback。更新後不應降回僅理解 payload v1 的 APK；舊 decoder 會拒絕 v2，不能將它當成可安全降版。
+人工核對基線（format 2）的交易日期新增為 `Fact<String>`；本辨識版本寫入 format 3（見下方）。舊 draft payload format 1 的缺省日期遷移為 `Unknown(NotObserved)`；讀取不修改 DB 或 revision，下次 CAS 寫入 format 2。SQL schema 仍為 v1，沒有新增 SQL 欄位，亦沒有 destructive fallback。更新後不應降回僅理解 payload v1 的 APK；舊 decoder 會拒絕 v2，不能將它當成可安全降版。
 
 2026-09-08 人工核對完整 gate：**136 tests（新增 23）、0 failures／errors／skipped，lint No issues found，debug build 成功**。執行 `testDebugUnitTest lintDebug assembleDebug --offline --no-daemon --max-workers=1`，未停用任何檢查；最終耗時 1 分 7 秒。主機證據、涵蓋範圍和限制見 [人工核對驗證](docs/ARCHITECTURE.md#人工核對驗證)。
 
@@ -217,7 +217,7 @@ $env:GRADLE_USER_HOME = "$PWD\.gradle\task-gradle-home"
 
 - [x] Room v1 schema、schema 相容性／非破壞性升降版保護測試與 CAS repository adapter。
 - [x] Sharesheet、Photo Picker、多圖 evidence inbox 與 app-private 圖片保存實作；實機端到端驗收待完成。
-- [ ] ReceiptPage／PriceTag／PromotionSign／Other classifier，以及 OCR／structured extraction adapter。
+- [x] 使用者明確選取收據頁面，本機中文 OCR＋結構化品項候選；自動圖片分類仍未實作。
 - [ ] `MlKitNanoAnalyzer` 與 `FirebaseCloudAnalyzer` adapters；Firebase 路徑強制 App Check／Play Integrity。
 - [ ] 寶雅等 retailer source adapters，保存 URL、抓取時間與適用條件，僅產生 candidate。
 - [ ] WorkManager 唯一工作與重試策略；不得假設 Nano 能在背景執行。
@@ -241,3 +241,26 @@ $env:GRADLE_USER_HOME = "$PWD\.gradle\task-gradle-home"
 
 - 功能工作使用 `feat/<topic>`，例如 `feat/promotion-evidence-architecture`。
 - 每個 branch 聚焦單一可審查主題；修正與文件若屬於該功能，跟隨同一 branch。
+
+## 收據照片自動擷取與人工核對
+
+從圖片草稿勾選**同一交易的收據圖片**，按「辨識收據／重試」。本機逐頁辨識完成後，自動建立品項並進入既有人工核對畫面；保存修正、勾選完整，再通過既有 gate 才能確認記帳。完整人工輸入入口保留。
+
+- 真實路徑是隨 APK 打包的 `com.google.mlkit:text-recognition-chinese:16.0.1`，配合 `receipt-layout-1` 本機解析器。無須下載 Nano，不使用雲端。Nano 本版本未接入，不能將 OCR 可用視為 Nano 可用。
+- 本次解析限 **TWD**。優先處理明確的「品名／數量／單價／金額」欄位或「品名 數量 × 單價 行合計」行式；可解析西元／民國日期、交易總額與另列折扣／費用。收據版面沒有明確欄位時仍可產生品名候選，但數量或行金額保持未知。單價不乘成行合計，也不代填未知數量 1。
+- 商家採第一個合適文字行作候選，可能需要修正；統編、電話、付款、找零、稅額摘要不作一般品項。複雜促銷、換行品名、無標題欄位、傾斜／模糊與非 TWD 不保證能處理。無任何可用品項會顯示失敗，不以純 OCR 文字當成擷取成功。
+- 跨頁同名或差一字的候選保守合組；同頁的重複列保留。跨頁組合的數量與金額保持未知、原文都保留，請核對後填值，若實際是不同品項可新增。其他漏頁、不同 OCR 名稱的重複仍需人工檢查。
+- 另列折扣／費用會帶入正負方向與可解析金額，scope 保持未知，請明確選擇整筆或指定品項；已含在價格或稅額摘要中的金額不自行重複扣加。
+- 取消、逾時（120 秒）、離開前景或程序中斷不套用未完成結果。旋轉也可能取消辨識；選圖狀態可復原，重試須由使用者啟動。辨識期間不能追加圖片或進入編輯；即使其他 writer 更改 revision、圖片 metadata 或 bytes，結果也會被 CAS／SHA-256 檢查阻擋。
+- 重新辨識成功會取代商家、日期、總額、品項及調整，包括保存的人工修正，因此須先通過顯示目前版本與數量的取代確認。失敗保留原草稿。含促銷／分攤關聯的草稿拒絕取代；Confirmed 交易不可辨識或修改。
+- 核對畫面可展開辨識原文、圖片及區域座標，保存 analyzer／SDK／parser／schema 版本與來源 SHA-256。座標對應 EXIF 轉正、最多 4096px 的 OCR 圖片，並記錄該座標空間尺寸，原圖 bytes 保持不變。
+- 單次最多 20 圖、100 品項、50 調整；OCR 最多 500 行、每行 500 字、總文字 50,000 字。超限拒絕整批，不靜默截斷品項。
+- 核對畫面分別顯示「已知金額試算差額」與既有 reconciliation 阻擋原因；試算平衡不代表完整或辨識正確。容差仍是 ±1 最小單位，沒有自動確認。
+
+持久化 draft payload 更新至 **format 3**，向前讀取 format 1／2；舊資料的 extraction 為空、revision 不變。SQL schema 仍為 v1，沒有 destructive migration。升級後不可假設舊 APK 能讀取新版資料。
+
+本次隔離 worktree：`D:\projects\pixel-receipt-assistant\.gradle\worktrees\receipt-auto-extraction`，分支 `feat/receipt-auto-extraction`；起始 SHA `d31e1049e69dd4c6de818ddb963c337e1e808b43` 已包含人工核對。工具與快取均在本 worktree 的 `.gradle/`，不共用其他任務的建置輸出。交付 APK `app/build/outputs/apk/debug/app-debug-manual-review-signature.apk` 已使用人工核對基線的 debug key 簽署，憑證與來源 APK 相同；手機現有安裝簽章仍未比對，**不要卸載或清除資料解決簽章衝突**。一般 `app-debug.apk` 使用本 worktree 獨立測試簽章，供 emulator 驗證，不應直接拿來更新手機。
+
+品質資料與驗證證據請見 [自動擷取驗證](docs/ARCHITECTURE.md#自動擷取驗證)。
+
+2026-09-09 最終技術驗證：**162 項主機測試、0 failures／errors／skipped，lint No issues found，debug build 通過；獨立 Android API 35 x86_64 emulator 的 5 項真實 ML Kit／Compose 測試通過**。涵蓋照片匯入→OCR→自動建立品項→Room→人工核對→使用者確認，以及中文多品項／另列折扣、多頁重疊、空白失敗與畫面辨識按鈕自動導入表單。資料全為合成，真實收據品質及實體 Pixel 驗收未完成。

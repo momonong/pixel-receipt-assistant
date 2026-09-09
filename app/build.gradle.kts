@@ -72,6 +72,7 @@ dependencies {
     implementation(libs.androidx.compose.material3.adaptive.layout)
     implementation(libs.androidx.compose.material3.adaptive.navigation)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.mlkit.chinese)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 
@@ -83,4 +84,8 @@ dependencies {
     implementation(libs.androidx.exif)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(composeBom)
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
 }

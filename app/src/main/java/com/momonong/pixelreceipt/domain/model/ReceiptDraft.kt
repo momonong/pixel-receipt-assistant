@@ -23,6 +23,7 @@ class ReceiptDraft(
     val revision: Long = 0,
     /** ISO calendar date (yyyy-MM-dd); legacy receipts remain explicitly unknown. */
     val transactionDate: Fact<String> = Fact.Unknown(UnknownFactReason.NotObserved),
+    val extraction: ReceiptExtractionRecord? = null,
 ) {
     val items: List<ReceiptLineDraft> = items.toList()
     val adjustments: List<ReceiptAdjustment> = adjustments.toList()
@@ -65,6 +66,7 @@ class ReceiptDraft(
         stage: ReceiptStage = this.stage,
         revision: Long = this.revision,
         transactionDate: Fact<String> = this.transactionDate,
+        extraction: ReceiptExtractionRecord? = this.extraction,
     ) = ReceiptDraft(
         id = id,
         merchant = merchant,
@@ -80,12 +82,14 @@ class ReceiptDraft(
         stage = stage,
         revision = revision,
         transactionDate = transactionDate,
+        extraction = extraction,
     )
 
     override fun equals(other: Any?): Boolean = other is ReceiptDraft &&
         id == other.id &&
         merchant == other.merchant &&
         transactionDate == other.transactionDate &&
+        extraction == other.extraction &&
         total == other.total &&
         items == other.items &&
         adjustments == other.adjustments &&
@@ -102,6 +106,7 @@ class ReceiptDraft(
         var result = id.hashCode()
         result = 31 * result + merchant.hashCode()
         result = 31 * result + transactionDate.hashCode()
+        result = 31 * result + (extraction?.hashCode() ?: 0)
         result = 31 * result + total.hashCode()
         result = 31 * result + items.hashCode()
         result = 31 * result + adjustments.hashCode()

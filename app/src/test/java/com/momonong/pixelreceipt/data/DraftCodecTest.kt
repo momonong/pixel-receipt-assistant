@@ -7,14 +7,14 @@ import org.junit.Test
 
 class DraftCodecTest {
     private val codec = DraftCodec()
-    @Test fun legacyPayloadMigratesMissingDateToUnknownAndWritesV2() {
+    @Test fun legacyPayloadMigratesMissingDateToUnknownAndWritesV3() {
         val payload = javaClass.getResource("/legacy-draft-v1.json")!!.readText()
         val draft = codec.decode(payload)
         assertEquals(Fact.Unknown(UnknownFactReason.NotObserved), draft.transactionDate)
         assertEquals(3L, draft.revision)
         assertEquals("舊商店", (draft.merchant as Fact.Known).value)
         val updated = draft.copy(transactionDate = Fact.Known("2026-09-08", FactProvenance.UserConfirmed(40)))
-        assertTrue(codec.encode(updated).contains("\"format\":2"))
+        assertTrue(codec.encode(updated).contains("\"format\":3"))
         assertEquals(updated, codec.decode(codec.encode(updated)))
         assertNotEquals(draft, updated)
     }
@@ -22,6 +22,15 @@ class DraftCodecTest {
     @Test fun corruptV2CannotSilentlyCreateNullDate() {
         val payload = javaClass.getResource("/legacy-draft-v1.json")!!.readText().replace("\"format\":1", "\"format\":2")
         assertThrows(IllegalArgumentException::class.java) { codec.decode(payload) }
+    }
+    @Test fun manualReviewV2ReadsWithNullExtractionWithoutChangingRevision() {
+        val draft = ReceiptDraft("legacy-manual", stage = ReceiptStage.NeedsReview, revision = 7,
+            transactionDate = Fact.Known("2026-09-08", FactProvenance.UserConfirmed(1)))
+        val v2 = codec.encode(draft).replace("\"format\":3", "\"format\":2")
+        val restored = codec.decode(v2)
+        assertEquals(draft, restored)
+        assertNull(restored.extraction)
+        assertEquals(7L, restored.revision)
     }
     @Test fun allFactStatesAndProvenanceRoundTripWithoutNumericCoercion() {
         val ref = EvidenceReference("image", "region")

@@ -126,7 +126,7 @@ class ReceiptPersistenceTest {
         assertEquals(payload, db.receipts().draft(legacy.id)!!.payload)
         val opened = (TransitionReceiptStage(repository)(legacy, ReceiptStage.NeedsReview) as TransitionReceiptStageResult.Updated).draft
         assertEquals(4L, opened.revision)
-        assertEquals(2, JsonParser.parseString(db.receipts().draft(legacy.id)!!.payload).asJsonObject["format"].asInt)
+        assertEquals(3, JsonParser.parseString(db.receipts().draft(legacy.id)!!.payload).asJsonObject["format"].asInt)
         assertEquals(DraftWriteResult.Conflict, repository.compareAndSetDraft(legacy.copy(revision = 4), 3))
         db.close(); reopen()
         assertEquals(opened, repository.observeDraft(legacy.id).first())

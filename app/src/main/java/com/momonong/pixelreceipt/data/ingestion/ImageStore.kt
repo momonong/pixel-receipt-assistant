@@ -127,6 +127,9 @@ class ImageStore(private val root: File) {
 
     fun preview(hash: String): Bitmap? = decode(file(hash), 1600)
 
+    /** Larger, EXIF-oriented image for OCR; original bytes are never rewritten. */
+    fun recognitionBitmap(hash: String): Bitmap? = decode(file(hash), 4096)
+
     private fun decode(file: File, maxSide: Int): Bitmap? {
         if (Build.VERSION.SDK_INT >= 28) {
             return ImageDecoder.decodeBitmap(ImageDecoder.createSource(file)) { decoder, info, _ ->

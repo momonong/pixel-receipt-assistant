@@ -2,7 +2,7 @@
 
 ## 目標與範圍
 
-這個專案以 **Google Pixel 10 Pro Fold** 為主要實機，採原生 Android 架構，同時保持對一般 Android 手機與不同視窗尺寸的相容性。現在已完成可建置、可安裝的 Phase 0，以及 Phase 1A 的 evidence／Fact／promotion／pricing／AI routing domain contracts。本機 Sharesheet、Photo Picker、多圖 inbox、Room、人工核對與確認記帳已接入；ML Kit、Firebase AI Logic、拆帳與 Google Sheets adapters 仍待實作。下圖的 AI 與外部整合是目標架構，不代表已經可用。
+這個專案以 **Google Pixel 10 Pro Fold** 為主要實機，採原生 Android 架構，同時保持對一般 Android 手機與不同視窗尺寸的相容性。現在已完成可建置、可安裝的 Phase 0，以及 Phase 1A 的 evidence／Fact／promotion／pricing／AI routing domain contracts。本機 Sharesheet、Photo Picker、多圖 inbox、Room、人工核對、確認記帳與 ML Kit 中文 OCR／本機收據解析已接入；Gemini Nano、Firebase AI Logic、拆帳與 Google Sheets adapters 仍待實作。下圖的 Nano 與雲端仍是目標架構，現行辨識流程見「自動擷取架構」。
 
 App 支援下限採 `minSdk 26`。這只是安裝下限，不代表每台 Android 8+ 裝置都能執行 Gemini Nano；Nano 必須另外在 runtime 檢查裝置、Android／AICore、模型下載與個別 ML Kit GenAI API 的可用性。
 
@@ -35,7 +35,7 @@ App 支援下限採 `minSdk 26`。這只是安裝下限，不代表每台 Androi
                          Room → Adaptive review → Sheets export
 ```
 
-Compose UI → domain ← data adapters 的依賴方向不變。Domain 不引用 Android URI、ML Kit、Firebase、Room 或 Google Sheets 型別；`AiRouter` 位於 domain use case，透過 `OnDeviceReceiptAnalyzer`／`CloudReceiptAnalyzer` ports 呼叫未來 adapters。Evidence repository 與 exporter 同樣只傳 domain model 或明確結果。
+Compose UI → domain ← data adapters 的依賴方向不變。Domain 不引用 Android URI、ML Kit、Firebase、Room 或 Google Sheets 型別；`AiRouter` 位於 domain use case，透過 `OnDeviceReceiptAnalyzer`／`CloudReceiptAnalyzer` ports 呼叫 adapters（目前為本機中文 OCR，Nano 與 cloud 待實作）。Evidence repository 與 exporter 同樣只傳 domain model 或明確結果。
 
 目前先維持單一 `:app` module，以 package 邊界降低初期複雜度；當 Room、相機與網路 adapter 進入專案後，再依編譯隔離與多人協作需求拆成 `:domain`、`:data`、`:feature-*`。不要只為了形式提早拆 module。
 
@@ -146,7 +146,7 @@ CAS 衝突保留本地 snapshot 與輸入，讀取最新版供比較；明確放
 | `draft_evidence` | draft／asset 外鍵、同草稿唯一 asset 關聯及穩定 position |
 | `imports` | operation ID、目標／結果草稿 ID、running／completed／interrupted、逐張結果；不保存外部 URI |
 
-`DraftCodec` 是只用於 app-private DB 的 JSON 格式，使用固定 allowlist tag 保存所有 Fact 狀態、generic values、provenance、links、promotion 與整數 Money；不得拿來解析 AI／外部 JSON。草稿目前寫入 format 2，evidence metadata 繼續 format 1。`ReceiptDraft.transactionDate` 是 ISO 日期 `Fact<String>`；format 1 缺省日期明確遷移為 `Unknown(NotObserved)`，不能依賴 Gson 執行 Kotlin constructor default（Gson 可略過 constructor）。讀取不寫 DB／遞增 revision，下次合法 CAS 才保存新 payload。SQL 表結構無變動，`ReceiptDatabase` 保持 v1，無需 SQL migration；固定 legacy fixture 與實際 SQLite 重開測試驗證相容。缺少日期的損壞 v2 或未知格式拒絕讀取，沒有 destructive fallback。僅支援 v1 的舊 APK 無法讀 v2，勿將降版當成相容操作。
+`DraftCodec` 是只用於 app-private DB 的 JSON 格式，使用固定 allowlist tag 保存所有 Fact 狀態、generic values、provenance、links、promotion 與整數 Money；不得拿來解析 AI／外部 JSON。草稿目前寫入 format 3（人工核對基線為 format 2），evidence metadata 繼續 format 1。`ReceiptDraft.transactionDate` 是 ISO 日期 `Fact<String>`；format 1 缺省日期明確遷移為 `Unknown(NotObserved)`，不能依賴 Gson 執行 Kotlin constructor default（Gson 可略過 constructor）。讀取不寫 DB／遞增 revision，下次合法 CAS 才保存新 payload。SQL 表結構無變動，`ReceiptDatabase` 保持 v1，無需 SQL migration；固定 legacy fixture 與實際 SQLite 重開測試驗證相容。缺少日期的損壞 v2 或未知格式拒絕讀取，沒有 destructive fallback。僅支援 v1 的舊 APK 無法讀 v2，勿將降版當成相容操作。
 
 草稿 evidence membership 與關聯表在同一 Room transaction 更新。金額不經過浮點數，既有帳務語意未更動。Gson 欄位名稱是持久化格式的一部分，ProGuard 已保留 domain model 欄位；未來欄位／enum／tag 變更必須提供 payload migration，不能直接改名。
 
@@ -297,3 +297,65 @@ DM 可能有全國、區域專櫃或新店版本；活動也可能受日期、�
 ## 分支慣例
 
 功能工作使用 `feat/<topic>`，例如 `feat/promotion-evidence-architecture`。每個 branch 應聚焦單一可審查主題；屬於該功能的測試與文件跟隨同一 branch。
+
+## 自動擷取架構
+
+`ExtractionControls → ExtractionSession → ExtractReceipt → AiRouter(OnDeviceOnly) → MlKitReceiptAnalyzer → LocalReceiptParser → MapReceiptRecognition → CAS → ReviewSession`。
+
+`MlKitReceiptAnalyzer` 實際呼叫 bundled Chinese Text Recognition。中文 SDK 有時省略欄間空白，或提供包含空白的字元框；adapter 以字元位置與只讀像素空白帶重建分欄，並同時保存原始 OCR 文字。未知欄標保留位置，不擅自當成單價；像素掃描在 Default executor 執行，不阻塞 UI。每次 SDK 只接收一張已驗證 SHA-256 的本機圖片；adapter 順序處理選取頁面，再交本機 parser 處理欄位與多頁候選。`MultipleImageInput` 表示這個 adapter 的協調能力，不是宣稱 ML Kit 或 Nano 單次 API 支援多圖。選路沒有 cloud adapter；固定 bundled model 不需要執行 Nano availability probe，Nano 狀態在 UI 明示為未接入／未檢查。
+
+官方文件核對於 2026-09-09：[ML Kit Text Recognition Android](https://developers.google.com/ml-kit/vision/text-recognition/v2/android) 列出 bundled Chinese 16.0.1 與文字／區域輸出；[Prompt API](https://developers.google.com/ml-kit/genai/prompt/android/get-started) 要求自行檢查 AVAILABLE／DOWNLOADABLE／DOWNLOADING／UNAVAILABLE。本次不用手機型號推論 Nano 能力。
+
+不可信的 `ReceiptRecognition` 只有文字、頁面／行索引與座標，沒有本機 ID、revision、stage 或最終帳務結果。Mapper 檢查長度、數量、座標、來源索引、數值與日期，才產生本機 UUID、Fact 與 Candidate evidence links。來源無法解析保留 Unknown，多個交易欄位候選不一致使用 Conflicting；金額以整數 parsing，僅接受合法千分位及小數部分全為零的 TWD 表示。UI 明確限定 TWD，發現已標示外幣的 OCR 輸出拒絕。
+
+`ReceiptExtractionRecord` 保存來源 SHA-256、版本、帶 rawText 的 EvidenceRegion、警告與原始金額試算／gate 狀態。人工編輯保留這份原始擷取快照，讓修正後的平衡不會冒充原始擷取正確。Region 的寬高定義 OCR EXIF-oriented、降採樣座標空間；畫面提供原圖與原文比對。
+
+沒有在 Room 寫入暫態 Analyzing stage：執行工作保存在 ViewModel，SavedState 只標示中斷，不自動重播；成功結果一次 CAS 寫入 NeedsReview 且保持未核對完整。這是避免取消、程序死亡與暫時性模型失敗把人工入口鎖死的選擇。離開 RESUMED 取消 coroutine；ML Kit Task 不支援真正取消，晚到 callback 只負責釋放資源，不能寫入草稿。SDK 正在使用的 bitmap 不會在取消瞬間提前回收。
+
+套用前重新核對完整 evidence metadata、選取圖片實際 SHA-256 與 expected revision。成功以一次 Room transaction 保存 facts、provenance 與 audit；任何失敗保留原草稿。重新辨識必須對目前 base 版本明確授權取代，不保留另一套可被誤用的最終帳務值。帶促銷／分攤相依的草稿拒絕取代。Confirmed 與後續匯出階段均唯讀。
+
+payload format 3 向前相容 format 1／2：新增 nullable extraction，舊格式未具 audit 時保持 null。SQL schema v1 未改；decoder 不以破壞性重建處理版本。`ReceiptAmountPreview` 是額外的 BigInteger 診斷，既有 `ReceiptReconciler`、`ReceiptValidator`、`TransitionReceiptStage` 及 ±1 容差不變。
+
+## 自動擷取驗證
+
+### 資料盤點與預先品質門檻
+
+2026-09-09 在主專案與人工核對 checkout 的非建置檔案中未找到獲授權的真實收據資料集。未讀取手機 App 私有資料，也未上傳任何照片。`RealOcrPipelineTest` 是固定合成圖片與內嵌人工期望值，僅驗證實際 SDK 技術流程；`ReceiptExtractionTest` 的文字 observations 是軟體測試輸入。
+
+真實資料初步試用門檻（在取得固定資料並評估前提出）：清晰樣本的交易總額及日期全對，商家正確至少 90%；品項漏列率與多列率分別 ≤5%，已匹配品項的數量與行金額 exact match 各 ≥95%。理由是本功能應顯著減少重打，且金額錯誤代價高；小型集合必須同時報原始分子／分母，不能以百分比掩蓋少量案例。模糊／反光案例另外列出是否失敗或保留 Unknown，不把拒絕率混入清晰樣本準確率，也不要求強行產生結果。多頁歧義應阻擋直接確認，資料保護案例要求零覆蓋／零遺失。
+
+仍需 10–20 筆獲授權、可去識別的 TWD 真實交易照片，包含清晰單頁、多品項、多頁含重疊、另列折扣／費用及模糊／反光失敗案例。請提供每張所屬交易與頁序、可辨讀的商家／日期／總額、逐列品名／數量／單價／行合計與另列調整標註；看不清處標 Unknown。固定樣本 ID、SHA-256、授權範圍與標註後，再凍結評估。不得將用來調整 parser 的樣本當成未見測試集。
+
+品質報告必須分列：
+
+| 面向 | 真實收據結果 |
+| --- | --- |
+| 商家／日期／交易總額 exact match、Unknown、錯誤 | 尚無資料，未評估 |
+| 品項漏列／多列數、已匹配名稱／數量／行金額 exact match | 尚無資料，未評估 |
+| 原始擷取的金額差額與 reconciliation 阻擋原因 | 尚無資料，未評估 |
+| 需修正的交易欄位數、品項欄位數、需新增／刪除列數 | 尚無資料，未評估 |
+
+合成技術流程預期：標準單頁所有指定欄位 exact match、跨頁相同品項只產生一個未解候選、空白圖片不得成功或改動草稿。這些測試不構成真實辨識品質驗收。
+
+### 主機及 Android 證據
+
+2026-09-09 最終 `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest --offline --no-daemon --max-workers=1` 通過，耗時 2 分 21 秒。主機 **162 tests（人工核對基線 136＋本次 26）、0 failures／errors／skipped**；lint `No issues found`。未停用檢查。Android 測試編譯另有 Compose JUnit4 舊 rule API 的 deprecation 提示，不是失敗或被略過的測試。
+
+獨立 `receipt-ocr-test`／`emulator-5580`，API 35、x86_64、WHPX：**5 tests 全通過，9.83 秒**。`RealOcrPipelineTest` 實際執行 bundled SDK，涵蓋英文單頁、中文多品項與另列折扣、多頁重疊及空白圖失敗；`RealOcrUiTest` 透過實際 Compose 按鈕與真實 SDK 自動進入人工核對，檢查已帶入商家、品名、數量及行金額。沒有以 fake analyzer 代替這五項測試。其餘主機協調測試使用可控 adapter 測取消、衝突與錯誤，不能視為模型驗證。
+
+| 固定合成案例 | 交易欄位 | 品項與金額 | 原始對帳／人工修正 |
+| --- | --- | --- | --- |
+| 英文單頁 | 商家、日期、總額 3/3 exact | 1/1 品項，名稱／數量／行額各 1/1；無漏列／多列 | 金額差額 0；完整性未確認而阻擋；0 文字欄位需修正，仍須人工勾選完整、保存並確認 |
+| 中文兩品項＋折扣 | 商家、日期、總額 3/3 exact | 2/2 品項，名稱／數量／行額各 2/2；折扣額 5，無漏列／多列 | 金額差額 0；完整性及 adjustment scope 未確認而阻擋；金額文字無需修正，須人工指定 1 個 scope 並確認完整 |
+| 重疊兩頁 | 共同交易欄位保留來源 | 一個跨頁候選，沒有重複建立兩列 | 數量、行額 Unknown，差額未知；須人工確認兩欄與頁面完整性 |
+| 空白圖 | 無可用欄位 | 無品項，不回成功 | 原草稿保持不變，可人工輸入／重試 |
+
+上述案例曾用於 parser 除錯，不是未見驗證集；不能外推真實收據準確率。品質門檻仍未經真實資料驗收。
+
+本 worktree 的證據：`.gradle/extraction-final-build.log`、`app/build/test-results/testDebugUnitTest/TEST-*.xml`、`app/build/reports/lint-results-debug.txt`、`.gradle/real-ocr-final-results.log`、`.gradle/receipt-ocr-review.png`。測試 emulator 已停止，AVD 保留；未安裝到實體手機、未卸載 App、未清除使用者資料。
+
+交付 APK：`app/build/outputs/apk/debug/app-debug-manual-review-signature.apk`，SHA-256 `1810c29cd579f7d0819f47dc57d6cd5895cccfd5c87888934f9be6bf80c5c69d`。已用來源人工核對 `.gradle/android-user/debug.keystore` 的本地副本簽署；憑證 SHA-256 `6fa1a1e710134668a0443876160ee821b3fd044705ef319bbcfb88ee993f4db2` 與來源人工核對 APK 相同。與通過 emulator 測試的 `app-debug.apk` 比較，545 個非簽章 ZIP entries 完全一致。一般 debug APK 的本 worktree 測試憑證是 `36d29f9d2aab4e06aac0fc4eee2076c365193d507ee4fa31e30c5726144d4d89`，不要將它誤作手機升級包。憑證與來源 APK 相同不證明與手機現有安裝相同；更新手機前仍須比對，禁止以卸載解決衝突。
+
+仍未驗證：真實收據品質、實體 Pixel 10 Pro Fold／ARM64、折疊／旋轉／分割視窗、大字級與手機保留資料升級。多頁模糊對應可能需新增／刪除列，OCR 不保證找出全部重複；未知版面與影像品質仍需人工修正。Nano、cloud、菜單等排除項目未接入。
+
+整合注意：本 worktree 位於主 checkout 的 `.gradle/worktrees/` 以符合本任務可寫範圍；它是獨立 Git 工作目錄，不能把整個主 checkout `.gradle/` 當成一般快取刪除。未授權合回 main、推送或刪除 worktree。

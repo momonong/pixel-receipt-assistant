@@ -39,6 +39,7 @@ fun InboxScreen(viewModel: InboxViewModel) {
     val error by viewModel.error.collectAsStateWithLifecycle()
     val latest by viewModel.latestImport.collectAsStateWithLifecycle()
     val review by viewModel.review.state.collectAsStateWithLifecycle()
+    val extraction by viewModel.extraction.state.collectAsStateWithLifecycle()
     val expanded = currentWindowAdaptiveInfoV2().windowSizeClass.minWidthDp >= 840
     var preview by rememberSaveable { mutableStateOf<String?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(20), viewModel::picked)
@@ -62,12 +63,13 @@ fun InboxScreen(viewModel: InboxViewModel) {
             review.message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Row(Modifier.weight(1f).padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 if (expanded || selected == null) {
-                    DraftList(drafts, selected, progress == null && !review.busy, viewModel::select, viewModel::createDraft,
+                    DraftList(drafts, selected, progress == null && !review.busy && !extraction.busy, viewModel::select, viewModel::createDraft,
                         { viewModel.select(null); pick() }, if (expanded) null else latest?.report, Modifier.weight(1f))
                 }
                 if (expanded || selected != null) {
-                    EvidenceInbox(drafts.find { it.id == selected }, evidence.assets.takeIf { evidence.draftId == selected }.orEmpty(), progress == null && !review.busy, { viewModel.select(null) }, pick,
+                    EvidenceInbox(drafts.find { it.id == selected }, evidence.assets.takeIf { evidence.draftId == selected }.orEmpty(), progress == null && !review.busy && !extraction.busy, { viewModel.select(null) }, pick,
                         { selected?.let(viewModel.review::open) },
+                        { draft, assets -> ExtractionControls(draft, assets, progress == null && !review.busy, viewModel.extraction, extraction) },
                         { preview = it }, latest?.report, Modifier.weight(if (expanded) 1.5f else 1f))
                 }
             }
@@ -130,7 +132,7 @@ private fun DraftList(
 @Composable
 private fun EvidenceInbox(
     draft: ReceiptDraft?, assets: List<EvidenceAsset>, enabled: Boolean, back: () -> Unit,
-    pick: () -> Unit, review: () -> Unit, preview: (String) -> Unit, report: String?, modifier: Modifier,
+    pick: () -> Unit, review: () -> Unit, extraction: @Composable (ReceiptDraft, List<EvidenceAsset>) -> Unit, preview: (String) -> Unit, report: String?, modifier: Modifier,
 ) {
     val id = draft?.id
     LazyColumn(modifier.fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -139,6 +141,7 @@ private fun EvidenceInbox(
             Text(if (id == null) "選取草稿以查看圖片" else "草稿 ${id.take(8)}", style = MaterialTheme.typography.titleLarge)
             if (draft != null) {
                 Text(stageText(draft.stage))
+                extraction(draft, assets)
                 if (draft.stage == ReceiptStage.Captured) Button(onClick = pick, enabled = enabled) { Text("補選圖片") }
                 Button(onClick = review, enabled = enabled) { Text(if (draft.stage in setOf(ReceiptStage.Captured, ReceiptStage.NeedsReview)) "人工核對" else "查看交易明細") }
                 if (draft.stage == ReceiptStage.Captured) Text("進入核對後不再追加圖片；請先補齊所有證據。")

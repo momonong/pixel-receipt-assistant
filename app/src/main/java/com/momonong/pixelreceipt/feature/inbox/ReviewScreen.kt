@@ -9,6 +9,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -53,7 +54,7 @@ fun ReviewScreen(session: ReviewSession, state: ReviewState, assets: List<Eviden
                     photo?.let { TextButton(onClick = { preview(it.contentSha256) }) { Text("開啟原圖預覽") } }
                 }
             }
-            LazyColumn(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            LazyColumn(Modifier.weight(1f).fillMaxHeight().testTag("review-form"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 item {
                     if (!expanded) {
                         PhotoChoices(assets, photo?.id) { photoId = it }
@@ -65,6 +66,16 @@ fun ReviewScreen(session: ReviewSession, state: ReviewState, assets: List<Eviden
                     Text("未保存輸入會隨畫面狀態復原；請按保存後再離開。強制停止或清除 App 前，務必先保存。")
                     Text("金額使用幣別最小單位整數（TWD 為元）；行金額不再乘數量。只有收據另列的加減項才新增調整，避免重複扣折扣。")
                     Text("沒有另列調整不代表已知零折扣；未知原價與折扣保持未知。")
+                    base.extraction?.let { record ->
+                        Text("辨識來源：${record.provenance.extractorName} / ${record.provenance.extractorVersion} / ${record.provenance.promptVersion}")
+                        Text("區域座標以 EXIF 轉正後的 OCR 圖片為準；原圖未修改。")
+                        record.warnings.forEach { Text(it, color = MaterialTheme.colorScheme.error) }
+                        var showText by remember(base.id) { mutableStateOf(false) }
+                        TextButton(onClick = { showText = !showText }) { Text(if (showText) "收起辨識原文" else "查看辨識原文與區域依據") }
+                        if (showText) record.regions.forEach { region ->
+                            Text("圖片 ${assets.indexOfFirst { it.id == region.assetId } + 1} (${region.leftPx},${region.topPx})–(${region.rightPx},${region.bottomPx})：${region.rawText}")
+                        }
+                    }
                     state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
                     if (state.conflict) {
                         Text("本地輸入暫時唯讀。請比較下方最新版後，選擇保留本地畫面或放棄輸入並重新載入。")
@@ -139,6 +150,7 @@ fun ReviewScreen(session: ReviewSession, state: ReviewState, assets: List<Eviden
                     Text("本機對帳", style = MaterialTheme.typography.titleLarge)
                     evaluation.errors.forEach { Text(it, color = MaterialTheme.colorScheme.error) }
                     result?.let { Text(reconciliationText(it)) }
+                    evaluation.draft?.let { Text(receiptAmountPreview(it)) }
                     Text("差額 = 品項行金額合計 + 加項 − 減項 − 收據總額；不自動補差額。")
                     if (base.stage == ReceiptStage.NeedsReview) {
                         Button(onClick = session::save, enabled = state.editable && state.dirty) { Text("保存修改") }
