@@ -9,6 +9,7 @@ import com.momonong.pixelreceipt.data.ingestion.*
 import com.momonong.pixelreceipt.data.local.*
 import com.momonong.pixelreceipt.domain.model.*
 import com.momonong.pixelreceipt.domain.port.DraftWriteResult
+import com.momonong.pixelreceipt.domain.usecase.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import org.junit.*
@@ -93,6 +94,43 @@ class ReceiptPersistenceTest {
         assertEquals(next, repository.observeDraft("cas").first())
         assertEquals(DraftWriteResult.Conflict, repository.createDraft(initial))
         assertEquals(DraftWriteResult.NotFound, repository.compareAndSetDraft(ReceiptDraft("missing", revision = 1), 0))
+    }
+
+    @Test fun manualReviewFromImportedPhotoSurvivesDatabaseReopenAndConfirmedReplay() = runBlocking {
+        val imported = batch("manual-photo", null, input(png()))
+        val captured = repository.observeDraft(imported.draftId!!).first()!!
+        val opened = (TransitionReceiptStage(repository)(captured, ReceiptStage.NeedsReview) as TransitionReceiptStageResult.Updated).draft
+        val refs = opened.evidenceAssetIds
+        val form = ReviewInput("商店", "2026-09-08", "99", true, refs,
+            listOf(ReviewLineInput("line", "商品", "1", "100", refs)),
+            listOf(ReviewAdjustmentInput("coupon", "1", scope = "order", evidenceIds = refs)))
+        val saved = (ManualReceiptReview(repository).save(opened, form, 42) as ReviewSaveResult.Saved).draft
+        db.close(); reopen()
+        assertEquals(saved, repository.observeDraft(saved.id).first())
+        assertTrue(repository.evidence(saved.id).first().all { store.preview(it.contentSha256) != null })
+        val confirmed = (TransitionReceiptStage(repository)(saved, ReceiptStage.Confirmed) as TransitionReceiptStageResult.Updated).draft
+        db.close(); reopen()
+        assertEquals(confirmed, repository.observeDraft(saved.id).first())
+        assertEquals(TransitionReceiptStageResult.Conflict, TransitionReceiptStage(repository)(saved, ReceiptStage.Confirmed))
+        assertTrue(ManualReceiptReview(repository).save(confirmed, form.copy(total = "0"), 43) is ReviewSaveResult.Rejected)
+        assertEquals(1, repository.drafts.first().size)
+        assertEquals(3, confirmed.evidenceLinks.size)
+    }
+
+    @Test fun existingSqlSchemaAndLegacyPayloadUpgradeOnlyOnCasWrite() = runBlocking {
+        val payload = javaClass.getResource("/legacy-draft-v1.json")!!.readText()
+        db.receipts().insertDraft(DraftRow("legacy-review", 3, 10, payload))
+        db.close(); reopen()
+        val legacy = repository.observeDraft("legacy-review").first()!!
+        assertTrue(legacy.transactionDate is Fact.Unknown)
+        assertEquals(payload, db.receipts().draft(legacy.id)!!.payload)
+        val opened = (TransitionReceiptStage(repository)(legacy, ReceiptStage.NeedsReview) as TransitionReceiptStageResult.Updated).draft
+        assertEquals(4L, opened.revision)
+        assertEquals(2, JsonParser.parseString(db.receipts().draft(legacy.id)!!.payload).asJsonObject["format"].asInt)
+        assertEquals(DraftWriteResult.Conflict, repository.compareAndSetDraft(legacy.copy(revision = 4), 3))
+        db.close(); reopen()
+        assertEquals(opened, repository.observeDraft(legacy.id).first())
+        assertEquals(1, db.openHelper.readableDatabase.version)
     }
 
     @Test fun allFailuresAndCancellationDoNotCreateDraftsOrLeaveFiles() = runBlocking {

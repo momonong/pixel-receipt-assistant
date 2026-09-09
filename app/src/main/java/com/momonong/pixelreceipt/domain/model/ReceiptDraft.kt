@@ -21,6 +21,8 @@ class ReceiptDraft(
     val assemblyStatus: ReceiptAssemblyStatus = ReceiptAssemblyStatus.Collecting,
     val stage: ReceiptStage = ReceiptStage.Captured,
     val revision: Long = 0,
+    /** ISO calendar date (yyyy-MM-dd); legacy receipts remain explicitly unknown. */
+    val transactionDate: Fact<String> = Fact.Unknown(UnknownFactReason.NotObserved),
 ) {
     val items: List<ReceiptLineDraft> = items.toList()
     val adjustments: List<ReceiptAdjustment> = adjustments.toList()
@@ -62,6 +64,7 @@ class ReceiptDraft(
         assemblyStatus: ReceiptAssemblyStatus = this.assemblyStatus,
         stage: ReceiptStage = this.stage,
         revision: Long = this.revision,
+        transactionDate: Fact<String> = this.transactionDate,
     ) = ReceiptDraft(
         id = id,
         merchant = merchant,
@@ -76,11 +79,13 @@ class ReceiptDraft(
         assemblyStatus = assemblyStatus,
         stage = stage,
         revision = revision,
+        transactionDate = transactionDate,
     )
 
     override fun equals(other: Any?): Boolean = other is ReceiptDraft &&
         id == other.id &&
         merchant == other.merchant &&
+        transactionDate == other.transactionDate &&
         total == other.total &&
         items == other.items &&
         adjustments == other.adjustments &&
@@ -96,6 +101,7 @@ class ReceiptDraft(
     override fun hashCode(): Int {
         var result = id.hashCode()
         result = 31 * result + merchant.hashCode()
+        result = 31 * result + transactionDate.hashCode()
         result = 31 * result + total.hashCode()
         result = 31 * result + items.hashCode()
         result = 31 * result + adjustments.hashCode()
@@ -161,7 +167,7 @@ enum class ReceiptStage {
     ;
 
     fun canTransitionTo(next: ReceiptStage): Boolean = next in when (this) {
-        Captured -> setOf(PendingAnalysis)
+        Captured -> setOf(PendingAnalysis, NeedsReview)
         PendingAnalysis -> setOf(Analyzing)
         Analyzing -> setOf(NeedsReview, AnalysisFailed)
         AnalysisFailed -> setOf(PendingAnalysis)

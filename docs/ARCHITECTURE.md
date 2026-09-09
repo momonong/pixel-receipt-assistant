@@ -2,7 +2,7 @@
 
 ## 目標與範圍
 
-這個專案以 **Google Pixel 10 Pro Fold** 為主要實機，採原生 Android 架構，同時保持對一般 Android 手機與不同視窗尺寸的相容性。現在已完成可建置、可安裝的 Phase 0，以及 Phase 1A 的 evidence／Fact／promotion／pricing／AI routing domain contracts。本機 Sharesheet、Photo Picker、多圖 inbox 與 Room 已接入；ML Kit、Firebase AI Logic、核對記帳 UI 與 Google Sheets adapters 仍待實作。下圖的 AI 與外部整合是目標架構，不代表已經可用。
+這個專案以 **Google Pixel 10 Pro Fold** 為主要實機，採原生 Android 架構，同時保持對一般 Android 手機與不同視窗尺寸的相容性。現在已完成可建置、可安裝的 Phase 0，以及 Phase 1A 的 evidence／Fact／promotion／pricing／AI routing domain contracts。本機 Sharesheet、Photo Picker、多圖 inbox、Room、人工核對與確認記帳已接入；ML Kit、Firebase AI Logic、拆帳與 Google Sheets adapters 仍待實作。下圖的 AI 與外部整合是目標架構，不代表已經可用。
 
 App 支援下限採 `minSdk 26`。這只是安裝下限，不代表每台 Android 8+ 裝置都能執行 Gemini Nano；Nano 必須另外在 runtime 檢查裝置、Android／AICore、模型下載與個別 ML Kit GenAI API 的可用性。
 
@@ -95,7 +95,7 @@ receipt lines ↔ observations ↔ promotion/price evidence（多對多）
         ↓
 deterministic pricing + reconciliation
         ↓
-Room (NeedsReview；允許 Unknown；後續核對 UI 待實作) → Adaptive review UI
+Room (NeedsReview；允許 Unknown) → Adaptive manual review UI（已實作）
         ↓ 使用者確認 evidence、matching、adjustment 與 split
 Room (Confirmed / ExportPending)
         ↓
@@ -113,6 +113,7 @@ Nano 推論不可假設能在 WorkManager 背景工作執行。需要 Nano 的�
 ```text
 Captured → PendingAnalysis → Analyzing → NeedsReview
                               └───────→ AnalysisFailed
+   └──────── 人工核對 ─────────────────→ NeedsReview
 
 NeedsReview → Confirmed → ExportPending → Exported
                                   ├────→ ExportFailed
@@ -120,6 +121,18 @@ NeedsReview → Confirmed → ExportPending → Exported
 ```
 
 `NeedsReview` 不代表資料已完整；它可以合法包含 evidence、matching 或 adjustment 的 `Unknown`。`TransitionReceiptStage` 在進入 `Confirmed` 前必須取得 `ReceiptReconciler.Balanced` 或 `WithinTolerance`；incomplete receipt、未知 merchant／line name／quantity／total／line amount／adjustment amount／scope、pending promotion 或 validation issue 都會回 `ConfirmationBlocked`，且不寫入 repository。
+
+### 人工核對與編輯緩衝
+
+狀態機只新增 `Captured → NeedsReview` 邊：讓已保存圖片直接交給使用者核對，無須虛構 `PendingAnalysis`／`Analyzing` 或 extraction provenance。進入時仍經 `TransitionReceiptStage` 和 repository CAS，不改寫 merchant／其他 Fact。`NeedsReview → Confirmed` 的既有容差和必要資料要求不變；新日期欄位 Unknown 不單獨阻擋既有 gate。
+
+`InboxViewModel` 持有 `ReviewSession`，以 StateFlow 提供原始 snapshot、編輯輸入、busy／dirty／conflict／錯誤狀態。`ReviewInput` 的文字、明確 scope portions 與原始 revision 經 SavedStateHandle 保存，畫面重建不需要把半成品文字寫進 Room。返回需選繼續編輯或放棄；force-stop 等沒有 saved-state 復原保證的操作，UI 提醒先保存。編輯限制為 100 品項／50 調整及每欄 500 字元。busy 時抑制重複操作與返回，Confirmed 和其他非 NeedsReview 狀態唯讀。
+
+`ManualReceiptReview` 在 domain 解析非負 Long 金額、正 Int 數量和嚴格 ISO calendar date，輸入不經浮點數。空白保留／轉為 Unknown；未修改的 Fact（包含 Conflicting、NotApplicable、原價與來源）原樣保留。修改值保存 `UserConfirmed` timestamp 及使用者選定的 evidence references；額外指定圖片建立 Confirmed EvidenceLink，不移除原有關聯。新調整為 Other 類型，支援 Add／Subtract 和 Order／Line／LineSet，未做促銷推論、價格查詢或自動分攤。刪除品項／調整只移除其 evidence link，若仍被其他 domain entity 引用則拒絕保存，不能靜默破壞 lineage。
+
+保存可保留尚未齊全／不平衡的草稿，解析錯誤不可保存。確認只作用於已保存 snapshot，由原 `TransitionReceiptStage` 調用 reconciler／validator，再 CAS 寫入同筆交易的 Confirmed 與下一 revision。重複確認不產生新交易。UI 區分 Balanced、WithinTolerance、Unbalanced，顯示 `computed − receipt` 的有號差額；範圍未知、適用數量超限、必要 Fact 不全、混合幣別及既有促銷分攤問題都能阻擋確認。
+
+CAS 衝突保留本地 snapshot 與輸入，讀取最新版供比較；明確放棄後才重新載入，從不自動 rebase／覆寫。寫入錯誤保留輸入並允許重試。保存後 Room Flow 更新列表；再次開啟從 repository 讀取。核對時收到外部分享會提示先離開再重新分享，避免隱性切換正在編輯的交易。
 
 ## Room 與檔案一致性
 
@@ -133,7 +146,9 @@ NeedsReview → Confirmed → ExportPending → Exported
 | `draft_evidence` | draft／asset 外鍵、同草稿唯一 asset 關聯及穩定 position |
 | `imports` | operation ID、目標／結果草稿 ID、running／completed／interrupted、逐張結果；不保存外部 URI |
 
-`DraftCodec` 是只用於 app-private DB 的 JSON format 1，使用固定 allowlist tag 保存所有 Fact 狀態、generic values、provenance、links、promotion 與整數 Money；不得拿來解析 AI／外部 JSON。草稿 evidence membership 與關聯表在同一 Room transaction 更新。金額不經過浮點數，原始 domain API／語意未更動。Gson 欄位名稱是持久化格式的一部分，ProGuard 已保留 domain model 欄位；未來欄位／enum／tag 變更必須提供 payload migration，不能直接改名。
+`DraftCodec` 是只用於 app-private DB 的 JSON 格式，使用固定 allowlist tag 保存所有 Fact 狀態、generic values、provenance、links、promotion 與整數 Money；不得拿來解析 AI／外部 JSON。草稿目前寫入 format 2，evidence metadata 繼續 format 1。`ReceiptDraft.transactionDate` 是 ISO 日期 `Fact<String>`；format 1 缺省日期明確遷移為 `Unknown(NotObserved)`，不能依賴 Gson 執行 Kotlin constructor default（Gson 可略過 constructor）。讀取不寫 DB／遞增 revision，下次合法 CAS 才保存新 payload。SQL 表結構無變動，`ReceiptDatabase` 保持 v1，無需 SQL migration；固定 legacy fixture 與實際 SQLite 重開測試驗證相容。缺少日期的損壞 v2 或未知格式拒絕讀取，沒有 destructive fallback。僅支援 v1 的舊 APK 無法讀 v2，勿將降版當成相容操作。
+
+草稿 evidence membership 與關聯表在同一 Room transaction 更新。金額不經過浮點數，既有帳務語意未更動。Gson 欄位名稱是持久化格式的一部分，ProGuard 已保留 domain model 欄位；未來欄位／enum／tag 變更必須提供 payload migration，不能直接改名。
 
 `createDraft` 僅接受 revision 0，重複 ID 回 Conflict；`compareAndSetDraft` 要求 next = expected + 1，使用 SQL revision 條件與 Room transaction 原子寫入 payload／關聯，缺少 evidence 會拒絕，不允許舊 revision 覆蓋新資料。匯入追加只允許 Captured 草稿，保留既有 Fact 與 stage；批次讀取期間如被其他寫入更新，整批回衝突並回滾新 metadata，不偷偷重套至較新版本。
 
@@ -167,6 +182,34 @@ Activity 使用自己的 UUID（不信任分享 extras 裡的 ID），保存於 
 
 未測突然斷電／儲存硬體故障；原圖檔案有 sync，但不宣稱跨檔案與 SQLite 的硬體掉電原子性。來源 provider 若阻塞讀取，取消可能需要等待目前的讀取返回；沒有新增背景服務或 provider 的硬性 timeout 架構。
 
+
+## 人工核對驗證
+
+2026-09-08 在原生隔離 worktree、指定起點 `1a2f624e42508a4d90554ee92757c57cdbab5a19` 上，以局部 JDK 17／SDK 37.0 執行：
+
+```powershell
+.\gradlew.bat testDebugUnitTest lintDebug assembleDebug --offline --no-daemon --max-workers=1
+```
+
+最終結果 **BUILD SUCCESSFUL，1m 7s；136 tests，0 failures／errors／skipped；lint No issues found**。新增 23 tests：ManualReceiptReview 15、ReviewSession 4、codec 2、實際 Room／SQLite 2；上游 113 tests 全部維持通過。`app/schemas/.../1.json` 沒有改動。
+
+| 驗收 | 主機證據與限制 |
+| --- | --- |
+| 不使用 AI 完成人工記帳 | `ManualReceiptReviewTest` 驗證合法直接人工轉換、保存及 confirmation gate；`ReceiptPersistenceTest.manualReviewFromImportedPhotoSurvivesDatabaseReopenAndConfirmedReplay` 從實際匯入照片跑至 Confirmed |
+| 重開保留 Fact／日期／provenance／evidence | 實際 SQLite 關閉重開、逐 Fact equality、原圖解碼與 links 保存通過；未執行 OS force-stop |
+| 未保存內容策略 | `ReviewSessionTest` 驗證 SavedStateHandle 原始字串和 base revision 重建、非法半成品保留及後續保存；UI 返回對話框／真正 Activity 重建待裝置驗收 |
+| 缺漏與非法輸入阻擋 | 正整數數量、非負 Long 金額、溢位、小數、分隔符號、非法日期、必要 Fact、缺品項／scope／適用數量等測試通過 |
+| 原價／折扣未知 | 原價 Unknown／Conflicting 與其他未修改 Fact 保留；未知日期不改既有 gate；無自動補零／代填 |
+| scope 與加減方向 | Order、Line、LineSet、明確適用數量、Add／Subtract 各一次計算，行金額不乘數量；超量阻擋確認 |
+| CAS 衝突及恢復 | 保存／確認舊 revision 拒寫；Session 保留輸入、最新版摘要及明確 reload；重載 Confirmed 後唯讀 |
+| Confirmed 持久化／冪等 | 同一 receipt ID 和 revision 持久化；重複確認、確認後保存拒絕，不新增交易 |
+| payload／schema 相容 | 固定 `legacy-draft-v1.json` fixture、舊資料讀取不寫回、CAS 才升 v2、SQL v1 重開、未知／損壞 format 拒讀；上游非破壞性 schema 保護測試仍通過 |
+
+本機證據：`.gradle/manual-review-final-gate.log`、`app/build/test-results/testDebugUnitTest/TEST-*.xml`、`app/build/reports/tests/testDebugUnitTest/index.html`、`app/build/reports/lint-results-debug.txt`。APK `app/build/outputs/apk/debug/app-debug.apk` 的 SHA-256 為 `1d8d26850b7f835bb4b520004c7a72ed3f6a98db8f17536b3dd4d04d02058bba`。
+
+首次並行 gate 的測試／APK 完成，但 lint 超過六分鐘仍在 `KotlinUFile.getAllCommentsInFile`／`BidirectionalTextDetector`，兩次 thread dump 保存在 `.gradle/manual-review-threads*.txt`，日誌為 `.gradle/manual-review-gate-lint-stall.log`。僅停止本任務該程序後，單一 worker 完整 gate 通過；尚未建立 lint 卡住原因的最小重現，不宣稱是專案或上游工具的確定缺陷。沒有修改 lint 規則或 warnings-as-errors。
+
+`adb devices -l` 本次無裝置；Compose 互動、Compact／Expanded／Fold、大字級／鍵盤、Sharesheet／Picker、OS URI 撤權及真正 force-stop 仍未驗證。README 有手動驗收步驟。APK 使用局部新 debug key，憑證 SHA-256 為 `6fa1a1e710134668a0443876160ee821b3fd044705ef319bbcfb88ee993f4db2`，與上游 APK 不同；既有 key 複製被自動核准審查拒絕，未執行。後續保留資料升級應待授權整合後於原簽章環境建置，不要卸載有資料的 App 來完成此驗收。
 
 ## 多對多 matching
 

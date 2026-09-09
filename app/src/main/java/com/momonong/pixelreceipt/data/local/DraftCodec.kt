@@ -46,13 +46,29 @@ class DraftCodec {
             "opaque" to PromotionTerms.Opaque::class.java,
         )).create()
 
-    fun encode(draft: ReceiptDraft): String = envelope(gson.toJsonTree(draft))
-    fun decode(payload: String): ReceiptDraft = gson.fromJson(body(payload), ReceiptDraft::class.java)
+    fun encode(draft: ReceiptDraft): String = envelope(gson.toJsonTree(draft), 2)
+    fun decode(payload: String): ReceiptDraft {
+        val root = JsonParser.parseString(payload).asJsonObject
+        val format = root["format"].asInt
+        require(format in 1..2) { "Unsupported persisted format" }
+        val value = root["value"].asJsonObject
+        // Gson bypasses Kotlin constructor defaults. Explicitly migrate v1 in memory;
+        // the next CAS write persists v2 without altering the SQL schema or revision here.
+        if (format == 1 && !value.has("transactionDate")) {
+            value.add("transactionDate", gson.toJsonTree(
+                Fact.Unknown(UnknownFactReason.NotObserved), Fact::class.java,
+            ))
+        }
+        require(value.has("transactionDate") && !value["transactionDate"].isJsonNull) {
+            "Missing persisted transaction date fact"
+        }
+        return gson.fromJson(value, ReceiptDraft::class.java)
+    }
     fun encodeAsset(asset: EvidenceAsset): String = envelope(gson.toJsonTree(asset))
     fun decodeAsset(payload: String): EvidenceAsset = gson.fromJson(body(payload), EvidenceAsset::class.java)
 
-    private fun envelope(value: JsonElement): String = JsonObject().apply {
-        addProperty("format", 1)
+    private fun envelope(value: JsonElement, format: Int = 1): String = JsonObject().apply {
+        addProperty("format", format)
         add("value", value)
     }.toString()
 

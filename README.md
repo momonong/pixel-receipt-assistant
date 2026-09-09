@@ -2,7 +2,7 @@
 
 PixelReceipt AI 是以 **Google Pixel 10 Pro Fold** 為主要實機的原生 Android 智慧記帳 App。目標體驗是不必先開 App：使用者先用原廠相機拍照，再從 Android Sharesheet 分享進 App，或稍後透過系統 Photo Picker 補選多張圖片；App 將收據、價標與促銷牌整理成同一筆交易的 evidence inbox，最後交給使用者核對。
 
-目前已實作 **本機收據匯入與草稿保存**：Sharesheet 單圖／多圖、Photo Picker、草稿列表、追加圖片與原圖預覽，以及 Room persistence。既有 evidence／Fact、pricing、reconciliation、revision/CAS 與 AI routing domain contracts 保留。AI、OCR、Firebase、品項核對及 Sheets adapters 尚未實作；裝置驗收狀態見下方，不能以 JVM 測試代替實機驗證。
+目前已實作 **本機收據匯入、人工核對與確認記帳**：Sharesheet 單圖／多圖、Photo Picker、草稿列表、追加圖片與原圖預覽、交易／品項／人工調整編輯、CAS 保存，以及通過既有本機 gate 後保存 Confirmed。全程可不使用 AI。AI、OCR、Firebase、拆帳及 Sheets adapters 尚未實作；裝置驗收狀態見下方，不能以 JVM 測試代替實機驗證。
 
 ## 核心原則
 
@@ -42,7 +42,7 @@ Gradle distribution 有固定 SHA-256，wrapper JAR 也已對照官方 checksum�
                                                    ↓
                                     deterministic pricing + scoped adjustment
                                                    ↓
-                                    Room（已實作）→ Review UI（待實作） → Sheets（待實作）
+                                    Room（已實作）→ 人工 Review UI（已實作） → Sheets（待實作）
 ```
 
 Domain 已將 AI recognition facts 與本機 `ReceiptDraft` 分開，模型不能指定本機 ID、revision、workflow stage 或帳務結果。`EvidenceAsset`／`EvidenceReference`／`EvidenceLink` 可表示一張促銷牌對多個收據品項，以及一個品項由多張圖片共同佐證；圖片以 SHA-256 定址保存在 app-private storage，Room 保存草稿、evidence metadata、關聯與匯入結果。資料寫入 contract 使用 revision + compare-and-set，避免 UI 與背景工作同時覆寫；exporter 只接收已驗證的 immutable batch。
@@ -62,7 +62,7 @@ app/src/main/java/com/momonong/pixelreceipt/
 ├── domain/usecase/      合法狀態轉換與 CAS 協調
 ├── data/local/          Room schema、versioned codec、CAS repository
 ├── data/ingestion/      URI 串流、驗證、去重、匯入協調
-└── feature/inbox/       草稿列表、圖片預覽、ViewModel／StateFlow
+└── feature/inbox/       草稿列表、圖片預覽、人工核對、ViewModel／StateFlow
 ```
 
 初期先保留單一 `:app` module；等 evidence ingestion、Room 與 service adapters 進入後，再依實際編譯隔離需求拆 module，避免過早模組化。
@@ -120,11 +120,16 @@ PowerShell 本次任務局部環境（工具位於 `.gradle/`，不提交、不�
 ```powershell
 $env:JAVA_HOME = (Get-ChildItem .gradle/task-tools/jdk17 -Directory | Select-Object -First 1).FullName
 $env:ANDROID_HOME = "$PWD\.gradle\task-tools\android-sdk"
+$env:ANDROID_USER_HOME = "$PWD\.gradle\android-user"
 $env:GRADLE_USER_HOME = "$PWD\.gradle\task-gradle-home"
 .\gradlew.bat testDebugUnitTest lintDebug assembleDebug
 ```
 
 其他 checkout 請設定自己的 JDK／SDK；不假設上述忽略目錄會隨 Git 同步。依賴均置於 version catalog；此次嚴格 lint 要求的 Kotlin Compose plugin 更新至 2.4.20。
+
+此原生 worktree 的工具與依賴從既有安裝複製至本地忽略目錄；沒有改寫原專案。Windows 沙箱可能阻擋 AGP 的 `debug.keystore.lock` 檔案正規化；本次需在核准後以相同 worktree、相同局部環境執行 gate，沒有改到其他工作目錄執行。debug keystore 也只放在忽略目錄，不提交。
+
+本 worktree 產物使用局部新建的 debug key，**與上游 APK 簽章不同，不能直接覆蓋安裝上游版本**。自動核准審查未允許複製既有私密金鑰，因此未複製。保留資料升級驗收應於後續獲授權整合後，在原有簽章環境重新建置；不要為了安裝此 APK 卸載已有資料的 App。
 
 輸出 APK：`app/build/outputs/apk/debug/app-debug.apk`
 
@@ -147,7 +152,7 @@ $env:GRADLE_USER_HOME = "$PWD\.gradle\task-gradle-home"
 
 ## 收據匯入驗證與手動驗收
 
-本次完整 gate 通過：113 tests（新增 16）、0 failures／errors／skipped，lint 無問題，debug APK 已產生。主機驗證與限制詳見 [架構文件](docs/ARCHITECTURE.md#收據匯入驗證)。`testDebugUnitTest` 包含 Robolectric 的 SQLite／Room、原生圖片解碼、schema v1 開啟與保留資料、CAS、錯誤與中斷恢復測試。這是第一版持久化 schema，之前沒有 Room DB；因此沒有虛構的 v0→v1 migration。之後 schema／payload 變更必須附 migration，禁止 destructive fallback。
+2026-09-07 匯入基線 gate 通過：113 tests（新增 16）、0 failures／errors／skipped，lint 無問題，debug APK 已產生。主機驗證與限制詳見 [架構文件](docs/ARCHITECTURE.md#收據匯入驗證)。`testDebugUnitTest` 包含 Robolectric 的 SQLite／Room、原生圖片解碼、schema v1 開啟與保留資料、CAS、錯誤與中斷恢復測試。這是第一版持久化 schema，之前沒有 Room DB；因此沒有虛構的 v0→v1 migration。之後 schema／payload 變更必須附 migration，禁止 destructive fallback。
 
 裝置手動驗收（目前尚未連接裝置）：
 
@@ -158,6 +163,35 @@ $env:GRADLE_USER_HOME = "$PWD\.gradle\task-gradle-home"
 5. 混合正常、損壞、不支援及超限圖片，確認逐張結果；在同草稿重選整批，確認成功部分不重複。全失敗不能產生新草稿。
 6. 匯入途中按取消或終止程序，再啟動：已提交草稿仍可讀，本批顯示取消／中斷，沒有被當成成功的殘缺草稿。
 7. 在 Compact、Expanded、旋轉、分割視窗與大字級分別操作建立、返回、補選、結果捲動與預覽；實體 Fold 的折疊切換也需驗證。
+
+## 人工核對與確認記帳
+
+1. 開啟草稿，先補齊圖片，再按「人工核對」。`Captured → NeedsReview` 是合法人工入口，不執行或假造 AI 分析。進入核對後沿用既有匯入限制，不再追加圖片。
+2. 對照照片輸入商家、交易日期（`YYYY-MM-DD`）、品項名稱、正整數數量、收據行金額及收據總額。Compact 使用可捲動表單與圖片預覽，Expanded 同時顯示證據及表單。
+3. 金額輸入幣別最小單位整數（TWD 為元）；行金額是該行合計，**不再乘以數量**。不接受負數、小數、千分位、科學記號或溢位。空白保持 Unknown；日期未知依既有 gate 不單獨阻擋確認，不會補成今天。
+4. 可新增／刪除品項，以及收據**另列**的人工調整。調整金額非負，由「加上／扣除」決定方向，範圍選整筆或明確指定品項及適用數量（單項或多項）；未知範圍可保存但阻擋確認。已含在收據行金額中的折扣不要再加一筆扣除。
+5. 各區可追加指定核對圖片，保存使用者 provenance 與 Confirmed evidence links；既有關聯保留。未修改的 Fact／provenance、原價、促銷及分攤資料原樣保留，未知原價不以實付額或零代填。沒有另列調整不等於已知零折扣。刪除仍被調整／促銷／分攤引用的品項會拒絕保存並指出引用。
+6. 勾選「收據完整」並保存修改。表單顯示解析錯誤、必要 Fact 缺漏、缺少品項、不合法 scope／幣別／既有促銷分攤等阻擋原因。完整 gate 沿用 `ReceiptReconciler`／`ReceiptValidator`／`TransitionReceiptStage`。
+7. 「完全平衡」差額為 0；「容差內」允許差額 ±1 最小單位。畫面與確認對話框均顯示實際差額，不調整資料湊平。保存後且 gate 通過才可確認；Confirmed 保存在同一交易，列表及明細顯示唯讀，不建立另一筆交易，也不提供重開／修改。
+
+未保存輸入存於 ViewModel 與 SavedStateHandle 的編輯緩衝，包含非法的半成品文字與原始 CAS revision；Room 仍是已保存交易的唯一來源。返回時可繼續編輯或明確放棄。Activity saved-state 復原可回到緩衝；**force-stop、移除最近任務或清除資料不保證復原未保存輸入，執行前請先保存**。一次限 100 品項、50 調整，各欄位最多輸入 500 字元。
+
+保存／確認遇 CAS 衝突時保留原輸入，顯示最新版摘要，禁止自動覆蓋；可保留畫面比對，或經對話框明確放棄輸入並重新載入，再重新核對。遇暫時性寫入失敗保留輸入供重試。人工核對中收到分享時會提示先離開，再重新分享。
+
+交易日期新增為 `Fact<String>`，舊 draft payload format 1 的缺省日期遷移為 `Unknown(NotObserved)`；讀取不修改 DB 或 revision，下次 CAS 寫入 format 2。SQL schema 仍為 v1，沒有新增 SQL 欄位，亦沒有 destructive fallback。更新後不應降回僅理解 payload v1 的 APK；舊 decoder 會拒絕 v2，不能將它當成可安全降版。
+
+2026-09-08 人工核對完整 gate：**136 tests（新增 23）、0 failures／errors／skipped，lint No issues found，debug build 成功**。執行 `testDebugUnitTest lintDebug assembleDebug --offline --no-daemon --max-workers=1`，未停用任何檢查；最終耗時 1 分 7 秒。主機證據、涵蓋範圍和限制見 [人工核對驗證](docs/ARCHITECTURE.md#人工核對驗證)。
+
+人工核對裝置手動驗收（本次 `adb devices -l` 無裝置，下列 UI 操作均未驗證）：
+
+1. 匯入兩張照片，進核對後切換／放大預覽；輸入商家、合法日期、品項數量 2／行金額 100／總額 100，指定圖片依據、勾選完整，保存後重開並確認。
+2. 查看 Confirmed 列表及明細；force-stop 後重啟，確認資料／日期／品項／調整／圖片仍在且唯讀。不得以卸載重裝代替保留資料升級。
+3. 編輯 `12.` 或不合法日期後返回，驗證放棄提示；選繼續編輯，旋轉／重建 Activity，原始文字仍在，沒有被當成已保存值。
+4. 分別留空必要欄位、數量填 0、小數／超長金額、空品項、未勾完整，驗證具體原因。未知原價與未知日期不得被填零或推測。
+5. 行合計 100／總額 99，確認顯示「容差內、差額 1」；總額 98 顯示差額 2 且不能確認。另測差額 -1 與完全平衡。
+6. 行合計 100，另列扣除 10、加上 5，總額 95；分別指定整筆、單項及多品項 scope，驗證只加減一次。適用數量超過購買數量時不能確認。
+7. 用除錯器／測試 writer 更新同筆 revision，原畫面保存／確認均應顯示衝突並保留輸入；檢查最新版後放棄並重載，若最新版已 Confirmed，立即唯讀。
+8. Compact、Expanded、旋轉、分割視窗、大字級及實體 Fold 折疊切換，檢查表單、軟鍵盤、長列表、返回提示與確認對話框。這些裝置驗收不由主機測試代替。
 
 ## Roadmap
 
@@ -187,7 +221,8 @@ $env:GRADLE_USER_HOME = "$PWD\.gradle\task-gradle-home"
 - [ ] `MlKitNanoAnalyzer` 與 `FirebaseCloudAnalyzer` adapters；Firebase 路徑強制 App Check／Play Integrity。
 - [ ] 寶雅等 retailer source adapters，保存 URL、抓取時間與適用條件，僅產生 candidate。
 - [ ] WorkManager 唯一工作與重試策略；不得假設 Nano 能在背景執行。
-- [ ] 單筆交易 evidence／品項核對、折扣修正、自用／代墊與平分介面。
+- [x] 單筆交易人工 evidence／品項核對、明確 scope 加減調整、CAS 保存與唯讀 Confirmed；裝置驗收待完成。
+- [ ] 複雜促銷修正、自用／代墊與平分介面。
 - [ ] Google OAuth 最小權限與 Sheets 冪等匯出。
 
 ### Phase 2：自動化

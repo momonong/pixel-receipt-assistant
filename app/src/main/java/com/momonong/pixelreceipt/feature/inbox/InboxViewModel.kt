@@ -20,6 +20,7 @@ data class InboxEvidence(val draftId: String?, val assets: List<EvidenceAsset> =
 class InboxViewModel(application: Application, private val saved: SavedStateHandle) : AndroidViewModel(application) {
     private val graph = application as ReceiptApplication
     val images get() = graph.images
+    val review = ReviewSession(graph.repository, saved, viewModelScope)
     private val _error = MutableStateFlow<String?>(null)
     val error = _error.asStateFlow()
     private val _progress = MutableStateFlow<Pair<Int, Int>?>(null)
@@ -48,7 +49,10 @@ class InboxViewModel(application: Application, private val saved: SavedStateHand
         }
     }
 
-    fun select(id: String?) { saved["selected"] = id }
+    fun select(id: String?) {
+        if (review.state.value.busy || review.state.value.base != null) return
+        saved["selected"] = id
+    }
     fun pickerLaunched() { saved["pickerTarget"] = selectedId.value }
     fun picked(uris: List<Uri>) {
         if (uris.isEmpty()) { _error.value = "已取消選取，草稿未變更。"; return }
@@ -58,7 +62,7 @@ class InboxViewModel(application: Application, private val saved: SavedStateHand
     fun showError(message: String) { _error.value = message }
 
     fun createDraft() {
-        if (_progress.value != null) return
+        if (_progress.value != null || review.state.value.busy || review.state.value.base != null) return
         viewModelScope.launch {
             try { select(graph.importer.createEmptyDraft()) } catch (error: Exception) {
                 if (error is CancellationException) throw error
@@ -69,6 +73,10 @@ class InboxViewModel(application: Application, private val saved: SavedStateHand
 
     private fun ingest(id: String, target: String?, uris: List<Uri>, source: EvidenceImportSource) {
         if (id in accepted) return
+        if (review.state.value.base != null || review.state.value.busy) {
+            _error.value = "請先離開人工核對，再重新分享或選取圖片。"
+            return
+        }
         if (_progress.value != null) {
             _error.value = "已有圖片正在匯入，請完成後重新分享或選取。"
             return

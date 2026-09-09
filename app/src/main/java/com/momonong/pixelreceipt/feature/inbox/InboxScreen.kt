@@ -23,6 +23,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.momonong.pixelreceipt.domain.model.EvidenceAsset
 import com.momonong.pixelreceipt.domain.model.ReceiptDraft
+import com.momonong.pixelreceipt.domain.model.ReceiptStage
+import com.momonong.pixelreceipt.domain.usecase.inputText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -36,6 +38,7 @@ fun InboxScreen(viewModel: InboxViewModel) {
     val progress by viewModel.progress.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
     val latest by viewModel.latestImport.collectAsStateWithLifecycle()
+    val review by viewModel.review.state.collectAsStateWithLifecycle()
     val expanded = currentWindowAdaptiveInfoV2().windowSizeClass.minWidthDp >= 840
     var preview by rememberSaveable { mutableStateOf<String?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(20), viewModel::picked)
@@ -43,9 +46,11 @@ fun InboxScreen(viewModel: InboxViewModel) {
         viewModel.pickerLaunched()
         picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
     }
-    BackHandler(selected != null && !expanded && preview == null) { viewModel.select(null) }
+    BackHandler(selected != null && !expanded && preview == null && review.base == null) { viewModel.select(null) }
     Surface(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize().safeContentPadding().padding(16.dp)) {
+        if (review.base != null) {
+            ReviewScreen(viewModel.review, review, evidence.assets.takeIf { evidence.draftId == review.base?.id }.orEmpty(), viewModel.images, expanded, { preview = it }, error)
+        } else Column(Modifier.fillMaxSize().safeContentPadding().padding(16.dp)) {
             Text("PixelReceipt AI", style = MaterialTheme.typography.headlineMedium)
             Text("收據草稿 · 圖片只保存在此裝置", style = MaterialTheme.typography.bodyMedium)
             progress?.let { (done, total) ->
@@ -54,13 +59,15 @@ fun InboxScreen(viewModel: InboxViewModel) {
                 TextButton(onClick = viewModel::cancelImport) { Text("取消本批匯入") }
             }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 8.dp)) }
+            review.message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Row(Modifier.weight(1f).padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 if (expanded || selected == null) {
-                    DraftList(drafts, selected, progress == null, viewModel::select, viewModel::createDraft,
+                    DraftList(drafts, selected, progress == null && !review.busy, viewModel::select, viewModel::createDraft,
                         { viewModel.select(null); pick() }, if (expanded) null else latest?.report, Modifier.weight(1f))
                 }
                 if (expanded || selected != null) {
-                    EvidenceInbox(selected, evidence.assets.takeIf { evidence.draftId == selected }.orEmpty(), progress == null, { viewModel.select(null) }, pick,
+                    EvidenceInbox(drafts.find { it.id == selected }, evidence.assets.takeIf { evidence.draftId == selected }.orEmpty(), progress == null && !review.busy, { viewModel.select(null) }, pick,
+                        { selected?.let(viewModel.review::open) },
                         { preview = it }, latest?.report, Modifier.weight(if (expanded) 1.5f else 1f))
                 }
             }
@@ -108,11 +115,12 @@ private fun DraftList(
         if (drafts.isEmpty()) item { Text("尚無草稿。選取圖片，或從相簿分享圖片到 PixelReceipt AI。") }
         report?.let { item { Text("最近一批匯入結果\n$it") } }
         itemsIndexed(drafts, key = { _, draft -> draft.id }) { _, draft ->
-            Card(onClick = { select(draft.id) }, modifier = Modifier.fillMaxWidth(),
+            Card(onClick = { select(draft.id) }, enabled = enabled, modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = if (selected == draft.id) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer)) {
                 Column(Modifier.padding(16.dp)) {
                     Text("草稿 ${draft.id.take(8)}", style = MaterialTheme.typography.titleMedium)
-                    Text("${draft.evidenceAssetIds.size} 張圖片 · 尚未分析")
+                    Text("${draft.merchant.inputText().ifBlank { "商家未知" }} · ${draft.evidenceAssetIds.size} 張圖片 · ${stageText(draft.stage)}")
+                    Text("${draft.transactionDate.inputText().ifBlank { "日期未知" }} · 總額 ${draft.total.inputText().ifBlank { "未知" }}")
                 }
             }
         }
@@ -121,14 +129,20 @@ private fun DraftList(
 
 @Composable
 private fun EvidenceInbox(
-    id: String?, assets: List<EvidenceAsset>, enabled: Boolean, back: () -> Unit,
-    pick: () -> Unit, preview: (String) -> Unit, report: String?, modifier: Modifier,
+    draft: ReceiptDraft?, assets: List<EvidenceAsset>, enabled: Boolean, back: () -> Unit,
+    pick: () -> Unit, review: () -> Unit, preview: (String) -> Unit, report: String?, modifier: Modifier,
 ) {
+    val id = draft?.id
     LazyColumn(modifier.fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             TextButton(onClick = back) { Text("返回草稿列表") }
             Text(if (id == null) "選取草稿以查看圖片" else "草稿 ${id.take(8)}", style = MaterialTheme.typography.titleLarge)
-            if (id != null) Button(onClick = pick, enabled = enabled) { Text("補選圖片") }
+            if (draft != null) {
+                Text(stageText(draft.stage))
+                if (draft.stage == ReceiptStage.Captured) Button(onClick = pick, enabled = enabled) { Text("補選圖片") }
+                Button(onClick = review, enabled = enabled) { Text(if (draft.stage in setOf(ReceiptStage.Captured, ReceiptStage.NeedsReview)) "人工核對" else "查看交易明細") }
+                if (draft.stage == ReceiptStage.Captured) Text("進入核對後不再追加圖片；請先補齊所有證據。")
+            }
             if (id != null && assets.isEmpty()) Text("此草稿尚無圖片。可選取一張或多張圖片加入。")
         }
         itemsIndexed(assets, key = { _, asset -> asset.id }) { index, asset ->
