@@ -29,17 +29,21 @@ class RealOcrUiTest {
         val graph = ui.activity.application as ReceiptApplication
         val id = runBlocking { graph.importer.import(UUID.randomUUID().toString(), null,
             listOf(ImportInput { bytes.inputStream() }), EvidenceImportSource.Other) { _, _ -> }.draftId!! }
-        ui.waitUntil(10_000) { ui.onAllNodesWithText("草稿 ${id.take(8)}").fetchSemanticsNodes().isNotEmpty() }
-        ui.onNodeWithText("草稿 ${id.take(8)}").performClick()
-        ui.onNode(isToggleable()).performScrollTo().performClick()
+        ui.waitUntil(10_000) { ui.onAllNodesWithTag("transaction-$id").fetchSemanticsNodes().isNotEmpty() }
+        ui.onNodeWithTag("transaction-$id").performClick()
+        ui.onNodeWithTag("review-form").performScrollToNode(hasText("其他工具：本機收據辨識 ＋"))
+        ui.onNodeWithText("其他工具：本機收據辨識 ＋").performClick()
+        ui.onNodeWithTag("ocr-photo-0").performScrollTo().performClick()
         ui.onNodeWithText("辨識收據／重試").performScrollTo().performClick()
-        ui.waitUntil(30_000) { ui.onAllNodesWithTag("review-form").fetchSemanticsNodes().isNotEmpty() }
+        ui.onNodeWithTag("review-form").performScrollToIndex(0)
+        ui.waitUntil(30_000) { ui.onAllNodes(hasSetTextAction() and hasText("EXAMPLE STORE")).fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithTag("review-form").performScrollToNode(hasText("商家"))
         ui.onNode(hasSetTextAction() and hasText("EXAMPLE STORE")).assertExists()
-        ui.onNodeWithTag("review-form").performScrollToNode(hasText("品項 1"))
-        ui.onNode(hasSetTextAction() and hasText("MILK")).assertExists()
-        ui.onNode(hasSetTextAction() and hasText("2")).assertExists()
-        ui.onNode(hasSetTextAction() and hasText("收據行金額（該行合計）") and hasText("100")).assertExists()
+        ui.onNodeWithTag("review-form").performScrollToNode(hasText("修改品項 1"))
+        ui.onNodeWithText("修改品項 1").performClick()
+        ui.onNodeWithTag("line-name").performScrollTo().assertTextContains("MILK")
+        ui.onNodeWithTag("line-quantity").performScrollTo().assertTextContains("2")
+        ui.onNodeWithTag("line-amount").performScrollTo().assertTextContains("100")
         File(ui.activity.getExternalFilesDir(null), "receipt-ocr-review.png").outputStream().use {
             ui.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it)
         }

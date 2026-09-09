@@ -5,6 +5,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import com.momonong.pixelreceipt.domain.model.*
 import com.momonong.pixelreceipt.domain.usecase.hasReviewContent
 
@@ -26,7 +27,7 @@ fun ExtractionControls(draft: ReceiptDraft, assets: List<EvidenceAsset>, enabled
     Text("請勾選同一筆交易的收據頁面；不選菜單、價標或促銷牌。只有 TWD 收據適用本次解析。")
     choices.forEach { asset ->
         Row {
-            Checkbox(asset.id in ids, { checked -> selected = (if (checked) ids + asset.id else ids - asset.id).toList() }, enabled = enabled && !state.busy)
+            Checkbox(asset.id in ids, { checked -> selected = (if (checked) ids + asset.id else ids - asset.id).toList() }, enabled = enabled && !state.busy, modifier = Modifier.testTag("ocr-photo-${assets.indexOf(asset)}"))
             Text("收據圖片 ${assets.indexOf(asset) + 1} · ${asset.widthPx} × ${asset.heightPx}")
         }
     }

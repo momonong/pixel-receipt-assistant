@@ -96,6 +96,38 @@ class ReceiptPersistenceTest {
         assertEquals(DraftWriteResult.NotFound, repository.compareAndSetDraft(ReceiptDraft("missing", revision = 1), 0))
     }
 
+    @Test fun reviewPhotoAppendRetainsData() = runBlocking {
+        val imported = batch("flow-first", null, input(png()))
+        val captured = repository.observeDraft(imported.draftId!!).first()!!
+        val opened = (TransitionReceiptStage(repository)(captured, ReceiptStage.NeedsReview) as TransitionReceiptStageResult.Updated).draft
+        val form = ReviewInput("餐廳", total = "120", complete = true,
+            lines = listOf(ReviewLineInput("meal", "午餐", "2", "120", opened.evidenceAssetIds)))
+        val before = (ManualReceiptReview(repository).save(opened, form, 123) as ReviewSaveResult.Saved).draft
+        batch("flow-duplicate", before.id, input(png()))
+        assertEquals(before, repository.observeDraft(before.id).first())
+        batch("flow-append", before.id, input(png(0xff123456.toInt())))
+        val after = repository.observeDraft(before.id).first()!!
+        assertEquals(before.items, after.items)
+        assertEquals(before.evidenceLinks, after.evidenceLinks)
+        assertEquals(before.merchant, after.merchant)
+        assertEquals(before.transactionDate, after.transactionDate)
+        assertEquals(before.total, after.total)
+        assertEquals(before.extraction, after.extraction)
+        assertEquals(before.revision + 1, after.revision)
+        assertEquals(ReceiptStage.NeedsReview, after.stage)
+        assertEquals(ReceiptAssemblyStatus.Collecting, after.assemblyStatus)
+        assertEquals(2, after.evidenceAssetIds.size)
+        assertTrue(TransitionReceiptStage(repository)(after, ReceiptStage.Confirmed) is TransitionReceiptStageResult.ConfirmationBlocked)
+        db.close(); reopen()
+        assertEquals(after, repository.observeDraft(after.id).first())
+        assertTrue(repository.evidence(after.id).first().all { store.preview(it.contentSha256) != null })
+        val completed = (ManualReceiptReview(repository).save(after, ReviewInput.from(after).copy(complete = true), 124) as ReviewSaveResult.Saved).draft
+        val confirmed = (TransitionReceiptStage(repository)(completed, ReceiptStage.Confirmed) as TransitionReceiptStageResult.Updated).draft
+        val refused = batch("flow-confirmed", after.id, input(png(0xff222222.toInt())))
+        assertEquals("interrupted", refused.state)
+        assertEquals(confirmed, repository.observeDraft(after.id).first())
+    }
+
     @Test fun manualReviewFromImportedPhotoSurvivesDatabaseReopenAndConfirmedReplay() = runBlocking {
         val imported = batch("manual-photo", null, input(png()))
         val captured = repository.observeDraft(imported.draftId!!).first()!!

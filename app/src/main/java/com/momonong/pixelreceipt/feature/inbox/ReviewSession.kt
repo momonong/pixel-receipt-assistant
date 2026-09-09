@@ -17,6 +17,7 @@ data class ReviewState(
     val message: String? = null,
     val latest: ReceiptDraft? = null,
     val conflict: Boolean = false,
+    val operation: String? = null,
 ) {
     val dirty: Boolean get() = base?.let { input != ReviewInput.from(it) } ?: false
     val editable: Boolean get() = base?.stage == ReceiptStage.NeedsReview && !busy && !conflict
@@ -64,30 +65,46 @@ class ReviewSession(
 
     fun edit(input: ReviewInput) {
         if (!_state.value.editable) return
-        publish(_state.value.copy(input = input, message = null))
+        val previous = _state.value.input
+        // Changed contents must be checked again; never carry a stale completeness assertion.
+        val next = if (previous.complete && input.copy(complete = previous.complete) != previous)
+            input.copy(complete = false) else input
+        publish(_state.value.copy(input = next, message = null))
     }
 
     fun close() {
         if (!_state.value.busy) publish(ReviewState())
     }
 
-    fun save() {
+    fun save(afterSaved: () -> Unit = {}) {
         val state = _state.value
         if (!state.editable || !state.dirty) return
-        action {
+        action("正在保存草稿…") {
             when (val result = useCase.save(requireNotNull(state.base), state.input, System.currentTimeMillis())) {
-                is ReviewSaveResult.Saved -> publish(ReviewState(result.draft, ReviewInput.from(result.draft), busy = true, message = "修改已保存。"))
+                is ReviewSaveResult.Saved -> {
+                    publish(ReviewState(result.draft, ReviewInput.from(result.draft), message = "修改已保存。"))
+                    afterSaved()
+                }
                 is ReviewSaveResult.Rejected -> publish(_state.value.copy(message = result.reasons.joinToString("\n")))
                 ReviewSaveResult.Conflict -> conflict(requireNotNull(state.base).id)
             }
         }
     }
 
+    /** Refresh only an unchanged buffer after a user-requested photo append. */
+    fun refreshAfterImport() {
+        if (!_state.value.dirty && !_state.value.busy) reload()
+    }
+
+    internal fun attachmentBusy(busy: Boolean) {
+        _state.value = _state.value.copy(busy = busy, operation = if (busy) "正在保存照片…" else null)
+    }
+
     fun confirm() {
         val state = _state.value
         val base = state.base ?: return
         if (!state.editable || state.dirty) return
-        action {
+        action("正在確認記帳…") {
             when (val result = TransitionReceiptStage(repository)(base, ReceiptStage.Confirmed)) {
                 is TransitionReceiptStageResult.Updated -> publish(ReviewState(result.draft, ReviewInput.from(result.draft), busy = true, message = "已確認記帳，此交易唯讀。"))
                 is TransitionReceiptStageResult.ConfirmationBlocked -> publish(_state.value.copy(message = reconciliationText(result.reconciliation)))
@@ -117,22 +134,22 @@ class ReviewSession(
         publish(_state.value.copy(latest = repository.observeDraft(id).first()))
     }
 
-    private fun action(block: suspend () -> Unit) {
+    private fun action(label: String = "正在開啟消費…", block: suspend () -> Unit) {
         if (_state.value.busy) return
-        _state.value = _state.value.copy(busy = true, message = null)
+        _state.value = _state.value.copy(busy = true, message = null, operation = label)
         scope.launch {
             try { block() }
             catch (error: Exception) {
                 if (error is CancellationException) throw error
                 publish(_state.value.copy(message = "操作失敗，輸入已保留：${error.message ?: "請重試"}"))
-            } finally { _state.value = _state.value.copy(busy = false) }
+            } finally { _state.value = _state.value.copy(busy = false, operation = null) }
         }
     }
 }
 
 fun stageText(stage: ReceiptStage): String = when (stage) {
-    ReceiptStage.Captured -> "待核對"
-    ReceiptStage.NeedsReview -> "核對中"
+    ReceiptStage.Captured -> "草稿已保存 · 待填寫"
+    ReceiptStage.NeedsReview -> "草稿已保存 · 待完成"
     ReceiptStage.Confirmed -> "已確認記帳 · 唯讀"
     ReceiptStage.PendingAnalysis -> "等待分析"
     ReceiptStage.Analyzing -> "分析中"
@@ -153,13 +170,13 @@ fun reconciliationText(result: ReceiptReconciliationResult): String = when (resu
         is ReconciliationGap.LineAmount -> "品項 ${gap.lineItemId}：收據行金額未知或有衝突。"
         is ReconciliationGap.AdjustmentAmount -> "調整 ${gap.adjustmentId}：金額未知或有衝突。"
         is ReconciliationGap.AdjustmentScope -> "調整 ${gap.adjustmentId}：適用範圍未知或有衝突。"
-        is ReconciliationGap.PromotionApplication -> "促銷 ${gap.applicationId} 尚未確認；需促銷核對流程。"
+        is ReconciliationGap.PromotionApplication -> "有既存促銷尚未確認；請先完成相關促銷核對。"
     } }
     is ReceiptReconciliationResult.Invalid -> result.issues.joinToString("\n") { issue -> when (issue) {
         ReceiptValidationIssue.NoLineItems -> "至少需要一個品項。"
         is ReceiptValidationIssue.MixedCurrencies -> "不可混用幣別：${issue.currencyCodes}。"
         is ReceiptValidationIssue.MissingReference -> "${issue.ownerId} 引用不存在的 ${issue.missingId}。"
         is ReceiptValidationIssue.PortionExceedsPurchasedQuantity -> "品項 ${issue.lineItemId} 的調整適用數量 ${issue.referencedQuantity} 超過購買數量 ${issue.purchasedQuantity}。"
-        else -> "既有促銷／分攤驗證未通過，需相關核對流程：$issue"
+        else -> "既存促銷或分攤資料不一致，請保留草稿；相關資料修正後才能確認記帳。"
     } }
 }

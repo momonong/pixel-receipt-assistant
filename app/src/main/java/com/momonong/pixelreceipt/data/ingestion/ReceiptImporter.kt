@@ -61,8 +61,8 @@ class ReceiptImporter(
                 }
                 val initial = targetId?.let { dao.draft(it)?.let { row -> repository.codec.decode(row.payload) }
                     ?: throw ImportFailure("草稿已不存在，請重新開啟。") }
-                if (initial != null && initial.stage != ReceiptStage.Captured) {
-                    throw ImportFailure("此草稿已進入後續處理，不能在此追加圖片。")
+                if (initial != null && initial.stage !in setOf(ReceiptStage.Captured, ReceiptStage.NeedsReview)) {
+                    throw ImportFailure("此交易目前不可補照片；已確認交易保持唯讀。")
                 }
                 val known = initial?.evidenceAssetIds.orEmpty().mapNotNull { dao.evidence(it)?.hash }.toMutableSet()
                 val assets = mutableListOf<EvidenceAsset>()
@@ -121,7 +121,9 @@ class ReceiptImporter(
                         }
                         val ids = initial?.evidenceAssetIds.orEmpty() + assets.map { it.id }
                         val write = if (initial == null) repository.createDraft(ReceiptDraft(draftId!!, evidenceAssetIds = ids))
-                        else repository.compareAndSetDraft(initial.copy(evidenceAssetIds = ids, revision = initial.revision + 1), initial.revision)
+                        else repository.compareAndSetDraft(initial.copy(evidenceAssetIds = ids,
+                            assemblyStatus = ReceiptAssemblyStatus.Collecting,
+                            revision = initial.revision + 1), initial.revision)
                         check(write is DraftWriteResult.Written)
                     }
                     dao.updateOperation(finished)
