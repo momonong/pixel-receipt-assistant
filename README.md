@@ -6,6 +6,10 @@ PixelReceipt AI 是以 **Google Pixel 10 Pro Fold** 為主要實機的原生 And
 
 ## 核心原則
 
+2026-09-09 整合基線包含圖片匯入 `1a2f624`、人工核對 `d31e104` 與本機 OCR `40e6a82`。主專案重新執行 `testDebugUnitTest lintDebug assembleDebug --offline --no-daemon --max-workers=1` 通過；162 項測試結果由 Gradle build cache 還原，0 failures／errors／skipped，lint 無問題，debug APK 組裝成功。這次未重跑裝置測試；真實收據品質、完整 Pixel 操作及保留資料升級仍待驗收。UI 流程重整尚未實作。
+
+主專案此次產生的 `app-debug.apk` 僅為建置驗證產物，未比對手機現有簽章；不要直接用它覆蓋手機版本或以卸載解決簽章衝突。新任務應從最新 `main` 建立隔離功能分支，保留現有 worktree 與測試資料。
+
 - 每件商品各自成列；已知值保存來源，不確定的原價、折扣或適用範圍則明確保留 `Unknown`，不為了湊齊欄位而填零。
 - AI 只做分類、文字／欄位擷取、關聯候選與說明；金額、折扣分攤、拆帳和總額一致性全部由可重現、可測試的本機 deterministic pricing rules 判定。
 - 缺少證據時保留 `Unknown`，不把網路促銷候選或模型猜測偽裝成已發生的折扣。
