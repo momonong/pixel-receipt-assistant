@@ -2,11 +2,13 @@
 
 PixelReceipt AI 是以 **Google Pixel 10 Pro Fold** 為主要實機的原生 Android 智慧記帳 App。目標體驗是不必先開 App：使用者先用原廠相機拍照，再從 Android Sharesheet 分享進 App，或稍後透過系統 Photo Picker 補選多張圖片；App 將收據、價標與促銷牌整理成同一筆交易的 evidence inbox，最後交給使用者核對。
 
-目前已實作 **本機收據匯入、中文 OCR 自動擷取、人工核對與確認記帳**：Sharesheet 單圖／多圖、Photo Picker、草稿列表、追加圖片與原圖預覽、交易／品項／人工調整編輯、CAS 保存，以及通過既有本機 gate 後保存 Confirmed。可辨識照片自動帶入品項，也保留完整人工輸入。Gemini Nano、Firebase、拆帳及 Sheets adapters 尚未實作；裝置驗收狀態見下方，不能以 JVM 測試代替實機驗證。
+目前已實作 **本機收據匯入、中文 OCR 自動擷取、人工核對與確認記帳**：Sharesheet 單圖／多圖、Photo Picker、草稿列表、追加圖片與原圖預覽、交易／品項／人工調整編輯、CAS 保存，以及通過既有本機 gate 後保存 Confirmed。手動啟動「其他工具：本機收據辨識」後，可嘗試擷取照片並帶入品項；目前匯入後的主要流程仍是人工填寫。Gemini Nano、Firebase、拆帳及 Sheets adapters 尚未實作；裝置驗收狀態見下方，不能以 JVM 測試代替實機驗證。
+
+產品驗收尚未完成：使用者期待「照片先轉成品項與金額清單，再核對並選出自用／替別人購買的部分」。現有版尚未提供這個完整流程，也沒有逐品項用途與個人支出計算。這是後續需要對齊並實作的產品目標；代買、送禮及共同使用如何計入個人支出仍待確定，不以本次人工操作改版宣稱已完成。
 
 ## 核心原則
 
-2026-09-09 整合基線包含圖片匯入 `1a2f624`、人工核對 `d31e104` 與本機 OCR `40e6a82`。主專案重新執行 `testDebugUnitTest lintDebug assembleDebug --offline --no-daemon --max-workers=1` 通過；162 項測試結果由 Gradle build cache 還原，0 failures／errors／skipped，lint 無問題，debug APK 組裝成功。這次未重跑裝置測試；真實收據品質、完整 Pixel 操作及保留資料升級仍待驗收。UI 流程重整尚未實作。
+2026-09-09 整合基線包含圖片匯入 `1a2f624`、人工核對 `d31e104` 與本機 OCR `40e6a82`。主專案重新執行 `testDebugUnitTest lintDebug assembleDebug --offline --no-daemon --max-workers=1` 通過；162 項測試結果由 Gradle build cache 還原，0 failures／errors／skipped，lint 無問題，debug APK 組裝成功。這次未重跑裝置測試；真實收據品質、完整 Pixel 操作及保留資料升級仍待驗收。本功能分支已重整人工記帳流程；本次驗證與操作步驟見下方「人工核對與確認記帳」，與整合基線的歷史結果分開記錄。
 
 主專案此次產生的 `app-debug.apk` 僅為建置驗證產物，未比對手機現有簽章；不要直接用它覆蓋手機版本或以卸載解決簽章衝突。新任務應從最新 `main` 建立隔離功能分支，保留現有 worktree 與測試資料。
 
@@ -119,32 +121,30 @@ App 內部金額不使用 `Double`，而以幣別最小單位 `Long` 儲存；�
 ./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
 
-PowerShell 本次任務局部環境（工具位於 `.gradle/`，不提交、不更動全機環境）：
+PowerShell 本功能 worktree 的建置環境（只設定目前程序，不改全機環境；不提交工具或簽章）：
 
 ```powershell
-$env:JAVA_HOME = (Get-ChildItem .gradle/task-tools/jdk17 -Directory | Select-Object -First 1).FullName
-$env:ANDROID_HOME = "$PWD\.gradle\task-tools\android-sdk"
-$env:ANDROID_USER_HOME = "$PWD\.gradle\android-user"
-$env:GRADLE_USER_HOME = "$PWD\.gradle\task-gradle-home"
-.\gradlew.bat testDebugUnitTest lintDebug assembleDebug
+$env:JAVA_HOME = 'D:/projects/pixel-receipt-assistant/.gradle/task-tools/jdk17/jdk-17.0.20.1+1'
+$env:ANDROID_HOME = 'D:/projects/pixel-receipt-assistant/.gradle/worktrees/receipt-auto-extraction/.gradle/task-tools/android-sdk'
+$env:ANDROID_USER_HOME = "$PWD/.gradle/android-user"
+$env:GRADLE_USER_HOME = 'D:/projects/pixel-receipt-assistant/.gradle/worktrees/receipt-auto-extraction/.gradle/task-gradle-home'
+.\gradlew.bat testDebugUnitTest lintDebug assembleDebug --offline --no-daemon --max-workers=1
 ```
 
-其他 checkout 請設定自己的 JDK／SDK；不假設上述忽略目錄會隨 Git 同步。依賴均置於 version catalog；此次嚴格 lint 要求的 Kotlin Compose plugin 更新至 2.4.20。
+本次核對來源任務閒置後，使用現有 JDK／SDK 與完整 Gradle dependency cache；build outputs、Android user home 與測試 AVD 均獨立。其他 checkout 請指定自己的工具路徑。Windows sandbox 可能無法讀寫 Kotlin／Robolectric 快取；本次以核准後的相同 worktree 命令完成，沒有停用 lint 或測試。
 
-此原生 worktree 的工具與依賴從既有安裝複製至本地忽略目錄；沒有改寫原專案。Windows 沙箱可能阻擋 AGP 的 `debug.keystore.lock` 檔案正規化；本次需在核准後以相同 worktree、相同局部環境執行 gate，沒有改到其他工作目錄執行。debug keystore 也只放在忽略目錄，不提交。
-
-本 worktree 產物使用局部新建的 debug key，**與上游 APK 簽章不同，不能直接覆蓋安裝上游版本**。自動核准審查未允許複製既有私密金鑰，因此未複製。保留資料升級驗收應於後續獲授權整合後，在原有簽章環境重新建置；不要為了安裝此 APK 卸載已有資料的 App。
+本 worktree 使用人工核對來源的 debug key 本地副本（忽略檔案、不提交）。產出 APK 的憑證 SHA-256 `6fa1a1e710134668a0443876160ee821b3fd044705ef319bbcfb88ee993f4db2` 已與人工核對來源 APK 比對相同。2026-09-09 亦已讀取 Pixel 10 Pro Fold 當時安裝的 APK，比對簽章一致後以 `adb install -r` 成功更新；手機安裝後的 APK SHA-256 與交付檔一致，啟動回報成功。未卸載或清除資料，application ID 未變更；既有收據與草稿內容的完整性仍需使用者實際確認。後續更新仍須核對當時安裝簽章。
 
 輸出 APK：`app/build/outputs/apk/debug/app-debug.apk`
 
-目前 quality gate 包含嚴格 lint（warnings as errors）、domain／ViewModel JVM tests 和 APK 組裝。尚未連接實體 Pixel，因此外螢幕、展開、旋轉、分割視窗與 tabletop 相機行為仍需在對應功能完成後做 device test。
+目前 quality gate 包含嚴格 lint（warnings as errors）、domain／ViewModel JVM tests 和 APK 組裝。實體 Pixel 已完成上述更新與啟動檢查；外螢幕、展開、旋轉、分割視窗與 tabletop 相機行為仍需在對應功能完成後做 device test。
 
 ## 本機收據匯入使用方式
 
-1. 從相簿選一張或多張圖片，透過分享選單選擇 PixelReceipt AI；每次外部分享預設建立**新草稿**。
-2. 或在 App 點「選取圖片建立草稿」。也能先建立空白草稿，再按「補選圖片」。取消 Photo Picker 不修改草稿。
-3. 開啟草稿查看多圖 inbox，點圖片列預覽原圖。Compact／Medium 使用列表與明細單 pane，Expanded（840dp 起）同時呈現列表與明細。
-4. 已成功匯入的圖片完全使用本機副本；重新啟動、原始 URI 失效或來源圖片刪除不影響副本。App 資料清除／解除安裝會刪除本機資料，目前沒有備份或匯出功能。
+1. 首頁按「新增消費・選照片」，或在相簿／相機檢視明細時分享至 PixelReceipt AI。照片保存後**直接進入同一筆消費的填寫畫面**，無須再次建立交易。
+2. 沒有照片可按「沒有照片，直接填寫」。正在填寫的交易可以「補照片」；有未保存內容時先選「保存並選照片」。Picker 取消不變更附件；新增照片後須再次核對完整性，重複照片不會重設已核對狀態。
+3. 照片屬於整筆消費的附件。Compact／Medium 可在表單上方對照、收起或放大，鍵盤開啟時收起照片區；Expanded（840dp 起）左側對照照片、右側填寫。放大視窗支援雙指縮放、拖曳，返回後保留品項與捲動位置。
+4. 每次外部分享代表新消費；若已有交易正在編輯，先保存目前草稿再開新消費，或取消這批分享。完成匯入的照片使用本機副本；原始 URI 失效不影響它。App 資料清除／解除安裝會刪除本機資料，目前沒有備份或匯出功能。
 
 每批最多 20 張、每張 20 MiB、整批讀取 100 MiB；每張最多 5,000 萬像素、單邊 20,000 像素，本機圖片總量上限 1 GiB。目前支援 JPEG／PNG／WebP；HEIC、GIF、AVIF 等會顯示格式不支援，需先轉換。原圖不旋轉、不壓縮、不覆寫；預覽才進行降採樣及 EXIF 方向處理。
 
@@ -152,13 +152,13 @@ $env:GRADLE_USER_HOME = "$PWD\.gradle\task-gradle-home"
 
 匯入至少一張成功才會建立新草稿；使用者明確建立的空白草稿除外。取消匯入會撤回本批未提交內容，既有草稿保留。程序中斷不自動重新讀取外部 URI：下次啟動會標示中斷、清理暫存／未引用檔案，再由使用者重選。畫面旋轉使用 ViewModel 保持同一操作；Activity／程序狀態復原使用 operation ID 與 Room 匯入紀錄拒絕重播。匯入中收到另一個分享會顯示忙碌訊息，須完成後重新分享。
 
-目前匯入工作只在前景 UI 流程啟動，沒有 WorkManager 或自動背景重試。後續已進入分析或記帳狀態的草稿不能透過此匯入入口追加圖片，避免更動已確認 evidence。
+目前匯入工作只在前景 UI 流程啟動，沒有 WorkManager 或自動背景重試。只有 Captured／NeedsReview 可追加照片，分析中與已確認交易拒絕追加；保存採原有 CAS，不覆蓋其他 writer 的更新。
 
 ## 收據匯入驗證與手動驗收
 
 2026-09-07 匯入基線 gate 通過：113 tests（新增 16）、0 failures／errors／skipped，lint 無問題，debug APK 已產生。主機驗證與限制詳見 [架構文件](docs/ARCHITECTURE.md#收據匯入驗證)。`testDebugUnitTest` 包含 Robolectric 的 SQLite／Room、原生圖片解碼、schema v1 開啟與保留資料、CAS、錯誤與中斷恢復測試。這是第一版持久化 schema，之前沒有 Room DB；因此沒有虛構的 v0→v1 migration。之後 schema／payload 變更必須附 migration，禁止 destructive fallback。
 
-裝置手動驗收（目前尚未連接裝置）：
+裝置手動驗收（以下完整實機案例仍待完成，更新與啟動成功不代表全部通過）：
 
 1. 各做一次 Sharesheet 單圖、多圖與 Photo Picker 單圖、多圖；確認建立新草稿且每張可預覽。
 2. 開啟既有草稿補入一張新圖及一張相同圖；確認新增一張、跳過一張，原有圖片與 revision 保留。
@@ -170,32 +170,30 @@ $env:GRADLE_USER_HOME = "$PWD\.gradle\task-gradle-home"
 
 ## 人工核對與確認記帳
 
-1. 開啟草稿，先補齊圖片，再按「人工核對」。`Captured → NeedsReview` 是合法人工入口，不執行或假造 AI 分析。進入核對後沿用既有匯入限制，不再追加圖片。
-2. 對照照片輸入商家、交易日期（`YYYY-MM-DD`）、品項名稱、正整數數量、收據行金額及收據總額。Compact 使用可捲動表單與圖片預覽，Expanded 同時顯示證據及表單。
-3. 金額輸入幣別最小單位整數（TWD 為元）；行金額是該行合計，**不再乘以數量**。不接受負數、小數、千分位、科學記號或溢位。空白保持 Unknown；日期未知依既有 gate 不單獨阻擋確認，不會補成今天。
-4. 可新增／刪除品項，以及收據**另列**的人工調整。調整金額非負，由「加上／扣除」決定方向，範圍選整筆或明確指定品項及適用數量（單項或多項）；未知範圍可保存但阻擋確認。已含在收據行金額中的折扣不要再加一筆扣除。
-5. 各區可追加指定核對圖片，保存使用者 provenance 與 Confirmed evidence links；既有關聯保留。未修改的 Fact／provenance、原價、促銷及分攤資料原樣保留，未知原價不以實付額或零代填。沒有另列調整不等於已知零折扣。刪除仍被調整／促銷／分攤引用的品項會拒絕保存並指出引用。
-6. 勾選「收據完整」並保存修改。表單顯示解析錯誤、必要 Fact 缺漏、缺少品項、不合法 scope／幣別／既有促銷分攤等阻擋原因。完整 gate 沿用 `ReceiptReconciler`／`ReceiptValidator`／`TransitionReceiptStage`。
-7. 「完全平衡」差額為 0；「容差內」允許差額 ±1 最小單位。畫面與確認對話框均顯示實際差額，不調整資料湊平。保存後且 gate 通過才可確認；Confirmed 保存在同一交易，列表及明細顯示唯讀，不建立另一筆交易，也不提供重開／修改。
+畫面統一以「消費」表示一筆交易；「照片」是附件，「草稿」是尚未確認的保存狀態。收據、發票與餐廳明細都可以作為照片附件，不要求使用者理解內部資料模型。
 
-未保存輸入存於 ViewModel 與 SavedStateHandle 的編輯緩衝，包含非法的半成品文字與原始 CAS revision；Room 仍是已保存交易的唯一來源。返回時可繼續編輯或明確放棄。Activity saved-state 復原可回到緩衝；**force-stop、移除最近任務或清除資料不保證復原未保存輸入，執行前請先保存**。一次限 100 品項、50 調整，各欄位最多輸入 500 字元。
+1. **消費資料**：手動填商家，日期可稍後補。日期空白保持未知，不自動填今天。照片匯入不表示欄位已被辨識；人工流程不會自動啟動 OCR。
+2. **消費品項**：按「新增品項」，填品名、正整數數量與**行合計**。例如 2 份餐點這一列共 120 元，數量填 2、行合計填 120；不再乘以 2，不推算未記錄的單價。完成此品項回清單，可再次展開修改或刪除。照片不必逐列重選；需要精確佐證時才展開「此品項的照片關聯與來源」。切換預覽照片不會建立或確認任何 link。
+3. **金額核對**：填整筆交易總額。只有明細另外列出的折扣／費用才展開新增，明確選「整筆消費」或「指定品項」及適用數量；不知道適用範圍可以留待補填。已含在品項行合計的折扣不要再扣一次。空白保持 Unknown，0 是明確已知的零。
+4. **保存草稿**：底部固定顯示未保存、保存中、保存未完成、草稿已保存或可確認記帳。草稿允許資料缺漏、總額不平；非法數字／日期要先修正才可保存。返回有「保存並離開」「繼續填寫」「放棄本次修改並離開」。保存失敗或衝突保留輸入，不繼續離開或開啟 Picker。
+5. **確認記帳**：確認全部品項與另列加減項已填完整，保存後才可確認。完全平衡為差額 0；容差內為 ±1 最小單位，畫面與確認對話框會列明實際差額，不改數字湊平。確認完成後仍是同一筆消費，顯示唯讀與「完成，返回消費紀錄」。
 
-保存／確認遇 CAS 衝突時保留原輸入，顯示最新版摘要，禁止自動覆蓋；可保留畫面比對，或經對話框明確放棄輸入並重新載入，再重新核對。遇暫時性寫入失敗保留輸入供重試。人工核對中收到分享時會提示先離開，再重新分享。
+修改已勾選完整的內容、新增／刪除品項或補入新照片後，要重新勾選完整性。這只是避免沿用過期勾選，沒有放寬 `ReceiptReconciler`／`ReceiptValidator`／`TransitionReceiptStage` 的既有 gate。日期 Unknown 不單獨阻擋確認；缺商家、品名、數量、行合計、總額或加減項適用範圍等仍會阻擋。
 
-人工核對基線（format 2）的交易日期新增為 `Fact<String>`；本辨識版本寫入 format 3（見下方）。舊 draft payload format 1 的缺省日期遷移為 `Unknown(NotObserved)`；讀取不修改 DB 或 revision，下次 CAS 寫入 format 2。SQL schema 仍為 v1，沒有新增 SQL 欄位，亦沒有 destructive fallback。更新後不應降回僅理解 payload v1 的 APK；舊 decoder 會拒絕 v2，不能將它當成可安全降版。
+所有金額以幣別最小單位的非負整數輸入（TWD 為元）；不接受小數、負號、千分位、科學記號或溢位。未改動的 Fact／provenance、原價、促銷、分攤與 evidence links 保留，未知原價不拿實付額代填。刪除有折扣／促銷／分攤引用的品項會拒絕保存並指出相關位置。
 
-2026-09-08 人工核對完整 gate：**136 tests（新增 23）、0 failures／errors／skipped，lint No issues found，debug build 成功**。執行 `testDebugUnitTest lintDebug assembleDebug --offline --no-daemon --max-workers=1`，未停用任何檢查；最終耗時 1 分 7 秒。主機證據、涵蓋範圍和限制見 [人工核對驗證](docs/ARCHITECTURE.md#人工核對驗證)。
+編輯緩衝在 ViewModel／SavedStateHandle，包含非法半成品字串。一般返回有明確保存選擇；Activity saved-state 重建可恢復。**force-stop、移除最近任務及清除資料不保證恢復未保存內容，請先保存草稿。** Room 仍是已保存資料唯一來源。一次最多 100 品項、50 調整，每欄 500 字元。確認後不可重開或修改。
 
-人工核對裝置手動驗收（本次 `adb devices -l` 無裝置，下列 UI 操作均未驗證）：
+可重現的人工驗收：
 
-1. 匯入兩張照片，進核對後切換／放大預覽；輸入商家、合法日期、品項數量 2／行金額 100／總額 100，指定圖片依據、勾選完整，保存後重開並確認。
-2. 查看 Confirmed 列表及明細；force-stop 後重啟，確認資料／日期／品項／調整／圖片仍在且唯讀。不得以卸載重裝代替保留資料升級。
-3. 編輯 `12.` 或不合法日期後返回，驗證放棄提示；選繼續編輯，旋轉／重建 Activity，原始文字仍在，沒有被當成已保存值。
-4. 分別留空必要欄位、數量填 0、小數／超長金額、空品項、未勾完整，驗證具體原因。未知原價與未知日期不得被填零或推測。
-5. 行合計 100／總額 99，確認顯示「容差內、差額 1」；總額 98 顯示差額 2 且不能確認。另測差額 -1 與完全平衡。
-6. 行合計 100，另列扣除 10、加上 5，總額 95；分別指定整筆、單項及多品項 scope，驗證只加減一次。適用數量超過購買數量時不能確認。
-7. 用除錯器／測試 writer 更新同筆 revision，原畫面保存／確認均應顯示衝突並保留輸入；檢查最新版後放棄並重載，若最新版已 Confirmed，立即唯讀。
-8. Compact、Expanded、旋轉、分割視窗、大字級及實體 Fold 折疊切換，檢查表單、軟鍵盤、長列表、返回提示與確認對話框。這些裝置驗收不由主機測試代替。
+1. 在相簿分享一張明細，以及首頁選兩張照片各做一次；應各開啟一筆消費，照片數量清楚，直接看到填寫步驟。
+2. 建立「午餐」：三個品項分別填數量／行合計 2／100、1／70、1／30。修改第一項行合計為 120，刪除第二項，保留兩項合計 150；照片附件不被刪除。
+3. 交易總額先填 200，確認看到差額 -50 和修正提示。保存離開後再開啟，兩品項與數量 2、1 保留；日期沒填仍未知。總額改 150，重新勾選完整並保存，應顯示完全平衡。
+4. 另做一筆行合計 100、總額 99：應顯示容差內、差額 +1；確認對話框仍列出差額。完成後唯讀，原金額仍為 100／99。
+5. 未保存時返回：分別試「繼續填寫」「保存並離開」；再試非法總額 `12.`，保存應失敗且留在原交易。填寫中補照片需先保存；新增照片後保留品項並取消完整性勾選。編輯中分享另一張照片不得混入原交易。
+6. 在 Compact、Expanded、鍵盤展開及大字級下重做新增／修改／保存／返回；照片放大返回後應保留原品項位置。實體 Fold 的折疊切換、系統相機／相簿分享與閱讀負擔仍需本人驗收。
+
+本次 169 項主機測試、lint、debug build，以及 8 項 Android 案例與 200% 字級／Expanded 回歸均通過。程式與 UI 證據、原流程診斷見 [人工核對驗證](docs/ARCHITECTURE.md#人工核對驗證)。不以測試通過宣稱「直覺」已獲使用者確認。
 
 ## Roadmap
 
@@ -248,7 +246,7 @@ $env:GRADLE_USER_HOME = "$PWD\.gradle\task-gradle-home"
 
 ## 收據照片自動擷取與人工核對
 
-從圖片草稿勾選**同一交易的收據圖片**，按「辨識收據／重試」。本機逐頁辨識完成後，自動建立品項並進入既有人工核對畫面；保存修正、勾選完整，再通過既有 gate 才能確認記帳。完整人工輸入入口保留。
+在消費填寫畫面展開「其他工具：本機收據辨識」，勾選**同一交易的收據圖片**，按「辨識收據／重試」。有未保存內容時須先保存。本機逐頁辨識完成後，自動建立品項並進入既有人工核對畫面；保存修正、勾選完整，再通過既有 gate 才能確認記帳。完整人工輸入入口保留。
 
 - 真實路徑是隨 APK 打包的 `com.google.mlkit:text-recognition-chinese:16.0.1`，配合 `receipt-layout-1` 本機解析器。無須下載 Nano，不使用雲端。Nano 本版本未接入，不能將 OCR 可用視為 Nano 可用。
 - 本次解析限 **TWD**。優先處理明確的「品名／數量／單價／金額」欄位或「品名 數量 × 單價 行合計」行式；可解析西元／民國日期、交易總額與另列折扣／費用。收據版面沒有明確欄位時仍可產生品名候選，但數量或行金額保持未知。單價不乘成行合計，也不代填未知數量 1。

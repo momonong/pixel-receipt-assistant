@@ -126,13 +126,13 @@ NeedsReview → Confirmed → ExportPending → Exported
 
 狀態機只新增 `Captured → NeedsReview` 邊：讓已保存圖片直接交給使用者核對，無須虛構 `PendingAnalysis`／`Analyzing` 或 extraction provenance。進入時仍經 `TransitionReceiptStage` 和 repository CAS，不改寫 merchant／其他 Fact。`NeedsReview → Confirmed` 的既有容差和必要資料要求不變；新日期欄位 Unknown 不單獨阻擋既有 gate。
 
-`InboxViewModel` 持有 `ReviewSession`，以 StateFlow 提供原始 snapshot、編輯輸入、busy／dirty／conflict／錯誤狀態。`ReviewInput` 的文字、明確 scope portions 與原始 revision 經 SavedStateHandle 保存，畫面重建不需要把半成品文字寫進 Room。返回需選繼續編輯或放棄；force-stop 等沒有 saved-state 復原保證的操作，UI 提醒先保存。編輯限制為 100 品項／50 調整及每欄 500 字元。busy 時抑制重複操作與返回，Confirmed 和其他非 NeedsReview 狀態唯讀。
+`InboxViewModel` 持有 `ReviewSession`，以 StateFlow 提供原始 snapshot、編輯輸入、busy／dirty／conflict／錯誤狀態。`ReviewInput` 的文字、明確 scope portions 與原始 revision 經 SavedStateHandle 保存，畫面重建不需要把半成品文字寫進 Room。返回可選保存並離開、繼續填寫或明確放棄；保存成功後才執行離開／選照片。force-stop 等沒有 saved-state 復原保證的操作，UI 提醒先保存。編輯限制為 100 品項／50 調整及每欄 500 字元。busy 時抑制重複操作與返回，Confirmed 和其他非 NeedsReview 狀態唯讀。
 
 `ManualReceiptReview` 在 domain 解析非負 Long 金額、正 Int 數量和嚴格 ISO calendar date，輸入不經浮點數。空白保留／轉為 Unknown；未修改的 Fact（包含 Conflicting、NotApplicable、原價與來源）原樣保留。修改值保存 `UserConfirmed` timestamp 及使用者選定的 evidence references；額外指定圖片建立 Confirmed EvidenceLink，不移除原有關聯。新調整為 Other 類型，支援 Add／Subtract 和 Order／Line／LineSet，未做促銷推論、價格查詢或自動分攤。刪除品項／調整只移除其 evidence link，若仍被其他 domain entity 引用則拒絕保存，不能靜默破壞 lineage。
 
 保存可保留尚未齊全／不平衡的草稿，解析錯誤不可保存。確認只作用於已保存 snapshot，由原 `TransitionReceiptStage` 調用 reconciler／validator，再 CAS 寫入同筆交易的 Confirmed 與下一 revision。重複確認不產生新交易。UI 區分 Balanced、WithinTolerance、Unbalanced，顯示 `computed − receipt` 的有號差額；範圍未知、適用數量超限、必要 Fact 不全、混合幣別及既有促銷分攤問題都能阻擋確認。
 
-CAS 衝突保留本地 snapshot 與輸入，讀取最新版供比較；明確放棄後才重新載入，從不自動 rebase／覆寫。寫入錯誤保留輸入並允許重試。保存後 Room Flow 更新列表；再次開啟從 repository 讀取。核對時收到外部分享會提示先離開再重新分享，避免隱性切換正在編輯的交易。
+CAS 衝突保留本地 snapshot 與輸入，讀取最新版供比較；明確放棄後才重新載入，從不自動 rebase／覆寫。寫入錯誤保留輸入並允許重試。保存後 Room Flow 更新列表；再次開啟從 repository 讀取。核對時收到外部分享會先保留待處理 URI，提示保存目前交易後新增另一筆消費，或取消這批分享；不隱性切換或混入附件。待處理 URI 不是持久化資料，程序中斷後可能需重新分享。
 
 ## Room 與檔案一致性
 
@@ -150,7 +150,7 @@ CAS 衝突保留本地 snapshot 與輸入，讀取最新版供比較；明確放
 
 草稿 evidence membership 與關聯表在同一 Room transaction 更新。金額不經過浮點數，既有帳務語意未更動。Gson 欄位名稱是持久化格式的一部分，ProGuard 已保留 domain model 欄位；未來欄位／enum／tag 變更必須提供 payload migration，不能直接改名。
 
-`createDraft` 僅接受 revision 0，重複 ID 回 Conflict；`compareAndSetDraft` 要求 next = expected + 1，使用 SQL revision 條件與 Room transaction 原子寫入 payload／關聯，缺少 evidence 會拒絕，不允許舊 revision 覆蓋新資料。匯入追加只允許 Captured 草稿，保留既有 Fact 與 stage；批次讀取期間如被其他寫入更新，整批回衝突並回滾新 metadata，不偷偷重套至較新版本。
+`createDraft` 僅接受 revision 0，重複 ID 回 Conflict；`compareAndSetDraft` 要求 next = expected + 1，使用 SQL revision 條件與 Room transaction 原子寫入 payload／關聯，缺少 evidence 會拒絕，不允許舊 revision 覆蓋新資料。匯入追加允許 Captured／NeedsReview 草稿，保留既有 Fact、links、extraction 與 stage；只有真正新增圖片才將 assemblyStatus 設回 Collecting，重複或取消不改。分析中、Confirmed 及後續狀態仍拒絕追加。批次讀取期間如被其他寫入更新，整批回衝突並回滾新 metadata，不偷偷重套至較新版本。
 
 原圖處理順序為：串流至 UUID `.part` → SHA-256／格式／尺寸／解碼驗證 → sync 原始檔 → rename 至 hash 路徑 → 單次 Room transaction 保存 assets、draft membership、revision 與完成報告。既存 hash 重新核對 bytes／digest 後共用，不覆寫。不同交易僅共用 immutable blob，各有自己的 evidence ID／metadata，絕不以 hash 合併交易。
 
@@ -210,6 +210,60 @@ Activity 使用自己的 UUID（不信任分享 extras 裡的 ID），保存於 
 首次並行 gate 的測試／APK 完成，但 lint 超過六分鐘仍在 `KotlinUFile.getAllCommentsInFile`／`BidirectionalTextDetector`，兩次 thread dump 保存在 `.gradle/manual-review-threads*.txt`，日誌為 `.gradle/manual-review-gate-lint-stall.log`。僅停止本任務該程序後，單一 worker 完整 gate 通過；尚未建立 lint 卡住原因的最小重現，不宣稱是專案或上游工具的確定缺陷。沒有修改 lint 規則或 warnings-as-errors。
 
 `adb devices -l` 本次無裝置；Compose 互動、Compact／Expanded／Fold、大字級／鍵盤、Sharesheet／Picker、OS URI 撤權及真正 force-stop 仍未驗證。README 有手動驗收步驟。APK 使用局部新 debug key，憑證 SHA-256 為 `6fa1a1e710134668a0443876160ee821b3fd044705ef319bbcfb88ee993f4db2`，與上游 APK 不同；既有 key 複製被自動核准審查拒絕，未執行。後續保留資料升級應待授權整合後於原簽章環境建置，不要卸載有資料的 App 來完成此驗收。
+
+### 消費流程重整（feat/receipt-flow-ux）
+
+來源核對：人工核對 worktree `C:/Users/morris/.codex/worktrees/dfa6/pixel-receipt-assistant` 已乾淨提交為 `d31e104`；OCR worktree 已乾淨提交為 `40e6a82`，相關任務均閒置。本分支從已包含兩者的 `fcd673ef718e9bea2ec3f651dee3c080b00d5c02` 建立，沒有降回只有匯入或 payload v2 的版本。SQL schema v1、draft payload format 3（讀取 1／2／3）維持原樣。
+
+本次工作目錄 `D:/projects/pixel-receipt-assistant/.gradle/worktrees/receipt-flow-ux` 是獨立 Git worktree，不能當作快取刪除。未改動其他工作目錄的程式碼，未合併 main、推送或發布。
+
+| 現有情境與診斷（程式 walkthrough；另參考來源任務既有畫面） | 本次具體改動 |
+| --- | --- |
+| 相簿／相機分享後只到圖片收件匣，還須理解「人工核對」才開始填寫 | 成功匯入直接開啟同一筆消費的三段表單；不自動辨識 |
+| 首頁以草稿 UUID 與圖片操作為中心，缺少新增消費動詞 | 首頁主要入口「新增消費・選照片」，另有無照片人工入口；列表用商家、總額與保存狀態辨識 |
+| 品項表單全展開且逐列顯示識別碼、來源引用，容易以為每列都要選圖 | 品項清單加單列展開；數量和行合計分開標示；精確照片關聯按需展開 |
+| Compact 照片在長捲動表單頂端，輸入數列後要反覆捲回 | 照片區位於表單捲動外，放大後回原位置；鍵盤時收起照片區，短視窗不展開內嵌預覽；Expanded 分左右 pane |
+| 核對後不能補照片，迫使使用者事先知道內部階段限制 | 保存後可向同筆 NeedsReview 追加；同一 Room transaction/CAS 保留欄位與來源並重設完整性 |
+| 保存和確認都在長頁底部；返回只可繼續或放棄 | 固定保存狀態與主要操作、保存並離開；失敗／衝突不執行後續動作 |
+| 完整性在品項之前、錯誤含 UUID／內部狀態 | 完整性移到金額核對最後；欄位解析錯誤就地提示，對帳以第幾個品項／名稱指出位置 |
+
+UI 照片上下文只保存目前預覽的 asset ID，不填入 `ReviewLineInput.evidenceIds`。不要求逐品項來源即可完成既有合法人工 gate；這是原 domain 允許的行為，沒有新增虛構 provenance。使用者明確展開並選擇來源，才沿用原 `ManualReceiptReview` 建立 Confirmed link；原 Candidate／Confirmed／Rejected 關聯均保留。
+
+`ReviewSession.save(afterSaved)` 只在 CAS 寫入成功後繼續離開或開 Picker；解析錯誤、I/O 失敗和衝突保留輸入。追加時 session busy 鎖住編輯，完成後只在 buffer 無修改時 reload；Picker target 固定綁定原交易。`edit` 發現已勾選完整的內容變更時撤回勾選，重新確認仍須使用者明確操作。確認規則、金額計算與資料格式沒有變動。
+
+2026-09-09 最終 `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest --offline --no-daemon --max-workers=1`：**BUILD SUCCESSFUL（1m 30s），169 項主機測試，0 failures／errors／skipped；lint No issues found，兩份 debug APK 建置完成**。相較整合基線新增 7 項主機案例，包含保存後續動作、保存失敗／衝突、完整性重查、dirty buffer 保護、照片上下文不建立 link、欄位回饋及 Room 補圖保留資料／Confirmed 拒寫。domain、codec、SQL schema、application ID 與建置設定均未更動。
+
+獨立 `receipt-flow-test`／`emulator-5582`，Android API 35 x86_64：**8 項 Android 測試通過（52.372s）**，包括既有 4 項真實 ML Kit pipeline、更新後的 OCR Compose 入口測試及新增 3 項人工流程測試。實際操作包含系統 Photo Picker 選兩張照片、先保存人工品項再追加第三張、取消 Picker 不改資料、ACTION_SEND 進入同一筆消費、照片放大返回、三品項新增／修改／刪除、未保存返回保護、Activity recreate、保存重開、差額 -50、完全平衡、+1 容差與 Confirmed 唯讀。另在 200% 系統字級（21.715s）及 900×760dp Expanded（19.825s）各完成一輪三品項人工操作，均通過。這是 8 個不同 Android 案例加 2 次不同視窗／字級回歸，不是 10 個不同案例。
+
+| 驗收範圍 | 本次證據與觀察 |
+| --- | --- |
+| 首頁／分享開始消費 | 原生 Picker 真實 UI 與 ACTION_SEND 接收流程通過；分享 Intent 由測試程式送出，尚未用 Pixel 原廠相機／相簿的分享選單驗收 |
+| 照片接續同筆交易 | 實際先選兩圖、輸入品項、保存後追加第三圖；資料庫仍同一 ID、同一品項，零虛構 link |
+| 三品項增修刪與數量／行合計 | 2／100、1／70、1／30；第一列改 120，刪除第二列；保存後兩列共 150、數量仍 2 與 1 |
+| 草稿／未保存保護 | 真正 Activity recreate 與保存離開再開啟通過；非法 `12.`、衝突不離開／不啟動後續行為由 Session 測試驗證 |
+| 金額缺漏與差額 | 欄位就地提示；200 對 150 顯示 -50、阻擋確認；Unknown 日期保留，0 不被當成空白 |
+| 完全平衡／容差／唯讀 | 150／150 顯示完全平衡；100／99 在表單和確認對話框顯示 +1 容差，確認後兩個原值未被改寫 |
+| 原資料保護 | Room 補圖、重開、Fact／provenance／links 保留與舊 payload fixtures 通過；後續實機保留資料更新已成功，尚未逐筆驗證手機既有收據與草稿內容 |
+| 視窗／鍵盤／字級 | Compact 約 411×914dp、Expanded 900×760dp、font scale 2.0；數字鍵盤展開時保存按鈕可見且可點。200% 字級需要較多捲動，不能同時看到整列所有說明 |
+| 程序重開／照片保留 | 模擬器 `am force-stop` 後重開，原三照片草稿與已確認紀錄仍在；開啟原草稿可再次顯示照片及 2／100 品項 |
+
+關鍵畫面均為本次實際 App 截圖、合成資料，未以設計稿替代：
+
+- [首頁](images/receipt-flow/home.png)：新增消費與無照片人工入口優先，既有紀錄顯示商家及保存狀態。
+- [Compact 照片與品項](images/receipt-flow/photos-compact.png)：三張附件、既有品項與固定保存狀態；長照片縮圖需放大才能讀細字。
+- [Expanded 照片並列](images/receipt-flow/photos-expanded.png)：重啟後的同筆草稿，左側照片、右側表單，沒有把選中的照片套用為品項佐證。
+- [200% 字級與數字鍵盤](images/receipt-flow/keyboard-large-font.png)：欄位可捲動，保存操作保持在鍵盤上方。
+- [容差內](images/receipt-flow/tolerance.png)、[確認完成唯讀](images/receipt-flow/confirmed.png)：差額與完成語意明確分開。
+
+完整本機證據：`.gradle/flow-gate.log`、`app/build/test-results/testDebugUnitTest/TEST-*.xml`、`app/build/reports/lint-results-debug.txt`、`.gradle/flow-ui-compact-final.log`、`.gradle/flow-ui-large-font.log`、`.gradle/flow-ui-expanded.log`。第一次新增 SQLite 案例出現 Windows 原生檔案開啟錯誤，縮短測試方法名稱後通過；未修改資料庫或測試 gate。分享 UI 測試曾因 ActivityScenario 追蹤的 Intent 被合法 onNewIntent 更新而在 teardown 失敗，測試在結束時恢復 launch Intent 後通過，產品仍按 Android 分享流程處理。仍有既有 Compose JUnit4 rule API 的 deprecation 編譯提示，沒有停用 lint。
+
+交付 APK `app/build/outputs/apk/debug/app-debug.apk`，SHA-256 `a5fa1742838c6d1666655eb7b46ecf775f9ebb512d45a22af096a97298b47481`。憑證與人工核對來源 APK 相同，SHA-256 `6fa1a1e710134668a0443876160ee821b3fd044705ef319bbcfb88ee993f4db2`。2026-09-09 實際讀取 Pixel 10 Pro Fold 原安裝 APK，簽章比對一致後執行 `adb install -r` 回報 Success；手機安裝後的 APK SHA-256 與上述交付檔完全相同。`firstInstallTime` 維持 2026-09-09 11:46:27，`lastUpdateTime` 更新為 21:06:12，`am start -W` 回報 Status: ok。未卸載、清除資料或更改 application ID；沒有讀取手機收據、照片或資料庫，因此不宣稱既有資料內容已完成驗證。
+
+仍需使用者實機確認：Pixel 10 Pro Fold 的實際折疊／展開／分割視窗、原廠相機及相簿分享、真實長明細的閱讀負擔、長時間多品項輸入是否順手，以及升級後既有收據與草稿內容。截圖檢查另修正了唯讀畫面沿用「照片可稍後補」等填寫提示的問題；完成後只呈現已保存結果與唯讀狀態。模擬器可操作與測試通過不等於使用者已確認直覺。人工可重現步驟集中在 README。
+
+使用者試用後指出產品目標仍有落差：期待匯入收據後先列出品項與金額，再核對並選出自用或替別人購買的部分。現行主流程仍是人工輸入，OCR 是選用工具，尚無逐品項用途或個人支出計算；不能把這輪流程改版當成完整產品驗收。後續需區分「辨識內容正確」與「品項是自用」，非自用品項仍須保留於完整收據以供對帳。代買、送禮、共同使用的帳務定義尚未定案，本次未改變核心確認規則或加入推定分攤。
+
+整合注意：保留現有 OCR `ExtractionSession`、payload format 3 與來源稽核資料。人工輸入不自動啟動辨識；OCR 工具藏在按需展開的區塊，成功後刷新同筆已保存表單，重新辨識仍須原本的取代確認。以後若有 background writer，仍必須遵守 revision／圖片 membership 檢查，不能直接套用 UI buffer。
 
 ## 多對多 matching
 
