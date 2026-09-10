@@ -243,7 +243,7 @@ UI 照片上下文只保存目前預覽的 asset ID，不填入 `ReviewLineInput
 | 草稿／未保存保護 | 真正 Activity recreate 與保存離開再開啟通過；非法 `12.`、衝突不離開／不啟動後續行為由 Session 測試驗證 |
 | 金額缺漏與差額 | 欄位就地提示；200 對 150 顯示 -50、阻擋確認；Unknown 日期保留，0 不被當成空白 |
 | 完全平衡／容差／唯讀 | 150／150 顯示完全平衡；100／99 在表單和確認對話框顯示 +1 容差，確認後兩個原值未被改寫 |
-| 原資料保護 | Room 補圖、重開、Fact／provenance／links 保留與舊 payload fixtures 通過；新 APK 未裝到實體手機，未驗證手機原資料升級 |
+| 原資料保護 | Room 補圖、重開、Fact／provenance／links 保留與舊 payload fixtures 通過；後續實機保留資料更新已成功，尚未逐筆驗證手機既有收據與草稿內容 |
 | 視窗／鍵盤／字級 | Compact 約 411×914dp、Expanded 900×760dp、font scale 2.0；數字鍵盤展開時保存按鈕可見且可點。200% 字級需要較多捲動，不能同時看到整列所有說明 |
 | 程序重開／照片保留 | 模擬器 `am force-stop` 後重開，原三照片草稿與已確認紀錄仍在；開啟原草稿可再次顯示照片及 2／100 品項 |
 
@@ -257,9 +257,11 @@ UI 照片上下文只保存目前預覽的 asset ID，不填入 `ReviewLineInput
 
 完整本機證據：`.gradle/flow-gate.log`、`app/build/test-results/testDebugUnitTest/TEST-*.xml`、`app/build/reports/lint-results-debug.txt`、`.gradle/flow-ui-compact-final.log`、`.gradle/flow-ui-large-font.log`、`.gradle/flow-ui-expanded.log`。第一次新增 SQLite 案例出現 Windows 原生檔案開啟錯誤，縮短測試方法名稱後通過；未修改資料庫或測試 gate。分享 UI 測試曾因 ActivityScenario 追蹤的 Intent 被合法 onNewIntent 更新而在 teardown 失敗，測試在結束時恢復 launch Intent 後通過，產品仍按 Android 分享流程處理。仍有既有 Compose JUnit4 rule API 的 deprecation 編譯提示，沒有停用 lint。
 
-交付 APK `app/build/outputs/apk/debug/app-debug.apk`，SHA-256 `a5fa1742838c6d1666655eb7b46ecf775f9ebb512d45a22af096a97298b47481`。憑證與人工核對來源 APK 相同，SHA-256 `6fa1a1e710134668a0443876160ee821b3fd044705ef319bbcfb88ee993f4db2`；實體手機現有安裝簽章尚未比對，未安裝、卸載或清除手機資料。
+交付 APK `app/build/outputs/apk/debug/app-debug.apk`，SHA-256 `a5fa1742838c6d1666655eb7b46ecf775f9ebb512d45a22af096a97298b47481`。憑證與人工核對來源 APK 相同，SHA-256 `6fa1a1e710134668a0443876160ee821b3fd044705ef319bbcfb88ee993f4db2`。2026-09-09 實際讀取 Pixel 10 Pro Fold 原安裝 APK，簽章比對一致後執行 `adb install -r` 回報 Success；手機安裝後的 APK SHA-256 與上述交付檔完全相同。`firstInstallTime` 維持 2026-09-09 11:46:27，`lastUpdateTime` 更新為 21:06:12，`am start -W` 回報 Status: ok。未卸載、清除資料或更改 application ID；沒有讀取手機收據、照片或資料庫，因此不宣稱既有資料內容已完成驗證。
 
-仍需使用者實機確認：Pixel 10 Pro Fold 的實際折疊／展開／分割視窗、原廠相機及相簿分享、真實長明細的閱讀負擔、長時間多品項輸入是否順手，以及手機保留資料升級。截圖檢查另修正了唯讀畫面沿用「照片可稍後補」等填寫提示的問題；完成後只呈現已保存結果與唯讀狀態。模擬器可操作與測試通過不等於使用者已確認直覺。人工可重現步驟集中在 README。
+仍需使用者實機確認：Pixel 10 Pro Fold 的實際折疊／展開／分割視窗、原廠相機及相簿分享、真實長明細的閱讀負擔、長時間多品項輸入是否順手，以及升級後既有收據與草稿內容。截圖檢查另修正了唯讀畫面沿用「照片可稍後補」等填寫提示的問題；完成後只呈現已保存結果與唯讀狀態。模擬器可操作與測試通過不等於使用者已確認直覺。人工可重現步驟集中在 README。
+
+使用者試用後指出產品目標仍有落差：期待匯入收據後先列出品項與金額，再核對並選出自用或替別人購買的部分。現行主流程仍是人工輸入，OCR 是選用工具，尚無逐品項用途或個人支出計算；不能把這輪流程改版當成完整產品驗收。後續需區分「辨識內容正確」與「品項是自用」，非自用品項仍須保留於完整收據以供對帳。代買、送禮、共同使用的帳務定義尚未定案，本次未改變核心確認規則或加入推定分攤。
 
 整合注意：保留現有 OCR `ExtractionSession`、payload format 3 與來源稽核資料。人工輸入不自動啟動辨識；OCR 工具藏在按需展開的區塊，成功後刷新同筆已保存表單，重新辨識仍須原本的取代確認。以後若有 background writer，仍必須遵守 revision／圖片 membership 檢查，不能直接套用 UI buffer。
 

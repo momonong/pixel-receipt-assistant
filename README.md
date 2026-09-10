@@ -2,7 +2,9 @@
 
 PixelReceipt AI 是以 **Google Pixel 10 Pro Fold** 為主要實機的原生 Android 智慧記帳 App。目標體驗是不必先開 App：使用者先用原廠相機拍照，再從 Android Sharesheet 分享進 App，或稍後透過系統 Photo Picker 補選多張圖片；App 將收據、價標與促銷牌整理成同一筆交易的 evidence inbox，最後交給使用者核對。
 
-目前已實作 **本機收據匯入、中文 OCR 自動擷取、人工核對與確認記帳**：Sharesheet 單圖／多圖、Photo Picker、草稿列表、追加圖片與原圖預覽、交易／品項／人工調整編輯、CAS 保存，以及通過既有本機 gate 後保存 Confirmed。可辨識照片自動帶入品項，也保留完整人工輸入。Gemini Nano、Firebase、拆帳及 Sheets adapters 尚未實作；裝置驗收狀態見下方，不能以 JVM 測試代替實機驗證。
+目前已實作 **本機收據匯入、中文 OCR 自動擷取、人工核對與確認記帳**：Sharesheet 單圖／多圖、Photo Picker、草稿列表、追加圖片與原圖預覽、交易／品項／人工調整編輯、CAS 保存，以及通過既有本機 gate 後保存 Confirmed。手動啟動「其他工具：本機收據辨識」後，可嘗試擷取照片並帶入品項；目前匯入後的主要流程仍是人工填寫。Gemini Nano、Firebase、拆帳及 Sheets adapters 尚未實作；裝置驗收狀態見下方，不能以 JVM 測試代替實機驗證。
+
+產品驗收尚未完成：使用者期待「照片先轉成品項與金額清單，再核對並選出自用／替別人購買的部分」。現有版尚未提供這個完整流程，也沒有逐品項用途與個人支出計算。這是後續需要對齊並實作的產品目標；代買、送禮及共同使用如何計入個人支出仍待確定，不以本次人工操作改版宣稱已完成。
 
 ## 核心原則
 
@@ -131,11 +133,11 @@ $env:GRADLE_USER_HOME = 'D:/projects/pixel-receipt-assistant/.gradle/worktrees/r
 
 本次核對來源任務閒置後，使用現有 JDK／SDK 與完整 Gradle dependency cache；build outputs、Android user home 與測試 AVD 均獨立。其他 checkout 請指定自己的工具路徑。Windows sandbox 可能無法讀寫 Kotlin／Robolectric 快取；本次以核准後的相同 worktree 命令完成，沒有停用 lint 或測試。
 
-本 worktree 使用人工核對來源的 debug key 本地副本（忽略檔案、不提交）。產出 APK 的憑證 SHA-256 `6fa1a1e710134668a0443876160ee821b3fd044705ef319bbcfb88ee993f4db2` 已與人工核對來源 APK 比對相同。**實體手機現有安裝簽章尚未讀取；更新前仍須比對，不得卸載或清除資料來解決簽章衝突。** application ID 未變更。
+本 worktree 使用人工核對來源的 debug key 本地副本（忽略檔案、不提交）。產出 APK 的憑證 SHA-256 `6fa1a1e710134668a0443876160ee821b3fd044705ef319bbcfb88ee993f4db2` 已與人工核對來源 APK 比對相同。2026-09-09 亦已讀取 Pixel 10 Pro Fold 當時安裝的 APK，比對簽章一致後以 `adb install -r` 成功更新；手機安裝後的 APK SHA-256 與交付檔一致，啟動回報成功。未卸載或清除資料，application ID 未變更；既有收據與草稿內容的完整性仍需使用者實際確認。後續更新仍須核對當時安裝簽章。
 
 輸出 APK：`app/build/outputs/apk/debug/app-debug.apk`
 
-目前 quality gate 包含嚴格 lint（warnings as errors）、domain／ViewModel JVM tests 和 APK 組裝。尚未連接實體 Pixel，因此外螢幕、展開、旋轉、分割視窗與 tabletop 相機行為仍需在對應功能完成後做 device test。
+目前 quality gate 包含嚴格 lint（warnings as errors）、domain／ViewModel JVM tests 和 APK 組裝。實體 Pixel 已完成上述更新與啟動檢查；外螢幕、展開、旋轉、分割視窗與 tabletop 相機行為仍需在對應功能完成後做 device test。
 
 ## 本機收據匯入使用方式
 
@@ -156,7 +158,7 @@ $env:GRADLE_USER_HOME = 'D:/projects/pixel-receipt-assistant/.gradle/worktrees/r
 
 2026-09-07 匯入基線 gate 通過：113 tests（新增 16）、0 failures／errors／skipped，lint 無問題，debug APK 已產生。主機驗證與限制詳見 [架構文件](docs/ARCHITECTURE.md#收據匯入驗證)。`testDebugUnitTest` 包含 Robolectric 的 SQLite／Room、原生圖片解碼、schema v1 開啟與保留資料、CAS、錯誤與中斷恢復測試。這是第一版持久化 schema，之前沒有 Room DB；因此沒有虛構的 v0→v1 migration。之後 schema／payload 變更必須附 migration，禁止 destructive fallback。
 
-裝置手動驗收（目前尚未連接裝置）：
+裝置手動驗收（以下完整實機案例仍待完成，更新與啟動成功不代表全部通過）：
 
 1. 各做一次 Sharesheet 單圖、多圖與 Photo Picker 單圖、多圖；確認建立新草稿且每張可預覽。
 2. 開啟既有草稿補入一張新圖及一張相同圖；確認新增一張、跳過一張，原有圖片與 revision 保留。
