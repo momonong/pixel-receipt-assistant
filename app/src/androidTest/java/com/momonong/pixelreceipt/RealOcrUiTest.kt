@@ -31,6 +31,7 @@ class RealOcrUiTest {
             listOf(ImportInput { bytes.inputStream() }), EvidenceImportSource.Other) { _, _ -> }.draftId!! }
         ui.waitUntil(10_000) { ui.onAllNodesWithTag("transaction-$id").fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithTag("transaction-$id").performClick()
+        ui.onNodeWithTag("engine-ocr").performScrollTo().performClick()
         ui.onNodeWithTag("recognize-receipt").performScrollTo().performClick()
         ui.waitUntil(30_000) { ui.onAllNodesWithText("1. MILK").fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithTag("review-form").performScrollToIndex(0)

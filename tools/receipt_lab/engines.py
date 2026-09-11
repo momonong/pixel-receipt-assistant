@@ -80,10 +80,11 @@ def validate_candidate(value):
 
 
 class Engines:
-    def __init__(self, adb=None, serial="emulator-5584", model=None):
+    def __init__(self, adb=None, serial="emulator-5584", model=None, nano_serial=None):
         self.adb = str(adb) if adb else None
         require(re.fullmatch(r"emulator-[0-9]+", serial), "本機測試只允許專用模擬器，不會操作實體手機。")
         self.serial = serial
+        self.nano_serial = nano_serial
         self.model = model or os.environ.get("RECEIPT_LAB_GEMINI_MODEL", "gemini-3.8-flash")
         require(re.fullmatch(r"gemini-[a-zA-Z0-9.\-]{1,100}", self.model), "Gemini 模型名稱無效。")
         self.key = os.environ.get("GEMINI_API_KEY", "")
@@ -93,7 +94,17 @@ class Engines:
                           "description": "與 App 同一套 ML Kit＋收據解析；執行時檢查模擬器"},
                 "gemini": {"configured": bool(self.key), "model": self.model, "cloud": True,
                            "description": "Google Gemini；每次測試須明確同意這筆收據上雲"},
-                "nano": {"configured": False, "description": "尚未接入；不能以 ML Kit OCR 代表 Nano 品質"}}
+                "nano": {"configured": bool(self.adb and self.nano_serial), "cloud": False,
+                         "description": "使用 nano-image 或 nano-ocr；實際能力須由 Pixel 前景檢查"},
+                **{engine: {"configured": bool(self.adb and self.nano_serial), "device": self.nano_serial,
+                    "cloud": False, "description": "Pixel 前景 Nano；能力與品質需實際執行確認"}
+                   for engine in ("nano-image", "nano-ocr")}}
+
+    def run_nano(self, run, case, store):
+        from .nano import NanoDevice
+        return NanoDevice(self.adb, self.nano_serial).run(run["engine"],
+            [(digest, store.image_bytes(digest)) for digest in case["images"]], job=run["id"],
+            cancelled=lambda: store.get("run", run["id"])["status"] == "cancelled")
 
     def adb_call(self, args, timeout=30):
         require(self.adb and Path(self.adb).is_file(), "尚未設定 ADB；請先執行 Android 測試準備步驟。", 503)

@@ -19,6 +19,18 @@ fun ExtractionControls(draft: ReceiptDraft, assets: List<EvidenceAsset>, enabled
     val ids = if (single) setOf(choices.single().id) else selected.toSet().intersect(choices.map { it.id }.toSet())
     Text("先把收據整理成品項與金額，再核對及指定歸屬。")
     Text("照片只在此裝置辨識 · 適用 TWD 收據", style = MaterialTheme.typography.bodySmall)
+    val traditionalOcr by session.traditionalOcr.collectAsState()
+    Row {
+        RadioButton(!traditionalOcr, { session.chooseTraditionalOcr(false) }, enabled = enabled && !state.busy,
+            modifier = Modifier.testTag("engine-nano"))
+        Text("Gemini Nano · 讀取照片與文字")
+    }
+    Row {
+        RadioButton(traditionalOcr, { session.chooseTraditionalOcr(true) }, enabled = enabled && !state.busy,
+            modifier = Modifier.testTag("engine-ocr"))
+        Text("傳統文字辨識（OCR）")
+    }
+    if (!traditionalOcr) Text("Nano 需裝置支援並保持前景；辨識品質仍待實機驗證。無須 API key。", style = MaterialTheme.typography.bodySmall)
     state.message?.takeIf { state.draftId == null || state.draftId == draft.id }?.let { Text(it) }
     if (state.busy) {
         LinearProgressIndicator(Modifier.fillMaxWidth())

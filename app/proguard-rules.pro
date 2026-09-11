@@ -5,3 +5,5 @@
 -keep class com.momonong.pixelreceipt.domain.usecase.ReviewInput { *; }
 -keep class com.momonong.pixelreceipt.domain.usecase.ReviewLineInput { *; }
 -keep class com.momonong.pixelreceipt.domain.usecase.ReviewAdjustmentInput { *; }
+-keep class com.momonong.pixelreceipt.data.extraction.NanoReceiptOutput { *; }
+-keep class com.momonong.pixelreceipt.data.extraction.NanoReceiptRow { *; }

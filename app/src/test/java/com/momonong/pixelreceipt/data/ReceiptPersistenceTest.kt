@@ -60,6 +60,26 @@ class ReceiptPersistenceTest {
     private suspend fun batch(id: String, target: String? = null, vararg inputs: ImportInput) =
         importer.import(id, target, inputs.toList(), EvidenceImportSource.PhotoPicker)
 
+    @Test fun nanoObservationAuditAndAssistantDraftSurviveActualRoomReopen() = runBlocking {
+        val assistant = CreateAssistantReviewDraft(repository).create()
+        val id = batch("nano-fixture", null, input(png())).draftId!!
+        val base = repository.observeDraft(id).first()!!
+        val assets = repository.evidence(id).first()
+        val value = com.momonong.pixelreceipt.data.extraction.NanoReceiptOutput("TWD", "合成店", null, "0",
+            listOf(com.momonong.pixelreceipt.data.extraction.NanoReceiptRow("product", "贈品", null, "0", "0", "unknown")))
+        val observed = com.momonong.pixelreceipt.data.extraction.NanoReceiptValidation.recognition(value, 8, 12)
+        val draft = MapReceiptRecognition().map(base, assets, observed,
+            ExtractionProvenance("fixture", "nano-host-fixture", "no-model-executed", "1", ExtractionRuntime.OnDevice, 1))
+            .copy(revision = base.revision + 1)
+        assertEquals(DraftWriteResult.Written(1), repository.compareAndSetDraft(draft, 0))
+        db.close(); reopen()
+        assertEquals(draft, repository.observeDraft(id).first())
+        assertEquals(assistant, repository.observeDraft(assistant.id).first())
+        assertTrue(repository.observeDraft(id).first()!!.items.single().quantity is Fact.Unknown)
+        assertTrue(repository.observeDraft(assistant.id).first()!!.total is Fact.Unknown)
+        assertEquals(DraftWriteResult.Conflict, repository.compareAndSetDraft(draft, 0))
+    }
+
     @Test fun mixedBatchAppendRetryAndSeparateTransactionsSurviveReopen() = runBlocking {
         val bytes = png()
         val first = batch("one", null, input(bytes), ImportInput { throw SecurityException() }, input(bytes), input(byteArrayOf(1, 2)))

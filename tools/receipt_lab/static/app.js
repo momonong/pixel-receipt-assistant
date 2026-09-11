@@ -65,7 +65,8 @@ function rawSection(label, data){const d=el('details');d.append(el('summary',lab
 function valueCell(value){return el('td',value??'未知',value==null?'unknown':null);}
 function renderRun(run){
   const box=el('section',null,'run');const heading=el('div',null,'section-row');
-  heading.append(el('h3',run.engine==='mlkit'?'本機 ML Kit＋解析器':`Gemini · ${run.request.model}`),el('span',statusText[run.status],`badge ${run.status}`));box.append(heading);
+  const engineNames={'mlkit':'傳統 OCR＋解析器','nano-image':'Gemini Nano · 原圖','nano-ocr':'Gemini Nano · 原圖＋OCR'};
+  heading.append(el('h3',engineNames[run.engine]??`Gemini 雲端 · ${run.request.model}`),el('span',statusText[run.status],`badge ${run.status}`));box.append(heading);
   box.append(el('p',new Date(run.createdAt).toLocaleString('zh-TW')+' · '+(run.elapsedMs!=null?`${(run.elapsedMs/1000).toFixed(1)} 秒`:'等待執行結果'),'meta'));
   if(['queued','running'].includes(run.status))box.append(button('取消這次測試',async()=>{await api(`/api/runs/${run.id}/cancel`,'POST',{});await refresh();}));
   if(run.error){box.append(el('p',run.error.split('\n')[0].slice(0,250),'error'));if(run.error.includes('\n')||run.error.length>250)box.append(rawSection('展開技術診斷',run.error));}
@@ -74,7 +75,7 @@ function renderRun(run){
     if(run.diagnostics){const m=el('div',null,'metrics');for(const [label,v] of [['擷取品項',run.diagnostics.itemCount],['核心未知欄位',run.diagnostics.unknownFields],['正確率','尚未評估']]){const item=el('div');item.append(el('strong',v??'—'),el('span',label));m.append(item);}box.append(m);}
     if(result.candidate){
       const c=result.candidate;box.append(el('p',`${c.merchant??'商家未知'} · ${c.date??'日期未知'} · 收據總額 ${c.totalMinor??'未知'} ${c.currency??''}`,'meta'));
-      const showUnit=run.engine==='gemini';
+      const showUnit=run.engine!=='mlkit';
       const table=el('table');const head=el('tr');for(const t of (showUnit?['品名','數量','單價','行合計']:['品名','數量','行合計']))head.append(el('th',t));table.append(head);
       for(const row of c.items){const tr=el('tr');tr.append(valueCell(row.name),valueCell(row.quantity));if(showUnit)tr.append(valueCell(row.unitPriceMinor));tr.append(valueCell(row.lineTotalMinor));table.append(tr);}
       const wrap=el('div',null,'table-wrap');wrap.append(table);box.append(wrap);
@@ -94,6 +95,10 @@ function renderDetail(item){
   const actions=el('div',null,'actions');const local=button('重跑本機辨識',async()=>{await runCase(item,'mlkit');await refresh();},'');local.disabled=!state.health.engines.mlkit.configured;
   const cloud=button(state.health.engines.gemini.configured?'用 Gemini 比較':'Gemini 尚未設定',()=>{state.cloudCase=item;$('cloud-info').textContent=`${item.title} · ${item.images.length} 張照片 · 模型 ${state.health.engines.gemini.model}`;$('cloud-dialog').showModal();});cloud.disabled=!state.health.engines.gemini.configured;
   actions.append(local,cloud,button('匯出完整結果',()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(item,null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download=`receipt-${item.id}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}));root.append(actions);
+  for(const [engine,label] of [['nano-image','Nano 讀原圖'],['nano-ocr','Nano 讀原圖＋OCR']]){
+    const b=button(label,async()=>{await runCase(item,engine);await refresh();});
+    b.disabled=!state.health.engines[engine]?.configured||item.images.length!==1;actions.append(b);
+  }
   root.append(el('p','候選清單不會改動手機帳本。不同引擎的品項數或未知數可比較，但不能當作準確率。','meta'));
   if(item.notes.length){root.append(el('h3','測試分析'));for(const note of item.notes){const n=el('div',note.text,'note');n.append(el('time',new Date(note.createdAt).toLocaleString('zh-TW')));root.append(n);}}
   if(!item.runs.length)root.append(el('p','照片已就緒，尚未執行辨識。你可以離開，稍後再回來看結果。','empty'));
@@ -111,5 +116,5 @@ async function refresh(){
 $('refresh').onclick=()=>refresh().catch(e=>message(e.message));
 $('cloud-cancel').onclick=()=>$('cloud-dialog').close();
 $('cloud-confirm').onclick=async()=>{const item=state.cloudCase;$('cloud-dialog').close();try{await runCase(item,'gemini',{provider:'google-gemini',model:state.health.engines.gemini.model,purpose:'receipt-extraction',imageHashes:item.images});await refresh();}catch(e){message(e.message);}};
-async function init(){state.health=await api('/api/health');const engines=state.health.engines;$('engines').textContent=`本機 OCR ${engines.mlkit.configured?'已設定':'未設定'} · Gemini ${engines.gemini.configured?'已設定':'未設定'} · Nano 尚未接入`;uploadButtons();await refresh();}
+async function init(){state.health=await api('/api/health');const engines=state.health.engines;$('engines').textContent=`本機 OCR ${engines.mlkit.configured?'已設定':'未設定'} · Gemini 雲端 ${engines.gemini.configured?'已設定':'未設定'} · Nano ${engines['nano-image']?.configured?'已指定 Pixel，能力待實測':'尚未指定 Pixel'}`;uploadButtons();await refresh();}
 init().then(()=>setInterval(()=>refresh().catch(()=>{}),2000)).catch(e=>message(e.message));

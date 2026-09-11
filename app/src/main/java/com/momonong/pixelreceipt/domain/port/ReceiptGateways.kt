@@ -71,6 +71,7 @@ sealed interface AnalysisResult {
 
 data class AnalysisError(
     val kind: AnalysisErrorKind,
+    val userMessage: String? = null,
 ) {
     val retryable: Boolean
         get() = kind.retryable

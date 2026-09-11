@@ -35,7 +35,7 @@ class Lab:
     def submit(self, case_id, value):
         case = self.store.get("case", case_id)
         engine = value.get("engine", "mlkit")
-        require(engine in {"mlkit", "gemini"}, "不支援的辨識引擎。")
+        require(engine in {"mlkit", "gemini", "nano-image", "nano-ocr"}, "不支援的辨識引擎。")
         request_id = value.get("requestId")
         require(isinstance(request_id, str) and 1 <= len(request_id) <= 100, "請提供 requestId，避免重複送出。")
         consent = value.get("consent")
@@ -44,6 +44,9 @@ class Lab:
                 "purpose": "receipt-extraction", "imageHashes": case["images"]}, "請明確同意本次指定照片傳送至 Google Gemini。", 403)
         signature = {"caseId": case_id, "engine": engine, "model": self.engines.model if engine == "gemini" else None,
                      "imageHashes": case["images"], "consent": consent}
+        if engine.startswith("nano-"):
+            require(len(case["images"]) == 1, "Nano 比較工具每次只接受一張收據。")
+            signature["device"] = self.engines.nano_serial
         with self.store.lock:
             for existing in self.store.all("run"):
                 if existing["requestId"] == request_id:
@@ -88,7 +91,7 @@ class Lab:
             started = time.monotonic()
             try:
                 case = self.store.get("case", run["caseId"])
-                method = self.engines.run_mlkit if run["engine"] == "mlkit" else self.engines.run_gemini
+                method = self.engines.run_nano if run["engine"].startswith("nano-") else self.engines.run_mlkit if run["engine"] == "mlkit" else self.engines.run_gemini
                 result = method(run, case, self.store)
                 require(result.get("status") in {"succeeded", "failed"}, "辨識器回傳無效狀態。")
                 self.store.finish(run["id"], status=result["status"], result=result,
@@ -118,6 +121,8 @@ def api_description():
         {"method": "GET", "path": "/api/cases/{id}", "description": "原圖 metadata、所有次測試與 raw output"},
         {"method": "GET", "path": "/api/images/{sha256}", "description": "指定已上傳照片的原始 bytes"},
         {"method": "POST", "path": "/api/cases/{id}/runs", "body": {"engine": "mlkit", "requestId": "unique-request-id"}},
+        {"method": "POST", "path": "/api/cases/{id}/runs", "body": {"engine": "nano-image", "requestId": "unique-request-id"}, "description": "B: one image on explicitly configured physical Pixel"},
+        {"method": "POST", "path": "/api/cases/{id}/runs", "body": {"engine": "nano-ocr", "requestId": "unique-request-id"}, "description": "C: image plus actual OCR on explicitly configured physical Pixel"},
         {"method": "POST", "path": "/api/cases/{id}/runs", "body": {"engine": "gemini", "requestId": "unique-request-id", "consent": {"provider": "google-gemini", "model": "configured-model", "purpose": "receipt-extraction", "imageHashes": ["exact-ordered-SHA256-list"]}}},
         {"method": "GET", "path": "/api/runs/{id}", "description": "queued/running/succeeded/failed/cancelled/interrupted"},
         {"method": "POST", "path": "/api/runs/{id}/cancel", "body": {}},

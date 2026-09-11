@@ -235,6 +235,11 @@ fun ReviewScreen(session: ReviewSession, state: ReviewState, assets: List<Eviden
                             Text("${record.provenance.extractorName} / ${record.provenance.extractorVersion} / ${record.provenance.promptVersion}")
                             record.warnings.forEach { Text(it) }
                             record.regions.forEach { region -> Text("照片 ${assets.indexOfFirst { it.id == region.assetId } + 1}：${region.rawText}") }
+                            record.unlocalizedObservationsJson?.let { json ->
+                                Text("以下為 Nano 觀察候選，未提供文字定位；付款、積點與單價不直接計入支出。")
+                                remember(json) { com.momonong.pixelreceipt.data.extraction.NanoReceiptValidation.auditText(json) }
+                                    .forEach { Text(it) }
+                            }
                         } }
                     }
                 }

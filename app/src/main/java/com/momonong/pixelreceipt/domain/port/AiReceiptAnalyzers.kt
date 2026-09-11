@@ -6,6 +6,8 @@ import com.momonong.pixelreceipt.domain.ai.AiAnalyzerDescriptor
 /** Implemented by an adapter backed by a model whose inference stays on the device. */
 interface OnDeviceReceiptAnalyzer {
     val descriptor: AiAnalyzerDescriptor
+    suspend fun prepare(): com.momonong.pixelreceipt.domain.ai.OnDeviceModelState =
+        com.momonong.pixelreceipt.domain.ai.OnDeviceModelState.Available
 
     suspend fun analyze(request: AiAnalysisRequest): AnalysisResult
 }

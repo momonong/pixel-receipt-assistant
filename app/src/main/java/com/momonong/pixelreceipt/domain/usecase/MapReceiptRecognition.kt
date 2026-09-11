@@ -14,6 +14,7 @@ class MapReceiptRecognition {
         require(output.items.size in 1..100 && output.adjustments.size <= 50) { "沒有可帶入的品項，文字辨識不等於品項擷取成功。" }
         require(output.merchants.size <= 40 && output.dates.size <= 100 && output.totals.size <= 100)
         require(output.warnings.size <= 200 && output.warnings.all { it.length <= 2000 })
+        require(output.unlocalizedObservationsJson == null || output.unlocalizedObservationsJson.length <= 100_000)
         require(output.pages.sumOf { it.lines.size } <= 500 && output.pages.sumOf { p -> p.lines.sumOf { it.text.length } } <= 50_000)
         val regions = mutableListOf<EvidenceRegion>()
         val refs = mutableMapOf<Pair<Int, Int>, EvidenceReference>()
@@ -34,6 +35,8 @@ class MapReceiptRecognition {
         val links = mutableListOf<EvidenceLink>()
         fun evidence(observation: TextObservation): EvidenceReference {
             require(observation.text.isNotBlank() && observation.text.length <= 500)
+            require(observation.page in sources.indices)
+            if (observation.line == -1) return EvidenceReference(sources[observation.page].id)
             return requireNotNull(refs[observation.page to observation.line]) { "辨識結果引用不存在的文字區域。" }
         }
         fun <T : Any> fact(observations: List<TextObservation>, label: String, parse: (String) -> T): Fact<T> {
@@ -54,7 +57,7 @@ class MapReceiptRecognition {
         fun link(observations: List<TextObservation>, target: EvidenceLinkTarget) {
             observations.map(::evidence).distinct().forEach { reference ->
                 links += EvidenceLink(UUID.randomUUID().toString(), reference, target, EvidenceLinkStatus.Candidate,
-                    FactProvenance.Extracted(provenance, listOf(reference)), rationale = "本機 OCR 候選，須人工核對")
+                    FactProvenance.Extracted(provenance, listOf(reference)), rationale = "本機辨識候選，須人工核對")
             }
         }
         // Match occurrences by name across pages. Never collapse repeated rows within one page.
@@ -86,7 +89,8 @@ class MapReceiptRecognition {
                 printed = Fact.Unknown(UnknownFactReason.Ambiguous, names.map(::evidence))
             }
             link(names + quantities + totals + unitPrices, EvidenceLinkTarget.ReceiptLine(id))
-            ReceiptLineDraft(id, rawName = fact(names, "品名") { it.trim().also { name -> require(name.isNotEmpty()) } },
+            ReceiptLineDraft(id, rawName = if (group.any { it.nameUnknown }) Fact.Unknown(UnknownFactReason.Unreadable, names.map(::evidence))
+                else fact(names, "品名") { it.trim().also { name -> require(name.isNotEmpty()) } },
                 quantity = qty, printedTotal = printed)
         }
         val adjustmentGroups = output.adjustments.groupBy { it.label.text.lowercase(java.util.Locale.ROOT) to it.subtract }
@@ -114,7 +118,7 @@ class MapReceiptRecognition {
             assemblyStatus = if (duplicates) ReceiptAssemblyStatus.PossibleDuplicates else if (sources.size > 1) ReceiptAssemblyStatus.NeedsOrdering else ReceiptAssemblyStatus.Collecting,
             stage = ReceiptStage.NeedsReview)
         return mapped.copy(extraction = ReceiptExtractionRecord(provenance, sources.associate { it.id to it.contentSha256 },
-            regions, warnings.distinct().take(300), items.size, "${receiptAmountPreview(mapped)}；${ReceiptReconciler().reconcile(mapped)}"))
+            regions, warnings.distinct().take(300), items.size, "${receiptAmountPreview(mapped)}；${ReceiptReconciler().reconcile(mapped)}", output.unlocalizedObservationsJson))
     }
 
     private fun similarName(a: String, b: String): Boolean {

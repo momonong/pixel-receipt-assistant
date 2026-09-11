@@ -2,7 +2,7 @@
 
 ## 目標與範圍
 
-這個專案以 **Google Pixel 10 Pro Fold** 為主要實機，採原生 Android 架構，同時保持對一般 Android 手機與不同視窗尺寸的相容性。現在已完成可建置、可安裝的 Phase 0，以及 Phase 1A 的 evidence／Fact／promotion／pricing／AI routing domain contracts。本機 Sharesheet、Photo Picker、多圖 inbox、Room、ML Kit 中文 OCR 主流程、人工核對、自用／代買／送禮、部分件數分配、個人支出及確認記帳已接入；Gemini Nano、Firebase AI Logic、共同分攤與 Google Sheets adapters 仍待實作。下圖的 Nano 與雲端仍是目標架構，現行辨識流程見「自動擷取架構」。
+這個專案以 **Google Pixel 10 Pro Fold** 為主要實機，採原生 Android 架構，同時保持對一般 Android 手機與不同視窗尺寸的相容性。Sharesheet、Photo Picker、多圖 inbox、Room、ML Kit Gemini Nano／中文 OCR、人工核對、自用／代買／送禮、部分件數分配、個人支出及確認記帳已接入。Nano 使用公開 Prompt／AICore，2026-09-11 因使用者離開拔除手機，實機能力與收據品質尚未驗證。Firebase AI Logic、共同分攤與 Google Sheets adapters 仍待實作；下圖包含這些目標，現行流程見「自動擷取架構」。AppFunctions 僅完成公開 service 建立空白待核對草稿的試作，尚無 Gemini 助理端到端證據。
 
 App 支援下限採 `minSdk 26`。這只是安裝下限，不代表每台 Android 8+ 裝置都能執行 Gemini Nano；Nano 必須另外在 runtime 檢查裝置、Android／AICore、模型下載與個別 ML Kit GenAI API 的可用性。
 
@@ -35,7 +35,7 @@ App 支援下限採 `minSdk 26`。這只是安裝下限，不代表每台 Androi
                          Room → Adaptive review → Sheets export
 ```
 
-Compose UI → domain ← data adapters 的依賴方向不變。Domain 不引用 Android URI、ML Kit、Firebase、Room 或 Google Sheets 型別；`AiRouter` 位於 domain use case，透過 `OnDeviceReceiptAnalyzer`／`CloudReceiptAnalyzer` ports 呼叫 adapters（目前為本機中文 OCR，Nano 與 cloud 待實作）。Evidence repository 與 exporter 同樣只傳 domain model 或明確結果。
+Compose UI → domain ← data adapters 的依賴方向不變。Domain 不引用 Android URI、ML Kit、Firebase、Room 或 Google Sheets 型別；`AiRouter` 位於 domain use case，透過 `OnDeviceReceiptAnalyzer`／`CloudReceiptAnalyzer` ports 呼叫 adapters（本機 Nano、中文 OCR 已接入，App cloud 待實作）。Evidence repository 與 exporter 同樣只傳 domain model 或明確結果。
 
 目前先維持單一 `:app` module，以 package 邊界降低初期複雜度；當 Room、相機與網路 adapter 進入專案後，再依編譯隔離與多人協作需求拆成 `:domain`、`:data`、`:feature-*`。不要只為了形式提早拆 module。
 
@@ -389,15 +389,19 @@ DM 可能有全國、區域專櫃或新店版本；活動也可能受日期、�
 
 ## 自動擷取架構
 
-`ExtractionControls → ExtractionSession → ExtractReceipt → AiRouter(OnDeviceOnly) → MlKitReceiptAnalyzer → LocalReceiptParser → MapReceiptRecognition → CAS → ReviewSession`。
+`ExtractionControls → ExtractionSession → ExtractReceipt → analyzer.prepare() → AiRouter(OnDeviceOnly) → MlKitNanoAnalyzer 或使用者選擇的 MlKitReceiptAnalyzer → MapReceiptRecognition → CAS → ReviewSession`。
 
-`MlKitReceiptAnalyzer` 實際呼叫 bundled Chinese Text Recognition。中文 SDK 有時省略欄間空白，或提供包含空白的字元框；adapter 以字元位置與只讀像素空白帶重建分欄，並同時保存原始 OCR 文字。未知欄標保留位置，不擅自當成單價；像素掃描在 Default executor 執行，不阻塞 UI。每次 SDK 只接收一張已驗證 SHA-256 的本機圖片；adapter 順序處理選取頁面，再交本機 parser 處理欄位與多頁候選。`MultipleImageInput` 表示這個 adapter 的協調能力，不是宣稱 ML Kit 或 Nano 單次 API 支援多圖。選路沒有 cloud adapter；固定 bundled model 不需要執行 Nano availability probe，Nano 狀態在 UI 明示為未接入／未檢查。
+`MlKitReceiptAnalyzer` 實際呼叫 bundled Chinese Text Recognition。中文 SDK 有時省略欄間空白，或提供包含空白的字元框；adapter 以字元位置與只讀像素空白帶重建分欄，並同時保存原始 OCR 文字。未知欄標保留位置，不擅自當成單價；像素掃描在 Default executor 執行，不阻塞 UI。每次 SDK 只接收一張已驗證 SHA-256 的本機圖片；adapter 順序處理選取頁面，再交本機 parser 處理欄位與多頁候選。`MultipleImageInput` 表示 adapter 的逐頁協調能力，不是宣稱 ML Kit 或 Nano 單次 API 支援多圖。選路沒有 cloud adapter；固定 bundled OCR 的 prepare 不需要 Nano probe，不能將此狀態視為 Nano 可用。
+
+`MlKitNanoAnalyzer` 使用 Prompt beta4 與 schema compiler alpha1 的公開 typed API。先 runtime probe／必要時前景下載，核對模型名稱及 structured capability；每次持有獨立 client，推論 mutex 序列化，finally 關閉。B 傳圖，C 傳圖＋實際 OCR rawText（不是人工標註），C 沒有文字時不靜默降成 B。影像沿用 ImageStore 的 SHA-256／EXIF／4096px 限制；原圖不改寫。每頁 temperature 0、seed 17、output 3500，countTokens 及模型 token limit 檢查後送出；finishReason 必須 STOP。前景／coroutine 檢查、240 秒逾時與各類 quota／unsupported／invalid-output 映射保留草稿，沒有自動重跑或上雲。
+
+`NanoReceiptOutput` 限制資料欄位，不含 ID、workflow 或金額計算。`NanoReceiptValidation` 拒絕外幣、非法日期、非整數／溢位、超限及無商品列，輸出只形成待核對候選。單價與行額分離，缺少數量保留 Unknown；零元／同頁重複保留。非商品列保存在 audit；已含折扣不再扣、是否已含不明時金額 Unknown、另列 scope Unknown。資料與其中文字中的指令都不授予工具／程式執行權限。
 
 官方文件核對於 2026-09-09：[ML Kit Text Recognition Android](https://developers.google.com/ml-kit/vision/text-recognition/v2/android) 列出 bundled Chinese 16.0.1 與文字／區域輸出；[Prompt API](https://developers.google.com/ml-kit/genai/prompt/android/get-started) 要求自行檢查 AVAILABLE／DOWNLOADABLE／DOWNLOADING／UNAVAILABLE。本次不用手機型號推論 Nano 能力。
 
-不可信的 `ReceiptRecognition` 只有文字、頁面／行索引與座標，沒有本機 ID、revision、stage 或最終帳務結果。Mapper 檢查長度、數量、座標、來源索引、數值與日期，才產生本機 UUID、Fact 與 Candidate evidence links。來源無法解析保留 Unknown，多個交易欄位候選不一致使用 Conflicting；金額以整數 parsing，僅接受合法千分位及小數部分全為零的 TWD 表示。UI 明確限定 TWD，發現已標示外幣的 OCR 輸出拒絕。
+不可信的 `ReceiptRecognition` 只有觀察文字、頁面／行索引、可得座標與可選的 Nano 觀察 JSON，沒有本機 ID、revision、stage 或最終帳務結果。Mapper 檢查長度、數量、座標、來源索引、數值與日期，才產生本機 UUID、Fact 與 Candidate evidence links。`line=-1` 明確表示整張原圖、沒有可靠座標；Nano 不產生虛構 OCR region。來源無法解析保留 Unknown，多個交易欄位候選不一致使用 Conflicting；金額以整數 parsing，僅接受合法千分位及小數部分全為零的 TWD 表示。UI 明確限定 TWD，發現已標示外幣的 OCR 輸出拒絕。
 
-`ReceiptExtractionRecord` 保存來源 SHA-256、版本、帶 rawText 的 EvidenceRegion、警告與原始金額試算／gate 狀態。人工編輯保留這份原始擷取快照，讓修正後的平衡不會冒充原始擷取正確。Region 的寬高定義 OCR EXIF-oriented、降採樣座標空間；畫面提供原圖與原文比對。
+`ReceiptExtractionRecord` 保存來源 SHA-256、版本、帶 rawText 的 EvidenceRegion、警告與原始金額試算／gate 狀態。Nano 另保存最多 100,000 字的 nullable `unlocalizedObservationsJson`，核對頁顯示分類／品名／數量／單價／行額；只能引用整張照片。人工編輯保留這份原始擷取快照，讓修正後的平衡不會冒充原始擷取正確。Region 的寬高定義 OCR EXIF-oriented、降採樣座標空間；畫面提供原圖與原文比對。Payload 維持 format 4，舊資料缺少新增 audit 時為 null，SQL v1 不變；實際 Room reopen 測試涵蓋此相容與 Unknown 保存。
 
 沒有在 Room 寫入暫態 Analyzing stage：執行工作保存在 ViewModel，SavedState 只標示中斷，不自動重播；成功結果一次 CAS 寫入 NeedsReview 且保持未核對完整。這是避免取消、程序死亡與暫時性模型失敗把人工入口鎖死的選擇。離開 RESUMED 取消 coroutine；ML Kit Task 不支援真正取消，晚到 callback 只負責釋放資源，不能寫入草稿。SDK 正在使用的 bitmap 不會在取消瞬間提前回收。
 
@@ -415,7 +419,9 @@ OCR 基線的 payload format 3 向前相容 format 1／2（本次已升 format 4
 
 案例圖片和 run 的請求內容不可變；新一次辨識產生新 run。`requestId` 對同內容冪等，內容改動則拒絕。取消阻止晚到結果覆寫，但不保證中止已送出的 SDK／Google 請求；adapter 未收尾前不可刪除它的案例。程序重啟標示 interrupted，沒有自動 replay。分析 note 明示不是 ground truth；不從 itemCount 或 Unknown 數產生準確率。
 
-可選的 Gemini 測試 adapter 使用主機環境憑證、固定 Google HTTPS API、結構化候選 schema，限制尺寸／整數溢位／日期與幣別，保留模型原始回覆，不建立 Ledger 值。Consent 精確綁模型、目的與有序 photo hashes；缺少 key 或同意不送出，沒有 redirect 或自動雲端重試。這是實驗 adapter，App 的 Firebase／Nano adapters 仍未接入；Gemini live 品質及 Pixel Nano availability 均未驗證。
+可選的 Gemini 測試 adapter 使用主機環境憑證、固定 Google HTTPS API、結構化候選 schema，限制尺寸／整數溢位／日期與幣別，保留模型原始回覆，不建立 Ledger 值。Consent 精確綁模型、目的與有序 photo hashes；缺少 key 或同意不送出，沒有 redirect 或自動雲端重試。這是實驗 adapter，App 的 Firebase 仍未接入；本次優先 Pixel Nano，沒有執行 Gemini 雲端測試。
+
+Nano 另走 `CLI／HTTP → 明確指定的 Pixel → debug NanoLabActivity → production Nano adapter／mapper → JSON`。不使用一般 instrumentation、不開 production Room，原本 OCR emulator-only 防護不變。每次 UUID＋輸入 hash 隔離，生成 client、bitmap、cache 隨該次生命週期結束；取消檔只影響該次測試，Activity 重建不重播。保留 SDK 公開的 typed response 與 finish reason，但不聲稱能取到原始生成 token 或精確 model revision（公開 API 未暴露）。測試室版本／hash／耗時與手機重新連線步驟見 README「Pixel Gemini Nano 整合」。
 
 五張使用者獲授權真實收據已完成原圖基線；交易總額全部 Unknown，存在 OCR 與 layout parsing 兩類錯誤。App 實際收到 3000×4000 圖片，不能把本批失敗歸因於 App 先降解析度；也不能當成 Nano 的表現。詳細數據與私人原文只存 Git 忽略的 `.receipt-lab/`，使用方法及驗證摘要见 README 的「收據測試室與 API」。此批屬開發診斷集，之後用於調整就不得再充當未見驗收集。以下 2026-09-09 的資料盤點及測試數量保留為歷史證據。
 

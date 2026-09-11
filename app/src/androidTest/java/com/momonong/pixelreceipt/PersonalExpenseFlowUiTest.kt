@@ -62,6 +62,7 @@ class PersonalExpenseFlowUiTest {
         }) }
         ui.waitUntil(15_000) { ui.onAllNodesWithTag("recognize-receipt").fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithTag("merchant").assertDoesNotExist()
+        node("engine-ocr").performClick()
         node("recognize-receipt").performClick()
         ui.waitUntil(30_000) { runBlocking { graph.repository.drafts.first().any { it.id !in before && it.extraction != null } } }
         val extracted = runBlocking { graph.repository.drafts.first().single { it.id !in before && it.extraction != null } }

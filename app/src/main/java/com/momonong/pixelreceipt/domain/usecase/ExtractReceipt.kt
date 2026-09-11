@@ -14,9 +14,11 @@ class ExtractReceipt(
     private val analyzer: OnDeviceReceiptAnalyzer,
     private val loadEvidence: suspend (String) -> List<EvidenceAsset>,
     private val verifyImage: suspend (String) -> Unit,
+    private val traditionalOcr: OnDeviceReceiptAnalyzer? = null,
 ) {
     suspend fun run(base: ReceiptDraft, selected: Set<String>, replaceApproved: Boolean,
-        foreground: () -> Boolean): ReceiptDraft {
+        useTraditionalOcr: Boolean = false, foreground: () -> Boolean): ReceiptDraft {
+        val selectedAnalyzer = if (useTraditionalOcr) requireNotNull(traditionalOcr) { "傳統 OCR 未設定。" } else analyzer
         require(base.stage in setOf(ReceiptStage.Captured, ReceiptStage.NeedsReview)) { "此交易唯讀，不能辨識。" }
         require(base.revision < Long.MAX_VALUE)
         require(replaceApproved || !hasReviewContent(base)) { "重新辨識需明確同意取代目前核對欄位。" }
@@ -36,19 +38,21 @@ class ExtractReceipt(
         check(foreground()) { "請回到前景再辨識。" }
         val request = AiAnalysisRequest(base.id, sources.map { LocalImageId(it.id) },
             sources.associate { LocalImageId(it.id) to it.contentSha256 }, setOf(AiCapability.StructuredOutput))
-        val routed = AiRouter(analyzer, null).analyze(request, AiRoutingPolicy(AiRoutingMode.OnDeviceOnly),
-            AiRuntimeContext(foreground(), false, OnDeviceModelState.Available))
+        val modelState = selectedAnalyzer.prepare()
+        check(modelState == OnDeviceModelState.Available) { "本機模型尚未就緒（$modelState）；請稍後重試，或選擇傳統 OCR／人工修正。" }
+        val routed = AiRouter(selectedAnalyzer, null).analyze(request, AiRoutingPolicy(AiRoutingMode.OnDeviceOnly),
+            AiRuntimeContext(foreground(), false, modelState))
         val result = (routed as? AiRouterResult.Executed)?.result ?: error("本機辨識器未就緒，草稿保留。")
         require(result !is AnalysisResult.Success || result.receipt.currencyCodeText == "TWD") { "本次辨識僅接受 TWD 收據。" }
         val recognized = (result as? AnalysisResult.Success)?.receipt?.recognition ?: error(
-            if ((result as? AnalysisResult.Failure)?.error?.kind == AnalysisErrorKind.InvalidOutput)
+            (result as? AnalysisResult.Failure)?.error?.userMessage ?: if ((result as? AnalysisResult.Failure)?.error?.kind == AnalysisErrorKind.InvalidOutput)
                 "未能擷取可用的品項；可能只有文字、版面不支援或圖片不清楚。可重試或人工核對。"
             else "本機 OCR 未就緒或執行失敗，請重試或人工核對。")
         currentCoroutineContext().ensureActive()
         check(foreground()) { "已離開前景，辨識結果未套用。" }
         check(loadEvidence(base.id) == all) { "來源圖片資料已改變，結果未套用。" }
         sources.forEach { verifyImage(it.contentSha256) }
-        val descriptor = analyzer.descriptor
+        val descriptor = selectedAnalyzer.descriptor
         val mapped = MapReceiptRecognition().map(base, sources, recognized,
             ExtractionProvenance(UUID.randomUUID().toString(), descriptor.analyzerId, descriptor.modelId,
                 requireNotNull(descriptor.schemaVersion), ExtractionRuntime.OnDevice, System.currentTimeMillis(), descriptor.promptVersion))

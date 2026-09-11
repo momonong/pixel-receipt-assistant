@@ -64,6 +64,12 @@ def main():
     serve.add_argument("--adb", default=os.environ.get("RECEIPT_LAB_ADB"))
     serve.add_argument("--serial", default="emulator-5584")
     serve.add_argument("--model", default=None)
+    serve.add_argument("--nano-serial", default=None, help="明確指定已授權 Pixel；不影響 emulator-only OCR")
+    nano = commands.add_parser("nano-probe", help="Pixel 前景 Nano 能力檢查；不讀取帳本")
+    nano.add_argument("--adb", required=True)
+    nano.add_argument("--serial", required=True)
+    nano.add_argument("--download", action="store_true")
+    nano.add_argument("--output", type=Path, required=True)
     commands.add_parser("status")
     commands.add_parser("list")
     upload = commands.add_parser("upload", help="一張一筆；--same-receipt 將多頁放同筆")
@@ -72,7 +78,7 @@ def main():
     upload.add_argument("--run", action="store_true", help="上傳後執行本機 OCR")
     run = commands.add_parser("run")
     run.add_argument("case_id")
-    run.add_argument("--engine", choices=["mlkit", "gemini"], default="mlkit")
+    run.add_argument("--engine", choices=["mlkit", "gemini", "nano-image", "nano-ocr"], default="mlkit")
     run.add_argument("--request-id", default=None)
     run.add_argument("--allow-google-upload", action="store_true", help="明確同意這筆案例全部照片送至已設定的 Google Gemini 模型")
     result = commands.add_parser("result")
@@ -83,9 +89,16 @@ def main():
     note.add_argument("case_id")
     note.add_argument("--file", type=Path, required=True)
     args = parser.parse_args()
+    if args.command == "nano-probe":
+        from .nano import NanoDevice
+        output = NanoDevice(args.adb, args.serial).run("probe", download=args.download)
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(json.dumps(output, ensure_ascii=False, indent=2))
+        return
     if args.command == "serve":
         with service_lock(args.data_dir.resolve()):
-            lab = Lab(Store(args.data_dir), Engines(args.adb, args.serial, args.model))
+            lab = Lab(Store(args.data_dir), Engines(args.adb, args.serial, args.model, args.nano_serial))
             server = Server(("127.0.0.1", args.port), lab)
             lab.start()
             print(f"PixelReceipt 測試介面：http://127.0.0.1:{server.server_port}", flush=True)

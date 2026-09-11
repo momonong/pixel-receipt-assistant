@@ -1,5 +1,7 @@
+[CmdletBinding(PositionalBinding=$false)]
 param(
-    [ValidateSet('serve','status','list','upload','run','case','result','note')][string]$Command = 'serve',
+    [Parameter(Position=0)][ValidateSet('serve','status','list','upload','run','case','result','note','nano-probe')][string]$Command = 'serve',
+    [string]$Url = 'http://127.0.0.1:8765',
     [Parameter(ValueFromRemainingArguments=$true)][string[]]$LabArguments
 )
 $ErrorActionPreference = 'Stop'
@@ -16,7 +18,7 @@ try {
         $taskConfig = Get-Content .receipt-lab/config.json -Raw | ConvertFrom-Json
         $env:RECEIPT_LAB_ADB = $taskConfig.adb
     }
-    & $taskPython -X utf8 -m tools.receipt_lab $Command @LabArguments
+    & $taskPython -X utf8 -m tools.receipt_lab --url $Url $Command @LabArguments
     exit $LASTEXITCODE
 }
 finally { Pop-Location }
