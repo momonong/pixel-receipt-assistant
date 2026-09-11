@@ -50,3 +50,8 @@ Thumbs.db
 # Test and tooling output
 coverage/
 lint-results*
+
+# Local receipt experiments: private samples, API responses and Python environment
+.receipt-lab/
+__pycache__/
+*.pyc

@@ -405,6 +405,20 @@ DM 可能有全國、區域專櫃或新店版本；活動也可能受日期、�
 
 OCR 基線的 payload format 3 向前相容 format 1／2（本次已升 format 4）：新增 nullable extraction，舊格式未具 audit 時保持 null。SQL schema v1 未改；decoder 不以破壞性重建處理版本。`ReceiptAmountPreview` 是額外的 BigInteger 診斷，`ReceiptReconciler`、`ReceiptValidator` 及 ±1 容差不變；本次 `TransitionReceiptStage` 另加個人支出分配 gate。
 
+## 本機收據診斷工具
+
+2026-09-11 新增 `tools/receipt_lab` 與根目錄 `receipt-lab.ps1`。使用者在對話提供的獲授權照片可由 CLI 直接加入；瀏覽器上傳只是另一個入口。工具的 SQLite 只保存不可混淆的測試案例、原圖 hashes、每次辨識結果和分析，不替代 App Room、不建立另一套交易工作流。
+
+路徑為 `CLI／localhost HTTP → dedicated emulator test APK → MlKitReceiptAnalyzer → LocalReceiptParser → MapReceiptRecognition → JSON result`。不呼叫 Activity、不讀寫 Room、不列舉手機照片。HTTP 僅監聽 127.0.0.1，有 Host／Origin／Fetch-Site 與 mutation header 檢查，不開 CORS 或遠端服務。每次 Android 操作驗證 `receipt-lab-test`／emulator 屬性；照片經 Base64 ASCII 傳入該 emulator 的 app-private、UUID 子目錄，以避開 Windows ADB stdin 的二進位 EOF 問題。ImageStore 解碼及原始 SHA-256 均通過才執行辨識。
+
+`MlKitReceiptAnalyzer` 新增預設 no-op 的診斷 callback，在 parser 前保存 OCR pages，因此 parser 拒絕時仍能對照原始文字；正常 App 組合不訂閱，也不增加網路。rawText 仍是 SDK 文字經既有行合併後的內容，不宣稱未加工的完整 SDK 原始回應。每次結果保存 input hashes、已安裝主／test APK SHA-256、引擎 descriptor、candidate 與原始解析資料，沒有賦予品項精確照片證據或確認狀態。
+
+案例圖片和 run 的請求內容不可變；新一次辨識產生新 run。`requestId` 對同內容冪等，內容改動則拒絕。取消阻止晚到結果覆寫，但不保證中止已送出的 SDK／Google 請求；adapter 未收尾前不可刪除它的案例。程序重啟標示 interrupted，沒有自動 replay。分析 note 明示不是 ground truth；不從 itemCount 或 Unknown 數產生準確率。
+
+可選的 Gemini 測試 adapter 使用主機環境憑證、固定 Google HTTPS API、結構化候選 schema，限制尺寸／整數溢位／日期與幣別，保留模型原始回覆，不建立 Ledger 值。Consent 精確綁模型、目的與有序 photo hashes；缺少 key 或同意不送出，沒有 redirect 或自動雲端重試。這是實驗 adapter，App 的 Firebase／Nano adapters 仍未接入；Gemini live 品質及 Pixel Nano availability 均未驗證。
+
+五張使用者獲授權真實收據已完成原圖基線；交易總額全部 Unknown，存在 OCR 與 layout parsing 兩類錯誤。App 實際收到 3000×4000 圖片，不能把本批失敗歸因於 App 先降解析度；也不能當成 Nano 的表現。詳細數據與私人原文只存 Git 忽略的 `.receipt-lab/`，使用方法及驗證摘要见 README 的「收據測試室與 API」。此批屬開發診斷集，之後用於調整就不得再充當未見驗收集。以下 2026-09-09 的資料盤點及測試數量保留為歷史證據。
+
 ## 自動擷取驗證
 
 ### 資料盤點與預先品質門檻

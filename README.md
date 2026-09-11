@@ -4,7 +4,7 @@ PixelReceipt AI 是以 **Google Pixel 10 Pro Fold** 為主要實機的原生 And
 
 目前已實作 **照片 → 本機辨識建立清單 → 核對內容 → 指定歸屬 → 個人支出／代墊 → 保存與確認**。首頁 Photo Picker 與外部分享匯入後直接開啟同一筆交易的「辨識並建立清單」，單圖不必額外勾選頁面；多圖先選這張收據的頁面。人工輸入是補正與失敗備援。照片不會上傳雲端。
 
-**核心產品驗收仍未完成**：本次可驗證合成收據的流程、帳務及資料保護，但尚未取得獲授權的真實收據測試集，也未安裝到 Pixel。Gemini Nano、Firebase、共同分攤、Sheets 與收款管理不在本次範圍。
+**核心產品驗收仍未完成**：合成收據的流程、帳務及資料保護已驗證。2026-09-11 後續獲授權的五張真實收據已跑現有 OCR 基線，五張交易總額皆 Unknown，不能視為可用的自動記帳品質。個人支出版本已另依使用者授權更新 Pixel；本次診斷工具只使用專用模擬器。Gemini Nano、Firebase、共同分攤、Sheets 與收款管理尚未接入。
 
 ## 核心原則
 
@@ -114,6 +114,8 @@ Nano 不是所有符合 `minSdk 26` 的裝置都保證可用。`minSdk 26` 是 M
 App 內部金額不使用 `Double`，而以幣別最小單位 `Long` 儲存；只有匯出 mapper 會依幣別格式化顯示值。`ReceiptExportRow` 也保留原價與折扣的 `Fact` 狀態，因此缺少價標時仍可匯出實付資料，而不會把未知折扣錯寫成 `0`。
 
 ## 建置與檢查
+
+工程測試現在可使用本機[收據測試室](#收據測試室與-api)：瀏覽器集中上傳，透過 HTTP API 重跑、讀取 OCR／候選／失敗原因與追加分析，免除手機反覆匯入。這是獨立測試資料，不會寫入手機帳本。
 
 需求：JDK 17、Android SDK Platform 37（SDK Manager 套件名稱 `platforms;android-37.0`）、Android Build Tools 36.0.0。
 
@@ -299,5 +301,50 @@ Sharesheet 的 `onNewIntent` 會使 Android `ActivityScenario` 不再追蹤原 l
 本次隔離 worktree：`D:\projects\pixel-receipt-assistant\.gradle\worktrees\receipt-auto-extraction`，分支 `feat/receipt-auto-extraction`；起始 SHA `d31e1049e69dd4c6de818ddb963c337e1e808b43` 已包含人工核對。工具與快取均在本 worktree 的 `.gradle/`，不共用其他任務的建置輸出。交付 APK `app/build/outputs/apk/debug/app-debug-manual-review-signature.apk` 已使用人工核對基線的 debug key 簽署，憑證與來源 APK 相同；手機現有安裝簽章仍未比對，**不要卸載或清除資料解決簽章衝突**。一般 `app-debug.apk` 使用本 worktree 獨立測試簽章，供 emulator 驗證，不應直接拿來更新手機。
 
 品質資料與驗證證據請見 [自動擷取驗證](docs/ARCHITECTURE.md#自動擷取驗證)。
+
+## 收據測試室與 API
+
+使用者可以直接在對話提供圖片路徑／附件，由助理執行下列命令；不用反覆到手機匯入或操作測試頁。瀏覽器上傳頁是可選入口。本工具只做辨識診斷，不是第二套帳本，不會寫入手機 Room。
+
+功能分支 `feat/receipt-test-workbench`，起點 `3e05386f8472a90af0f507a7e0ed486842fad981`（完整個人支出流程），worktree 位於 `D:\projects\pixel-receipt-assistant\.gradle\worktrees\receipt-test-workbench`。此分支尚未合回 main；不要將整個主專案 .gradle 當作可刪快取。
+
+首次準備需要 Python、JDK 17、Android SDK 的 API 35 Google APIs x86_64 系統映像及 Emulator；路徑可傳參數，不更動系統安裝：
+
+```powershell
+.\tools\receipt_lab\prepare-android.ps1 -Sdk <SDK路徑> -Jdk <JDK路徑> -GradleCache <Gradle快取路徑>
+.\receipt-lab.ps1 serve
+```
+
+準備腳本只建立／使用 `receipt-lab-test`、`emulator-5584`，安裝本分支主 APK 與 test APK，拒絕該連接埠上的其他 AVD。測試 adapter 每次再次確認 AVD 名稱與模擬器屬性，不操作實體 Pixel。APK 簽章不符時中止，不卸載、不清資料。主 APK 沒有 HTTP server；bridge 僅在 test APK。
+
+服務預設在 [localhost:8765](http://127.0.0.1:8765)，僅綁定 127.0.0.1；不提供 LAN、隧道或手機瀏覽器遠端存取。照片與結果寫到本 worktree 的 `.receipt-lab/`（Git 忽略）；原圖 SHA-256 去重。每張最多 20 MiB，一筆最多 20 張／100 MiB。第一次啟動建立隔離 Python venv 並安裝 Pillow；之後不需新增套件。
+
+```powershell
+.\receipt-lab.ps1 status
+.\receipt-lab.ps1 upload D:\Downloads\receipt-a.jpg D:\Downloads\receipt-b.jpg --run
+.\receipt-lab.ps1 upload D:\Downloads\page-1.jpg D:\Downloads\page-2.jpg --same-receipt --run
+.\receipt-lab.ps1 list
+.\receipt-lab.ps1 case <case-id>
+.\receipt-lab.ps1 run <case-id> --engine mlkit
+.\receipt-lab.ps1 result <run-id>
+.\receipt-lab.ps1 note <case-id> --file .\analysis.txt
+```
+
+照片預設各自一筆交易；多頁需明確指定。原圖、OCR／分欄結果、mapped candidate、警告、模型／parser 版本、來源 APK SHA-256、耗時和每次失敗均保留。分析 note 明確標為 `analysis_not_ground_truth`，不自動提升為人工真值。
+
+[API contract](http://127.0.0.1:8765/api/schema) 列出完整路由與 JSON 範例。寫入需 `X-Receipt-Lab: 1`；建立 run 需獨立 `requestId`，相同 ID 相同內容不重複執行，內容不同回 409。run 狀態為 queued／running／succeeded／failed／cancelled／interrupted；succeeded 只表示有候選，不是準確率。取消後晚到輸出不覆寫結果，adapter 仍收尾時不可刪案例；服務重啟將未完成 run 標成 interrupted，不自動重送。
+
+Gemini REST adapter 是**可選、尚未經 live 驗證**的測試路徑，與 App 未接入的 Firebase adapter 分開。只從服務程序的 `GEMINI_API_KEY` 讀憑證，不放 APK、網頁、命令參數或測試結果。模型以 `RECEIPT_LAB_GEMINI_MODEL`／serve 的 `--model` 設定。依當前官方範例預設 `gemini-3.8-flash`；API key 是否可用及配額須由實際服務驗證。每次送出必須同意指定模型、目的及這筆有序原圖 hashes；瀏覽器提供同意對話，CLI 需在獲授權後明確指定 `--engine gemini --allow-google-upload`。不自動重試、不偷偷 fallback 上雲。輸出只驗證候選格式與整數範圍，不產生最終帳務。參考：[Gemini 圖片](https://ai.google.dev/gemini-api/docs/image-understanding)、[structured output](https://ai.google.dev/gemini-api/docs/structured-output)、[generateContent API](https://ai.google.dev/api/generate-content)。
+
+### 2026-09-11 診斷結果
+
+- 188 項既有主機測試、lint、debug build 與 test APK build 通過；17 項 Python／真實 HTTP fixture 測試通過。fixture 僅驗證 API、保存、取消競態與輸出驗證，不是模型準確率。
+- 專用模擬器的實際 SDK：清楚合成單頁三筆品項及總額吻合；空白圖片失敗且可取回原始診斷；重疊多頁保留待核對候選。Windows ADB 二進位 stdin 截斷問題以 Base64 傳輸及 Android 解碼後原圖 SHA-256 檢查修正。
+- 使用者提供五張真實 JPEG，原圖均 3000×4000，沒有 App 降採樣。五張皆產生候選，但交易總額 **0/5 擷取成功，5/5 Unknown**。這批未改 parser，也未上雲。
+- 暫定視覺對照顯示商品漏列、摘要誤列、金額與日期 OCR 錯誤，以及分欄重建破壞原本正確的總額 token。需比較 VLM 直接看圖，而非無限制加店家規則；尚未選定替代引擎。
+- 詳盡原圖與私人分析只在 `.receipt-lab/reports/2026-09-11-real-baseline/`、本機 API 及測試資料庫；不提交照片、卡號或收據原文。參考標註由助理視覺判讀，未經使用者核定；正式驗收需另留未見樣本。
+- 尚未做：真實收據在 Pixel 完成修正／歸屬／保存／重開的整段驗收、實際修改操作數與完成時間、Nano availability、Gemini live 對照、手機瀏覽器／不同視窗尺寸的完整測試。
+
+Python 檢查：`python -m unittest discover -s tools/receipt_lab/tests -v`。Android 檢查仍用本專案既有 `gradlew.bat testDebugUnitTest lintDebug assembleDebug`；測試 bridge 另加 `assembleDebugAndroidTest`。一般 Android suite 不帶 receiptLabJob 時略過此手動呼叫的 bridge。
 
 2026-09-09 最終技術驗證：**162 項主機測試、0 failures／errors／skipped，lint No issues found，debug build 通過；獨立 Android API 35 x86_64 emulator 的 5 項真實 ML Kit／Compose 測試通過**。涵蓋照片匯入→OCR→自動建立品項→Room→人工核對→使用者確認，以及中文多品項／另列折扣、多頁重疊、空白失敗與畫面辨識按鈕自動導入表單。資料全為合成，真實收據品質及實體 Pixel 驗收未完成。

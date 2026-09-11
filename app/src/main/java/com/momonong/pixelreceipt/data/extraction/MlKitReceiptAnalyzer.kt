@@ -12,7 +12,10 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /** Bundled Chinese model: one image per SDK call, local multi-page parsing above the SDK. */
-class MlKitReceiptAnalyzer(private val images: ImageStore) : OnDeviceReceiptAnalyzer {
+class MlKitReceiptAnalyzer(private val images: ImageStore,
+    /** Optional local diagnostics: retain OCR even when the receipt grammar rejects a page. */
+    private val observeOcr: (List<OcrPage>) -> Unit = {},
+) : OnDeviceReceiptAnalyzer {
     override val descriptor = AiAnalyzerDescriptor("mlkit-chinese-receipt", "local-mlkit", "text-recognition-chinese-16.0.1",
         promptVersion = LocalReceiptParser.VERSION, schemaVersion = "receipt-observations-1",
         capabilities = setOf(AiCapability.ImageInput, AiCapability.MultipleImageInput, AiCapability.StructuredOutput))
@@ -63,6 +66,7 @@ class MlKitReceiptAnalyzer(private val images: ImageStore) : OnDeviceReceiptAnal
                 page
             }
             ensureActive()
+            observeOcr(pages)
             val recognition = LocalReceiptParser().parse(pages)
             if (recognition.items.isEmpty()) return@withContext AnalysisResult.Failure(AnalysisError(AnalysisErrorKind.InvalidOutput))
             AnalysisResult.Success(AnalyzedReceipt(null, null, null, "TWD", emptyList(), recognition))
