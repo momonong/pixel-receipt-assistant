@@ -330,14 +330,14 @@ sum(line printedTotal) + sum(Add adjustments) - sum(Subtract adjustments)
     = receipt total
 ```
 
-`referenceOriginalTotal` 只用於節省金額分析，不參與發票總額對帳。個人／代墊 split 的精確不變量會在 review feature 實作時另加；目前尚未宣稱完成。不符合時回傳可解釋的 reconciliation issue，不能讓模型補出一個剛好平衡的數字。使用者確認過的 override 也要保留原值、原因與 revision。
+`referenceOriginalTotal` 只用於節省金額分析，不參與發票總額對帳。個人／代墊分配的不變量已由 `PersonalExpenseCalculator` 與 review gate 實作，詳見「個人支出與品項歸屬」。不符合時回傳可解釋的 issue，不能讓模型補出一個剛好平衡的數字。使用者確認過的 override 也要保留原值、原因與 revision。
 
 ## AI routing 與上雲同意
 
-`AiRouter` 是 SDK-neutral domain use case，不是單一廠商 wrapper。它的 capability、foreground、network 與 consent gates 已完成；兩個實際 adapter 尚待接入：
+`AiRouter` 是 SDK-neutral domain use case，不是單一廠商 wrapper。它的 capability、foreground、network 與 consent gates 已完成；目前實際接入 Nano 與 bundled 中文 OCR，App 的雲端 adapter 仍待實作：
 
-1. `MlKitNanoAnalyzer`：直接使用 [ML Kit GenAI APIs](https://developers.google.com/ml-kit/genai) 所提供、由 Gemini Nano／AICore 支援的裝置端能力。每次依任務做 availability check；不透過 Gemini 消費者 App，也不能讀取該 App 的對話、登入狀態或私人模型介面。[Prompt API](https://developers.google.com/ml-kit/genai/prompt/android/get-started) 要求 API 26+。
-2. `FirebaseCloudAnalyzer`：透過 Firebase AI Logic 呼叫雲端模型，release 依 [Firebase App Check 指引](https://firebase.google.com/docs/ai-logic/app-check) 使用 Play Integrity，且 APK 不含可直接濫用的 Gemini API key。
+1. `MlKitNanoAnalyzer`（已接入，實機品質待驗證）：直接使用 [ML Kit GenAI APIs](https://developers.google.com/ml-kit/genai) 所提供、由 Gemini Nano／AICore 支援的裝置端能力。每次依任務做 availability check；不透過 Gemini 消費者 App，也不能讀取該 App 的對話、登入狀態或私人模型介面。[Prompt API](https://developers.google.com/ml-kit/genai/prompt/android/get-started) 要求 API 26+。
+2. `FirebaseCloudAnalyzer`（規劃）：透過 Firebase AI Logic 呼叫雲端模型，release 依 [Firebase App Check 指引](https://firebase.google.com/docs/ai-logic/app-check) 使用 Play Integrity，且 APK 不含可直接濫用的 Gemini API key。
 
 Router 採 local-first，但「本機不可用」不等於可以自動上雲。`CloudProcessingConsent.Granted` 綁定 case ID、每個 image ID 的 SHA-256、用途、analyzer ID、service ID 與同意時間；任一內容或處理服務不同都會回 `CloudConsentScopeMismatch`。Phase 1B 畫面仍須在送出前列出 evidence、目的、服務與敏感資訊；新增／修改圖片、改變用途或切換服務都要再次確認。拒絕上雲時保留本機／人工流程，不能阻止使用者手動完成記帳。
 
@@ -467,4 +467,4 @@ Nano 另走 `CLI／HTTP → 明確指定的 Pixel → debug NanoLabActivity → 
 
 仍未驗證：真實收據品質、實體 Pixel 10 Pro Fold／ARM64、折疊／旋轉／分割視窗、大字級與手機保留資料升級。多頁模糊對應可能需新增／刪除列，OCR 不保證找出全部重複；未知版面與影像品質仍需人工修正。Nano、cloud、菜單等排除項目未接入。
 
-整合注意：本 worktree 位於主 checkout 的 `.gradle/worktrees/` 以符合本任務可寫範圍；它是獨立 Git 工作目錄，不能把整個主 checkout `.gradle/` 當成一般快取刪除。未授權合回 main、推送或刪除 worktree。
+整合注意：功能 worktree 位於主 checkout 的 `.gradle/worktrees/`，是獨立 Git 工作目錄，不能把整個主 checkout `.gradle/` 當成一般快取刪除。`feat/receipt-nano-integration` 承接個人支出、測試室與 Nano 成果；推送與合併依當次授權執行，私人樣本／模型輸出及既有 worktree 仍保留在本機。

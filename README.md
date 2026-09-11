@@ -6,6 +6,10 @@ PixelReceipt AI 是以 **Google Pixel 10 Pro Fold** 為主要實機的原生 And
 
 **核心產品驗收仍未完成**：已接入公開 ML Kit Prompt API／AICore Gemini Nano、嚴格候選驗證與既有核對流程，提供明確選擇的傳統 OCR 備援。2026-09-11 使用者離開並拔除手機，本次未安裝新版、未執行 Pixel Nano；主機與獨立模擬器驗證不能代表 Nano 品質。五張真實收據只有既有 OCR 基線，總額皆 Unknown。Firebase、共同分攤、Sheets 與收款管理尚未接入；AppFunctions 完成公開 API 的有界草稿試作，Gemini 助理端到端仍未驗證。詳見下方「Pixel Gemini Nano 整合」。
 
+本版整合個人支出 `3e05386`、收據測試室 `8fb69de` 與 Nano `cde7d9f`，交付分支為 `feat/receipt-nano-integration`。以下功能分支、舊 APK、裝置更新與驗證數據保留為各階段歷史；GitHub 推送與合併狀態以 PR 記錄為準。合併程式碼不代表手機已更新、Nano 品質通過或已發布產品。私人收據與模型輸出不在 Git 中，新 checkout 不會自動取得它們。
+
+2026-09-11 整合 worktree 執行 `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest --offline --no-daemon --max-workers=1` 通過，196 項主機測試結果（包含 build cache 還原）、0 failures／errors／skipped，lint 無問題；21 項 Python／HTTP 測試通過。SQL schema v1 相對原 main 沒有變更，payload format 4 保持舊資料相容。此次 GitHub 整合沒有再操作手機或重跑裝置測試，裝置及品質證據沿用下方明確標示的來源階段。
+
 ## 核心原則
 
 2026-09-09 整合基線包含圖片匯入 `1a2f624`、人工核對 `d31e104` 與本機 OCR `40e6a82`。主專案重新執行 `testDebugUnitTest lintDebug assembleDebug --offline --no-daemon --max-workers=1` 通過；162 項測試結果由 Gradle build cache 還原，0 failures／errors／skipped，lint 無問題，debug APK 組裝成功。這次未重跑裝置測試；真實收據品質、完整 Pixel 操作及保留資料升級仍待驗收。這是歷史整合結果；2026-09-11 的完整流程與新驗證見下方「核對、品項歸屬與確認保存」。
@@ -306,7 +310,7 @@ Sharesheet 的 `onNewIntent` 會使 Android `ActivityScenario` 不再追蹤原 l
 
 ## Pixel Gemini Nano 整合
 
-本次工作在 `feat/pixel-nano-receipt`／`.gradle/worktrees/pixel-nano-receipt`，起點 `8fb69de1e72f76d958bdb9ee48bd213a5d297c27`，已核對包含個人支出基線 `3e05386`。本機及遠端 main 均為 `032949c`，未包含這批功能；本次沒有合回 main 或推送。下方 OCR 與測試室的來源分支／簽章記錄保留為歷史證據，不能當成本次交付狀態。
+Nano 開發來源為 `feat/pixel-nano-receipt`／`.gradle/worktrees/pixel-nano-receipt`，起點 `8fb69de1e72f76d958bdb9ee48bd213a5d297c27`，包含個人支出基線 `3e05386`。開發開始時 main 為 `032949c`；完整成果已由 `feat/receipt-nano-integration` 承接。下方 OCR 與測試室的來源分支／簽章記錄保留為歷史證據，不能當成最新交付狀態。
 
 ### 能力與執行邊界
 
@@ -357,7 +361,7 @@ Nano bridge 是僅 debug APK 的獨立前景 Activity，只處理指定 UUID／h
 - 主機：196 項 JVM／Robolectric 測試通過（含 Nano schema、取消／前景／不可用不 fallback、Unknown、零元與重複商品、保留人工修改、實際 Room reopen），lint 無問題，debug／Android test APK 建置通過。Python／HTTP 21 項測試通過；不視為模型準確率。
 - 獨立 API 35 x86_64 AVD `receipt-nano-host-test`／emulator-5586：Compact 的 9 項既有實際 ML Kit／Compose 流程通過；Expanded 與 Compact 1.5 倍字級各 1 項個人支出完整流程通過，截圖確認摘要及保存按鈕可用。共 11 次執行、9 個不同案例，全部為合成輸入。新版 debug 診斷頁另在此 emulator 實際呼叫 SDK capability probe，正確保存 UNAVAILABLE／structuredOutput=false；沒有執行 Nano 推論，不能代表 Pixel 能力。
 - 為通過既有嚴格 lint，更新 Compose BOM 2026.09.00、Room 2.8.5、Robolectric 4.17，沒有停用檢查。SQL v1 schema 無 diff；payload 維持 format 4，新增 nullable 觀察快照，舊格式缺省為 null，沒有 migration 或自動補造歸屬。
-- 五張開發樣本 bytes、case IDs 與保存的 A 基線已逐檔核對並複製至本 worktree。B／C 沒有執行，不能報告品質勝出或實際補正時間；私人比較表位於 `.receipt-lab/reports/2026-09-11-nano-comparison/report.md`。照片、收據原文、API 輸出與工具／簽章都未提交。
+- 五張開發樣本 bytes、case IDs 與保存的 A 基線已逐檔核對並複製至 Nano 來源 worktree。B／C 沒有執行，不能報告品質勝出或實際補正時間；私人比較表位於主 checkout 下 `.gradle/worktrees/pixel-nano-receipt/.receipt-lab/reports/2026-09-11-nano-comparison/report.md`。新整合 worktree／GitHub 不含這些私人樣本；重跑前須按明確授權來源複製並核對 hash。照片、收據原文、API 輸出與工具／簽章都未提交。
 
 手機重接後需完成以下五組驗收，完成前不宣稱核心產品通過：
 
@@ -371,7 +375,7 @@ Nano bridge 是僅 debug APK 的獨立前景 Activity，只處理指定 UUID／h
 
 使用者可以直接在對話提供圖片路徑／附件，由助理執行下列命令；不用反覆到手機匯入或操作測試頁。瀏覽器上傳頁是可選入口。本工具只做辨識診斷，不是第二套帳本，不會寫入手機 Room。
 
-功能分支 `feat/receipt-test-workbench`，起點 `3e05386f8472a90af0f507a7e0ed486842fad981`（完整個人支出流程），worktree 位於 `D:\projects\pixel-receipt-assistant\.gradle\worktrees\receipt-test-workbench`。此分支尚未合回 main；不要將整個主專案 .gradle 當作可刪快取。
+測試室開發來源分支為 `feat/receipt-test-workbench`，起點 `3e05386f8472a90af0f507a7e0ed486842fad981`（完整個人支出流程），worktree 位於 `D:\projects\pixel-receipt-assistant\.gradle\worktrees\receipt-test-workbench`；成果已包含在本次完整整合中。不要將整個主專案 .gradle 當作可刪快取。
 
 首次準備需要 Python、JDK 17、Android SDK 的 API 35 Google APIs x86_64 系統映像及 Emulator；路徑可傳參數，不更動系統安裝：
 
