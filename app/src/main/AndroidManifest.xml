@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
 
     <application
         android:name=".app.ReceiptApplication"
@@ -12,6 +12,14 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.PixelReceipt"
         android:usesCleartextTraffic="false">
+        <service android:name=".appfunctions.ReceiptFunctionService"
+            android:enabled="@bool/appfunctions_enabled"
+            tools:targetApi="36"
+            android:permission="android.permission.BIND_APP_FUNCTION_SERVICE" android:exported="true">
+            <property android:name="android.app.appfunctions.schema" android:value="app_functions_schema.xsd" />
+            <property android:name="android.app.appfunctions.v2" android:value="receipt_functions.xml" />
+            <intent-filter><action android:name="android.app.appfunctions.AppFunctionService" /></intent-filter>
+        </service>
         <activity
             android:name=".MainActivity"
             android:launchMode="singleTop"

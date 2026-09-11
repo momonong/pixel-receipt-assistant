@@ -1,0 +1,112 @@
+{
+  "format": 3,
+  "value": {
+    "id": "legacy-review",
+    "merchant": {
+      "tag": "known",
+      "data": {
+        "value": "舊商店",
+        "provenance": {
+          "tag": "user",
+          "data": {
+            "confirmedAtEpochMillis": 10,
+            "evidence": []
+          }
+        }
+      }
+    },
+    "total": {
+      "tag": "known",
+      "data": {
+        "value": {
+          "minorUnits": 100,
+          "currencyCode": "TWD"
+        },
+        "provenance": {
+          "tag": "user",
+          "data": {
+            "confirmedAtEpochMillis": 10,
+            "evidence": []
+          }
+        }
+      }
+    },
+    "items": [
+      {
+        "id": "legacy-tea",
+        "rawName": {
+          "tag": "known",
+          "data": {
+            "value": "茶",
+            "provenance": {
+              "tag": "user",
+              "data": {
+                "confirmedAtEpochMillis": 10,
+                "evidence": []
+              }
+            }
+          }
+        },
+        "barcodeOrSku": {
+          "tag": "unknown",
+          "data": {
+            "reason": "NotObserved",
+            "evidence": []
+          }
+        },
+        "quantity": {
+          "tag": "known",
+          "data": {
+            "value": 2,
+            "provenance": {
+              "tag": "user",
+              "data": {
+                "confirmedAtEpochMillis": 10,
+                "evidence": []
+              }
+            }
+          }
+        },
+        "printedTotal": {
+          "tag": "known",
+          "data": {
+            "value": {
+              "minorUnits": 100,
+              "currencyCode": "TWD"
+            },
+            "provenance": {
+              "tag": "user",
+              "data": {
+                "confirmedAtEpochMillis": 10,
+                "evidence": []
+              }
+            }
+          }
+        },
+        "referenceOriginalTotal": {
+          "tag": "unknown",
+          "data": {
+            "reason": "NotObserved",
+            "evidence": []
+          }
+        }
+      }
+    ],
+    "adjustments": [],
+    "allocations": [],
+    "promotionOffers": [],
+    "promotionApplications": [],
+    "evidenceAssetIds": [],
+    "evidenceLinks": [],
+    "assemblyStatus": "CompleteByUser",
+    "stage": "Confirmed",
+    "revision": 3,
+    "transactionDate": {
+      "tag": "unknown",
+      "data": {
+        "reason": "NotObserved",
+        "evidence": []
+      }
+    }
+  }
+}

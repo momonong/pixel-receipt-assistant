@@ -24,7 +24,11 @@ class ReceiptDraft(
     /** ISO calendar date (yyyy-MM-dd); legacy receipts remain explicitly unknown. */
     val transactionDate: Fact<String> = Fact.Unknown(UnknownFactReason.NotObserved),
     val extraction: ReceiptExtractionRecord? = null,
+    personalExpenses: Collection<LineExpenseDecision> = emptyList(),
+    expenseAdjustments: Collection<ExpenseAdjustmentDecision> = emptyList(),
 ) {
+    val personalExpenses: List<LineExpenseDecision> = personalExpenses.toList()
+    val expenseAdjustments: List<ExpenseAdjustmentDecision> = expenseAdjustments.toList()
     val items: List<ReceiptLineDraft> = items.toList()
     val adjustments: List<ReceiptAdjustment> = adjustments.toList()
     val allocations: List<Allocation> = allocations.toList()
@@ -67,6 +71,8 @@ class ReceiptDraft(
         revision: Long = this.revision,
         transactionDate: Fact<String> = this.transactionDate,
         extraction: ReceiptExtractionRecord? = this.extraction,
+        personalExpenses: Collection<LineExpenseDecision> = this.personalExpenses,
+        expenseAdjustments: Collection<ExpenseAdjustmentDecision> = this.expenseAdjustments,
     ) = ReceiptDraft(
         id = id,
         merchant = merchant,
@@ -83,6 +89,8 @@ class ReceiptDraft(
         revision = revision,
         transactionDate = transactionDate,
         extraction = extraction,
+        personalExpenses = personalExpenses,
+        expenseAdjustments = expenseAdjustments,
     )
 
     override fun equals(other: Any?): Boolean = other is ReceiptDraft &&
@@ -90,6 +98,8 @@ class ReceiptDraft(
         merchant == other.merchant &&
         transactionDate == other.transactionDate &&
         extraction == other.extraction &&
+        personalExpenses == other.personalExpenses &&
+        expenseAdjustments == other.expenseAdjustments &&
         total == other.total &&
         items == other.items &&
         adjustments == other.adjustments &&
@@ -107,6 +117,8 @@ class ReceiptDraft(
         result = 31 * result + merchant.hashCode()
         result = 31 * result + transactionDate.hashCode()
         result = 31 * result + (extraction?.hashCode() ?: 0)
+        result = 31 * result + personalExpenses.hashCode()
+        result = 31 * result + expenseAdjustments.hashCode()
         result = 31 * result + total.hashCode()
         result = 31 * result + items.hashCode()
         result = 31 * result + adjustments.hashCode()

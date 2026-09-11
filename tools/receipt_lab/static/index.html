@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PixelReceipt 收據測試室</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<header><div class="brand"><span class="mark">P</span><div><strong>PixelReceipt</strong><span class="eyebrow">收據測試室</span></div></div><span class="local">● 照片先存這台電腦</span></header>
+<main>
+<section class="intro"><span class="eyebrow">讓結果說明問題</span><h1>上傳一次，<br>一起把收據讀對。</h1><p>集中放入測試照片。每次辨識、原始文字和分析都會保留，之後可以直接重跑、比較，不必反覆在手機匯入。</p></section>
+<section class="upload panel" aria-labelledby="upload-title"><div><h2 id="upload-title">加入收據照片</h2><p>JPEG、PNG、WebP · 每張最多 20 MiB</p></div><label id="drop" class="drop" tabindex="0"><input id="files" type="file" accept="image/jpeg,image/png,image/webp" multiple><span class="plus">＋</span><strong>選取照片，或拖到這裡</strong><span id="selection">可一次加入多張收據</span></label>
+<label class="check"><input id="same" type="checkbox">這些照片是同一張收據的多個頁面</label>
+<div class="upload-actions"><button id="upload" disabled>上傳並執行本機辨識</button><button id="save-only" class="secondary" disabled>只保存照片</button></div><p id="upload-progress" aria-live="polite"></p></section>
+<section class="workspace"><aside class="panel"><div class="section-row"><h2>測試收據 <span id="count">0</span></h2><button id="refresh" class="text">重新整理</button></div><div id="cases"></div></aside>
+<article id="detail" class="panel detail"><div class="empty"><span class="empty-icon">▤</span><h2>你的測試結果會出現在這裡</h2><p>先上傳照片。我可以透過 API 讀取結果、定位錯誤，再把分析留在同一筆收據中。</p></div></article></section>
+<footer><span id="engines">正在連線…</span><a href="/api/schema" target="_blank" rel="noopener">API 格式與範例 ↗</a><p>辨識結果是待核對候選，不會寫入手機帳本。沒有人工基準時，未知欄位數不代表準確率。</p></footer>
+</main><div id="message" role="status" aria-live="polite"></div>
+<dialog id="cloud-dialog"><h2>用 Google Gemini 比較這筆收據？</h2><p id="cloud-info"></p><p>會把這筆收據全部照片傳送至 Google；可能產生 API 費用。這次同意只適用這筆照片與顯示的模型，重跑需要重新送出。</p><div class="actions"><button id="cloud-confirm">同意傳送並測試</button><button id="cloud-cancel" class="secondary">留在本機</button></div></dialog>
+</body></html>

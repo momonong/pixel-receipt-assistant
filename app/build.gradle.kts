@@ -73,6 +73,10 @@ dependencies {
     implementation(libs.androidx.compose.material3.adaptive.navigation)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.mlkit.chinese)
+    implementation(libs.mlkit.prompt)
+    ksp(libs.mlkit.schema)
+    implementation(libs.androidx.appfunctions)
+    ksp(libs.androidx.appfunctions.compiler)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 

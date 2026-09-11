@@ -67,9 +67,20 @@ class ReviewSession(
         if (!_state.value.editable) return
         val previous = _state.value.input
         // Changed contents must be checked again; never carry a stale completeness assertion.
-        val next = if (previous.complete && input.copy(complete = previous.complete) != previous)
+        fun contents(value: ReviewInput) = value.copy(complete = false,
+            lines = value.lines.map { it.copy(expense = null) }, adjustments = value.adjustments.map { it.copy(expense = null) })
+        val next = if (previous.complete && contents(input) != contents(previous))
             input.copy(complete = false) else input
         publish(_state.value.copy(input = next, message = null))
+    }
+
+    /** Lazy UI callbacks can outlive their rendered snapshot. Merge the action into current input. */
+    fun update(change: (ReviewInput) -> ReviewInput) = edit(change(_state.value.input))
+    fun editLine(line: ReviewLineInput) = update { current ->
+        current.copy(lines = current.lines.map { if (it.id == line.id) line else it })
+    }
+    fun editAdjustment(adjustment: ReviewAdjustmentInput) = update { current ->
+        current.copy(adjustments = current.adjustments.map { if (it.id == adjustment.id) adjustment else it })
     }
 
     fun close() {
@@ -108,6 +119,7 @@ class ReviewSession(
             when (val result = TransitionReceiptStage(repository)(base, ReceiptStage.Confirmed)) {
                 is TransitionReceiptStageResult.Updated -> publish(ReviewState(result.draft, ReviewInput.from(result.draft), busy = true, message = "已確認記帳，此交易唯讀。"))
                 is TransitionReceiptStageResult.ConfirmationBlocked -> publish(_state.value.copy(message = reconciliationText(result.reconciliation)))
+                is TransitionReceiptStageResult.ExpenseBlocked -> publish(_state.value.copy(message = result.reasons.joinToString("\n")))
                 TransitionReceiptStageResult.Conflict -> conflict(base.id)
                 else -> publish(_state.value.copy(message = "目前狀態無法確認，請重新載入草稿。"))
             }

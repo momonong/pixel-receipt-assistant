@@ -6,6 +6,22 @@ import com.momonong.pixelreceipt.domain.rules.*
 import java.time.LocalDate
 import java.util.UUID
 
+data class ExpenseInput(
+    val method: ExpenseSplitMethod = ExpenseSplitMethod.ByQuantity,
+    val wholePurpose: ExpensePurpose? = null,
+    val quantities: Map<ExpensePurpose, String> = emptyMap(),
+    val amounts: Map<ExpensePurpose, String> = emptyMap(),
+    val basisKey: String? = null,
+    val confirmedAtEpochMillis: Long? = null,
+)
+
+data class AdjustmentExpenseInput(
+    val method: ExpenseAdjustmentMethod = ExpenseAdjustmentMethod.ProportionalAmount,
+    val amounts: Map<ExpensePurpose, String> = emptyMap(),
+    val basisKey: String? = null,
+    val confirmedAtEpochMillis: Long? = null,
+)
+
 /** Raw editor values remain separate from persisted facts, including invalid partial input. */
 data class ReviewLineInput(
     val id: String = UUID.randomUUID().toString(),
@@ -13,6 +29,7 @@ data class ReviewLineInput(
     val quantity: String = "",
     val amount: String = "",
     val evidenceIds: Set<String> = emptySet(),
+    val expense: ExpenseInput? = null,
 )
 
 data class ReviewAdjustmentInput(
@@ -24,6 +41,7 @@ data class ReviewAdjustmentInput(
     val scope: String = "",
     val portions: Map<String, String> = emptyMap(),
     val evidenceIds: Set<String> = emptySet(),
+    val expense: AdjustmentExpenseInput? = null,
 )
 
 data class ReviewInput(
@@ -42,7 +60,9 @@ data class ReviewInput(
             complete = draft.assemblyStatus in setOf(ReceiptAssemblyStatus.CompleteByUser, ReceiptAssemblyStatus.CompleteByRule),
             evidenceIds = draft.referencesFor(EvidenceLinkTarget.Receipt(draft.id)),
             lines = draft.items.map { ReviewLineInput(it.id, it.rawName.inputText(), it.quantity.inputText(),
-                it.printedTotal.inputText(), draft.referencesFor(EvidenceLinkTarget.ReceiptLine(it.id))) },
+                it.printedTotal.inputText(), draft.referencesFor(EvidenceLinkTarget.ReceiptLine(it.id)),
+                draft.personalExpenses.find { d -> d.lineId == it.id }?.let { d -> ExpenseInput(d.method, d.wholePurpose,
+                    d.quantities.mapValues { e -> e.value.toString() }, d.amounts.mapValues { e -> e.value.toString() }, d.basisKey, d.confirmedAtEpochMillis) }) },
             adjustments = draft.adjustments.map { adjustment ->
                 val scope = (adjustment.scope as? Fact.Known)?.value
                 val portions = when (scope) {
@@ -53,7 +73,9 @@ data class ReviewInput(
                 ReviewAdjustmentInput(adjustment.id, adjustment.amount.inputText(), adjustment.direction,
                     adjustment.kind, when (scope) { null -> ""; ReceiptAdjustmentScope.Order -> "order"; else -> "lines" },
                     portions.associate { it.receiptLineId to it.quantity.toString() },
-                    draft.referencesFor(EvidenceLinkTarget.Adjustment(adjustment.id)))
+                    draft.referencesFor(EvidenceLinkTarget.Adjustment(adjustment.id)),
+                    draft.expenseAdjustments.find { it.adjustmentId == adjustment.id }?.let { d -> AdjustmentExpenseInput(d.method,
+                        d.amounts.mapValues { e -> e.value.toString() }, d.basisKey, d.confirmedAtEpochMillis) })
             },
         )
     }
@@ -157,6 +179,16 @@ class ManualReceiptReview(private val repository: ReceiptRepository) {
                 transactionDate = field("交易日期", input.date, base.transactionDate, receiptRefs, ReviewParsing::date),
                 total = field("收據總額", input.total, base.total, receiptRefs) { Money(ReviewParsing.amount(it), currency) },
                 items = lines, adjustments = adjustments, evidenceLinks = links,
+                personalExpenses = input.lines.mapNotNull { line -> line.expense?.let { e ->
+                    LineExpenseDecision(line.id, e.method, e.wholePurpose,
+                        e.quantities.filterValues { it.isNotBlank() }.mapValues { (_, text) ->
+                            ReviewParsing.amount(text.trim()).also { require(it <= Int.MAX_VALUE) { "歸屬件數超出範圍。" } }.toInt()
+                        }, e.amounts.filterValues { it.isNotBlank() }.mapValues { ReviewParsing.amount(it.value.trim()) }, e.basisKey, e.confirmedAtEpochMillis)
+                } },
+                expenseAdjustments = input.adjustments.mapNotNull { a -> a.expense?.let { e ->
+                    ExpenseAdjustmentDecision(a.id, e.method,
+                        e.amounts.filterValues { it.isNotBlank() }.mapValues { ReviewParsing.amount(it.value.trim()) }, e.basisKey, e.confirmedAtEpochMillis)
+                } },
                 assemblyStatus = if (input.complete == initial.complete) base.assemblyStatus
                     else if (input.complete) ReceiptAssemblyStatus.CompleteByUser else ReceiptAssemblyStatus.Collecting,
             )

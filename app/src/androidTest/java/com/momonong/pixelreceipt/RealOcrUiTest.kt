@@ -31,14 +31,12 @@ class RealOcrUiTest {
             listOf(ImportInput { bytes.inputStream() }), EvidenceImportSource.Other) { _, _ -> }.draftId!! }
         ui.waitUntil(10_000) { ui.onAllNodesWithTag("transaction-$id").fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithTag("transaction-$id").performClick()
-        ui.onNodeWithTag("review-form").performScrollToNode(hasText("其他工具：本機收據辨識 ＋"))
-        ui.onNodeWithText("其他工具：本機收據辨識 ＋").performClick()
-        ui.onNodeWithTag("ocr-photo-0").performScrollTo().performClick()
-        ui.onNodeWithText("辨識收據／重試").performScrollTo().performClick()
+        ui.onNodeWithTag("engine-ocr").performScrollTo().performClick()
+        ui.onNodeWithTag("recognize-receipt").performScrollTo().performClick()
+        ui.waitUntil(30_000) { ui.onAllNodesWithText("1. MILK").fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithTag("review-form").performScrollToIndex(0)
-        ui.waitUntil(30_000) { ui.onAllNodes(hasSetTextAction() and hasText("EXAMPLE STORE")).fetchSemanticsNodes().isNotEmpty() }
-        ui.onNodeWithTag("review-form").performScrollToNode(hasText("商家"))
-        ui.onNode(hasSetTextAction() and hasText("EXAMPLE STORE")).assertExists()
+        ui.onNodeWithText("商家與日期 ＋").performClick()
+        ui.onNodeWithTag("merchant").performScrollTo().assertTextContains("EXAMPLE STORE")
         ui.onNodeWithTag("review-form").performScrollToNode(hasText("修改品項 1"))
         ui.onNodeWithText("修改品項 1").performClick()
         ui.onNodeWithTag("line-name").performScrollTo().assertTextContains("MILK")

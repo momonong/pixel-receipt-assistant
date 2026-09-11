@@ -169,6 +169,22 @@ class ReceiptExtractionTest {
         assertEquals(base, repo.current)
     }
 
+    @Test fun savedOwnershipCannotBeReplacedEvenWithOcrReplacementConsent() = runBlocking {
+        val assigned = base.copy(personalExpenses = listOf(LineExpenseDecision("line", ExpenseSplitMethod.WholeLine, ExpensePurpose.Advance)))
+        val repo = ReviewTestRepository(assigned)
+        val useCase = ExtractReceipt(repo, analyzer { error("must not run") }, { listOf(source) }, {})
+        try { useCase.run(assigned, setOf(source.id), true) { true }; fail() } catch (_: IllegalArgumentException) { }
+        assertEquals(assigned, repo.current)
+    }
+
+    @Test fun calendarTokensUseRawOcrInsteadOfColumnGapsAndNeverAcceptTruncatedDays() {
+        val split = OcrPage(1000, 1000, listOf(OcrLine("2026/09/1 1", 1, 1, 900, 30, rawText = "2026/09/11")))
+        assertEquals("2026-09-11", parser.parse(listOf(split)).dates.single().text)
+        assertTrue(parser.parse(listOf(page("2026/09/1 1"))).dates.isEmpty())
+        assertEquals("2026-09-11", parser.parse(listOf(page("2026/09/11 12:35"))).dates.single().text)
+        assertTrue(parser.parse(listOf(page("2026/09/111"))).dates.isEmpty())
+    }
+
     @Test fun confirmedTransactionCannotInvokeAnalyzer() = runBlocking {
         val confirmed = base.copy(stage = ReceiptStage.Confirmed)
         val repo = ReviewTestRepository(confirmed)

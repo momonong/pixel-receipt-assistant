@@ -8,4 +8,6 @@ data class ReceiptExtractionRecord(
     val warnings: List<String>,
     val originalItemCount: Int,
     val originalReconciliation: String,
+    /** Optional observation audit, not ledger fields. Missing in older payloads stays null. */
+    val unlocalizedObservationsJson: String? = null,
 )

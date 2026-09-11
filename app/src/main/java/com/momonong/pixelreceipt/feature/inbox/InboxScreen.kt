@@ -60,7 +60,7 @@ fun InboxScreen(viewModel: InboxViewModel) {
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("把這筆消費記下來", style = MaterialTheme.typography.titleLarge)
-                            Text("先保存明細照片，再填寫品項與金額。未填完也能保存草稿，稍後繼續。")
+                            Text("選取收據照片，App 先建立品項與金額清單。核對後指定自用、代買或送禮，查看自己負擔多少。")
                             Button(onClick = { pick(null) }, enabled = progress == null && !review.busy,
                                 modifier = Modifier.fillMaxWidth().testTag("new-transaction")) { Text("新增消費・選照片") }
                             TextButton(onClick = viewModel::createDraft, enabled = progress == null && !review.busy,

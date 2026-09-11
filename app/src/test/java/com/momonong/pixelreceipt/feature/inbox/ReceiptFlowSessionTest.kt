@@ -56,7 +56,7 @@ class ReceiptFlowSessionTest {
         assertFalse(session.state.value.input.complete)
         session.save(); session.confirm()
         assertEquals(ReceiptStage.NeedsReview, repo.current!!.stage)
-        session.edit(session.state.value.input.copy(complete = true)); session.save(); session.confirm()
+        session.edit(session.state.value.input.copy(complete = true).withSelfExpenses(session.state.value.base!!)); session.save(); session.confirm()
         assertEquals(ReceiptStage.Confirmed, repo.current!!.stage)
     }
 

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="nano_lab_intro">PixelReceipt · Nano 本機測試\n只處理指定樣本，不寫入帳本。</string>
+    <string name="nano_lab_cancel">取消測試</string>
+    <string name="nano_lab_invalid">沒有有效的新測試輸入。</string>
+    <string name="nano_lab_interrupted">測試頁已重建，上次辨識不會自動重跑。請在主機查看該次結果；重試須建立新的測試。</string>
+    <string name="nano_lab_probe">檢查 Nano／AICore…</string>
+    <string name="nano_lab_running">正在執行 %1$s · 請保持前景\n不寫入帳本；可取消。</string>
+    <string name="nano_lab_done">測試狀態：%1$s\n%2$s\n結果已保存至本次測試目錄。</string>
+</resources>

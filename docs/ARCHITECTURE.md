@@ -2,7 +2,7 @@
 
 ## 目標與範圍
 
-這個專案以 **Google Pixel 10 Pro Fold** 為主要實機，採原生 Android 架構，同時保持對一般 Android 手機與不同視窗尺寸的相容性。現在已完成可建置、可安裝的 Phase 0，以及 Phase 1A 的 evidence／Fact／promotion／pricing／AI routing domain contracts。本機 Sharesheet、Photo Picker、多圖 inbox、Room、人工核對、確認記帳與 ML Kit 中文 OCR／本機收據解析已接入；Gemini Nano、Firebase AI Logic、拆帳與 Google Sheets adapters 仍待實作。下圖的 Nano 與雲端仍是目標架構，現行辨識流程見「自動擷取架構」。
+這個專案以 **Google Pixel 10 Pro Fold** 為主要實機，採原生 Android 架構，同時保持對一般 Android 手機與不同視窗尺寸的相容性。Sharesheet、Photo Picker、多圖 inbox、Room、ML Kit Gemini Nano／中文 OCR、人工核對、自用／代買／送禮、部分件數分配、個人支出及確認記帳已接入。Nano 使用公開 Prompt／AICore，2026-09-11 因使用者離開拔除手機，實機能力與收據品質尚未驗證。Firebase AI Logic、共同分攤與 Google Sheets adapters 仍待實作；下圖包含這些目標，現行流程見「自動擷取架構」。AppFunctions 僅完成公開 service 建立空白待核對草稿的試作，尚無 Gemini 助理端到端證據。
 
 App 支援下限採 `minSdk 26`。這只是安裝下限，不代表每台 Android 8+ 裝置都能執行 Gemini Nano；Nano 必須另外在 runtime 檢查裝置、Android／AICore、模型下載與個別 ML Kit GenAI API 的可用性。
 
@@ -35,7 +35,7 @@ App 支援下限採 `minSdk 26`。這只是安裝下限，不代表每台 Androi
                          Room → Adaptive review → Sheets export
 ```
 
-Compose UI → domain ← data adapters 的依賴方向不變。Domain 不引用 Android URI、ML Kit、Firebase、Room 或 Google Sheets 型別；`AiRouter` 位於 domain use case，透過 `OnDeviceReceiptAnalyzer`／`CloudReceiptAnalyzer` ports 呼叫 adapters（目前為本機中文 OCR，Nano 與 cloud 待實作）。Evidence repository 與 exporter 同樣只傳 domain model 或明確結果。
+Compose UI → domain ← data adapters 的依賴方向不變。Domain 不引用 Android URI、ML Kit、Firebase、Room 或 Google Sheets 型別；`AiRouter` 位於 domain use case，透過 `OnDeviceReceiptAnalyzer`／`CloudReceiptAnalyzer` ports 呼叫 adapters（本機 Nano、中文 OCR 已接入，App cloud 待實作）。Evidence repository 與 exporter 同樣只傳 domain model 或明確結果。
 
 目前先維持單一 `:app` module，以 package 邊界降低初期複雜度；當 Room、相機與網路 adapter 進入專案後，再依編譯隔離與多人協作需求拆成 `:domain`、`:data`、`:feature-*`。不要只為了形式提早拆 module。
 
@@ -120,19 +120,54 @@ NeedsReview → Confirmed → ExportPending → Exported
                                   └────→ AuthorizationRequired
 ```
 
-`NeedsReview` 不代表資料已完整；它可以合法包含 evidence、matching 或 adjustment 的 `Unknown`。`TransitionReceiptStage` 在進入 `Confirmed` 前必須取得 `ReceiptReconciler.Balanced` 或 `WithinTolerance`；incomplete receipt、未知 merchant／line name／quantity／total／line amount／adjustment amount／scope、pending promotion 或 validation issue 都會回 `ConfirmationBlocked`，且不寫入 repository。
+`NeedsReview` 不代表資料已完整；它可以合法包含 evidence、matching 或 adjustment 的 `Unknown`。`TransitionReceiptStage` 在進入 `Confirmed` 前必須取得 `ReceiptReconciler.Balanced` 或 `WithinTolerance`，再通過個人支出分配 gate；incomplete receipt、未知 merchant／line name／quantity／total／line amount／adjustment amount／scope、pending promotion 或 validation issue 都會回 `ConfirmationBlocked`，且不寫入 repository。
 
 ### 人工核對與編輯緩衝
 
-狀態機只新增 `Captured → NeedsReview` 邊：讓已保存圖片直接交給使用者核對，無須虛構 `PendingAnalysis`／`Analyzing` 或 extraction provenance。進入時仍經 `TransitionReceiptStage` 和 repository CAS，不改寫 merchant／其他 Fact。`NeedsReview → Confirmed` 的既有容差和必要資料要求不變；新日期欄位 Unknown 不單獨阻擋既有 gate。
+狀態機只新增 `Captured → NeedsReview` 邊：讓已保存圖片直接交給使用者核對，無須虛構 `PendingAnalysis`／`Analyzing` 或 extraction provenance。進入時仍經 `TransitionReceiptStage` 和 repository CAS，不改寫 merchant／其他 Fact。`NeedsReview → Confirmed` 的既有容差和必要資料要求不變，另外要求個人支出分配完成；日期欄位 Unknown 不單獨阻擋既有 gate。
 
-`InboxViewModel` 持有 `ReviewSession`，以 StateFlow 提供原始 snapshot、編輯輸入、busy／dirty／conflict／錯誤狀態。`ReviewInput` 的文字、明確 scope portions 與原始 revision 經 SavedStateHandle 保存，畫面重建不需要把半成品文字寫進 Room。返回可選保存並離開、繼續填寫或明確放棄；保存成功後才執行離開／選照片。force-stop 等沒有 saved-state 復原保證的操作，UI 提醒先保存。編輯限制為 100 品項／50 調整及每欄 500 字元。busy 時抑制重複操作與返回，Confirmed 和其他非 NeedsReview 狀態唯讀。
+`InboxViewModel` 持有 `ReviewSession`，以 StateFlow 提供原始 snapshot、編輯輸入、busy／dirty／conflict／錯誤狀態。LazyColumn 的欄位 callback 透過 update／editLine／editAdjustment 對目前緩衝套用局部動作，避免過期畫面 snapshot 覆蓋其他列剛完成的歸屬；持久化仍使用原始 CAS snapshot。`ReviewInput` 的文字、明確 scope portions 與原始 revision 經 SavedStateHandle 保存，畫面重建不需要把半成品文字寫進 Room。返回可選保存並離開、繼續填寫或明確放棄；保存成功後才執行離開／選照片。force-stop 等沒有 saved-state 復原保證的操作，UI 提醒先保存。編輯限制為 100 品項／50 調整及每欄 500 字元。busy 時抑制重複操作與返回，Confirmed 和其他非 NeedsReview 狀態唯讀。
 
 `ManualReceiptReview` 在 domain 解析非負 Long 金額、正 Int 數量和嚴格 ISO calendar date，輸入不經浮點數。空白保留／轉為 Unknown；未修改的 Fact（包含 Conflicting、NotApplicable、原價與來源）原樣保留。修改值保存 `UserConfirmed` timestamp 及使用者選定的 evidence references；額外指定圖片建立 Confirmed EvidenceLink，不移除原有關聯。新調整為 Other 類型，支援 Add／Subtract 和 Order／Line／LineSet，未做促銷推論、價格查詢或自動分攤。刪除品項／調整只移除其 evidence link，若仍被其他 domain entity 引用則拒絕保存，不能靜默破壞 lineage。
 
 保存可保留尚未齊全／不平衡的草稿，解析錯誤不可保存。確認只作用於已保存 snapshot，由原 `TransitionReceiptStage` 調用 reconciler／validator，再 CAS 寫入同筆交易的 Confirmed 與下一 revision。重複確認不產生新交易。UI 區分 Balanced、WithinTolerance、Unbalanced，顯示 `computed − receipt` 的有號差額；範圍未知、適用數量超限、必要 Fact 不全、混合幣別及既有促銷分攤問題都能阻擋確認。
 
 CAS 衝突保留本地 snapshot 與輸入，讀取最新版供比較；明確放棄後才重新載入，從不自動 rebase／覆寫。寫入錯誤保留輸入並允許重試。保存後 Room Flow 更新列表；再次開啟從 repository 讀取。核對時收到外部分享會先保留待處理 URI，提示保存目前交易後新增另一筆消費，或取消這批分享；不隱性切換或混入附件。待處理 URI 不是持久化資料，程序中斷後可能需重新分享。
+
+## 個人支出與分配規則
+
+2026-09-11 已定案：`Self`（自用）及 `Gift`（送禮）由自己負擔，`Advance`（代買）預期收回，分列代墊；無選擇保持未決。共同使用／多人分攤、收款與催款不在本階段。原有 `Allocation` 是促銷／調整的 analytical contract，不能拿其含義替代品項用途。
+
+`ReceiptDraft.personalExpenses` 保存每列 `LineExpenseDecision`；`expenseAdjustments` 保存另列加減項的分配選擇。每筆保存方式、用途件數／金額、已確認依據 fingerprint 與時間。它們與整張收據的 `assemblyStatus`、Fact provenance、EvidenceLink 分開。選用途不勾選完整性、不確認照片 link；只有使用者修改事實或明確指定來源時才維持原本 UserConfirmed 行為。圖片上下文不等於每列精確佐證。
+
+`PersonalExpenseCalculator` 在 domain 內只使用 Long 最小貨幣單位與 BigInteger 中間值。它不修改 printedTotal、adjustment amount／scope 或 reconciler；成功回傳自用、送禮、代墊、個人支出及已分配合計。缺漏、不一致、過期、溢位或負用途餘額時只回 pending reasons，不回假定為零的 personalMinor。
+
+| 情境 | 必要明確操作與算法 |
+| --- | --- |
+| 整列歸屬 | 使用者選用途，全列 printedTotal 計入該用途，不乘數量 |
+| 同列部分件數 | 各用途非負整數件數合計必須等於已知購買數量；未分完或超額保持 pending |
+| 部分件數、按比例 | 使用者明確選 ByQuantity，將 printedTotal 按件數比例分配；這是使用者接受的負擔方式，不聲稱還原促銷實際單價 |
+| 部分件數、有價差 | 使用 ExplicitAmounts，各用途明填金額（包括 0），合計須等於 printedTotal；沒有件數的用途不得拿到金額 |
+| 整筆或整列範圍加減項 | 明確選 ProportionalAmount，以 scope 內各用途的原行金額作權重；多筆各自用同一原始基準、不連乘。或選 ExplicitAmounts 直接指定 |
+| 加減項只適用部分件數 | 禁止比例推測，由使用者依實際負擔選 ExplicitAmounts；金額合計須等於加減項，且不得給 scope 外用途 |
+| 零權重、非零費用 | 無法比例分配，須自行指定；零價商品仍可由使用者明確負擔費用 |
+| 既存促銷／Allocation 相依 | 保留原資料，本流程不猜其個人歸屬，回 pending |
+
+比例運算採最大餘數法：精確計算 `amount × weight ÷ sum(weights)`，先給整數商，剩餘最小單位依餘數由大到小補入；同餘數依 **Self → Advance → Gift**，與 UI 列序或 Map 順序無關。例如行合計 100／3 件、自用 1／代買 2 得 33／67。所有合計及乘法使用 BigInteger，再經 exact conversion／addExact 檢查 Long 邊界。
+
+`lineBasis` 以規則版本、列 ID、品名、數量與行合計／幣別的長度前綴序列做 SHA-256。修改該列使其決定過期，保留原選擇供重新確認；其他列不受影響。`adjustmentBasis` 綁定整筆金額、所有行金額、加減項 scope／金額及各列歸屬；改折扣、增刪列或改用途後須重新確認加減分配。雜湊不包括保存 revision／確認時間，所以保存、重啟本身不會使決定過期。
+
+未完成／過期分配允許 CAS 保存草稿。`TransitionReceiptStage` 先執行原 reconciliation，再以 `ExpenseBlocked` 拒絕缺少確定支出的新 Confirmed，既有 ±1 容差沒有變動。`differenceMinor = 已分配合計 − receipt total` 永遠獨立顯示，不混入用途負擔；例如付款 99、已分配 100，自用仍為 100、未解差額 +1。
+
+Confirmed 仍唯讀，包括 v1／v2／v3 舊資料。沒有歸屬記錄時顯示未記錄，不寫回或自動分類。新增資料只走原 ManualReceiptReview／repository CAS；未保存的歸屬文字也在 ReviewInput／SavedStateHandle，與數值欄位一樣受返回、補圖、分享及版本衝突保護。`ExtractReceipt` 拒絕取代含任何歸屬決定的草稿，且原有 revision、圖片 hash／membership、前景及取消檢查保留。
+
+### OCR 主流程與品質邊界
+
+首頁選照片與分享使用同一 importer／openTransaction，匯入完成直接顯示辨識入口。單圖不用再勾頁面，多圖明確勾選收據頁面；只在使用者按辨識後呼叫本機 SDK。沒有先填商家／品項要求，不自動確認照片分類、完整性或來源 link。已有內容時重辨識藏於按需展開操作並保留取代確認，主清單直接提供修正及歸屬。
+
+本次沒有獲授權的真實收據 dataset；倉庫圖片為既有合成 UI 截圖，Android 測試圖片由程式生成。沒有讀取手機私有照片／DB，沒有上雲，也沒有用合成結果調整真實品質結論。本次合成 SDK 情境找到一個可重現的欄位分隔錯誤：原始 OCR 正確讀出 `2026/09/11`，分欄文字卻成為 `2026/09/1 1`，舊日期 parser 接受前綴而回傳 9/01。`receipt-layout-2` 改以 rawText 解析日期，並拒絕殘缺數字片段；日期帶時間仍支援。這是從已觀察錯誤做的單一結構性修正，沒有更換 OCR 模型或增加促銷特例；該合成圖已用於除錯，不是未見驗收資料。目前可知的技術限制仍是欄位標頭／版面、跨頁重複與 OCR 文字歧義。真實樣本到位後分開評估文字讀錯、欄位解析、多頁漏列／重複與 UI 找不到結果，不以對帳平衡判定準確。
+
+本次驗證數據見 README 的「本次驗證與仍需驗收」；以下 2026-09-07 至 09 的 gate 與舊流程描述是歷史證據，不能套用到本次改動。
 
 ## Room 與檔案一致性
 
@@ -146,7 +181,7 @@ CAS 衝突保留本地 snapshot 與輸入，讀取最新版供比較；明確放
 | `draft_evidence` | draft／asset 外鍵、同草稿唯一 asset 關聯及穩定 position |
 | `imports` | operation ID、目標／結果草稿 ID、running／completed／interrupted、逐張結果；不保存外部 URI |
 
-`DraftCodec` 是只用於 app-private DB 的 JSON 格式，使用固定 allowlist tag 保存所有 Fact 狀態、generic values、provenance、links、promotion 與整數 Money；不得拿來解析 AI／外部 JSON。草稿目前寫入 format 3（人工核對基線為 format 2），evidence metadata 繼續 format 1。`ReceiptDraft.transactionDate` 是 ISO 日期 `Fact<String>`；format 1 缺省日期明確遷移為 `Unknown(NotObserved)`，不能依賴 Gson 執行 Kotlin constructor default（Gson 可略過 constructor）。讀取不寫 DB／遞增 revision，下次合法 CAS 才保存新 payload。SQL 表結構無變動，`ReceiptDatabase` 保持 v1，無需 SQL migration；固定 legacy fixture 與實際 SQLite 重開測試驗證相容。缺少日期的損壞 v2 或未知格式拒絕讀取，沒有 destructive fallback。僅支援 v1 的舊 APK 無法讀 v2，勿將降版當成相容操作。
+`DraftCodec` 是只用於 app-private DB 的 JSON 格式，使用固定 allowlist tag 保存所有 Fact 狀態、generic values、provenance、links、promotion 與整數 Money；不得拿來解析 AI／外部 JSON。草稿目前寫入 format 4（OCR 基線為 format 3），evidence metadata 繼續 format 1。format 1／2／3 的 personalExpenses／expenseAdjustments 明確初始化為空集合（未記錄），format 4 缺少這些必要集合則拒絕讀取；Gson 不會自動補 Kotlin constructor defaults。`ReceiptDraft.transactionDate` 是 ISO 日期 `Fact<String>`；format 1 缺省日期明確遷移為 `Unknown(NotObserved)`，不能依賴 Gson 執行 Kotlin constructor default（Gson 可略過 constructor）。讀取不寫 DB／遞增 revision，下次合法 CAS 才保存新 payload。SQL 表結構無變動，`ReceiptDatabase` 保持 v1，無需 SQL migration；固定 legacy fixture 與實際 SQLite 重開測試驗證相容。缺少日期的損壞 v2 或未知格式拒絕讀取，沒有 destructive fallback。僅支援 v1 的舊 APK 無法讀 v2，勿將降版當成相容操作。
 
 草稿 evidence membership 與關聯表在同一 Room transaction 更新。金額不經過浮點數，既有帳務語意未更動。Gson 欄位名稱是持久化格式的一部分，ProGuard 已保留 domain model 欄位；未來欄位／enum／tag 變更必須提供 payload migration，不能直接改名。
 
@@ -211,7 +246,7 @@ Activity 使用自己的 UUID（不信任分享 extras 裡的 ID），保存於 
 
 `adb devices -l` 本次無裝置；Compose 互動、Compact／Expanded／Fold、大字級／鍵盤、Sharesheet／Picker、OS URI 撤權及真正 force-stop 仍未驗證。README 有手動驗收步驟。APK 使用局部新 debug key，憑證 SHA-256 為 `6fa1a1e710134668a0443876160ee821b3fd044705ef319bbcfb88ee993f4db2`，與上游 APK 不同；既有 key 複製被自動核准審查拒絕，未執行。後續保留資料升級應待授權整合後於原簽章環境建置，不要卸載有資料的 App 來完成此驗收。
 
-### 消費流程重整（feat/receipt-flow-ux）
+### 消費流程重整歷史（feat/receipt-flow-ux，2026-09-09）
 
 來源核對：人工核對 worktree `C:/Users/morris/.codex/worktrees/dfa6/pixel-receipt-assistant` 已乾淨提交為 `d31e104`；OCR worktree 已乾淨提交為 `40e6a82`，相關任務均閒置。本分支從已包含兩者的 `fcd673ef718e9bea2ec3f651dee3c080b00d5c02` 建立，沒有降回只有匯入或 payload v2 的版本。SQL schema v1、draft payload format 3（讀取 1／2／3）維持原樣。
 
@@ -261,9 +296,9 @@ UI 照片上下文只保存目前預覽的 asset ID，不填入 `ReviewLineInput
 
 仍需使用者實機確認：Pixel 10 Pro Fold 的實際折疊／展開／分割視窗、原廠相機及相簿分享、真實長明細的閱讀負擔、長時間多品項輸入是否順手，以及升級後既有收據與草稿內容。截圖檢查另修正了唯讀畫面沿用「照片可稍後補」等填寫提示的問題；完成後只呈現已保存結果與唯讀狀態。模擬器可操作與測試通過不等於使用者已確認直覺。人工可重現步驟集中在 README。
 
-使用者試用後指出產品目標仍有落差：期待匯入收據後先列出品項與金額，再核對並選出自用或替別人購買的部分。現行主流程仍是人工輸入，OCR 是選用工具，尚無逐品項用途或個人支出計算；不能把這輪流程改版當成完整產品驗收。後續需區分「辨識內容正確」與「品項是自用」，非自用品項仍須保留於完整收據以供對帳。代買、送禮、共同使用的帳務定義尚未定案，本次未改變核心確認規則或加入推定分攤。
+當時使用者試用後指出產品目標仍有落差：期待匯入收據後先列出品項與金額，再核對並選出自用或替別人購買的部分。當時主流程仍是人工輸入，OCR 是選用工具，尚無逐品項用途或個人支出計算；不能把這輪流程改版當成完整產品驗收。後續需區分「辨識內容正確」與「品項是自用」，非自用品項仍須保留於完整收據以供對帳。代買、送禮、共同使用的帳務定義尚未定案，本次未改變核心確認規則或加入推定分攤。
 
-整合注意：保留現有 OCR `ExtractionSession`、payload format 3 與來源稽核資料。人工輸入不自動啟動辨識；OCR 工具藏在按需展開的區塊，成功後刷新同筆已保存表單，重新辨識仍須原本的取代確認。以後若有 background writer，仍必須遵守 revision／圖片 membership 檢查，不能直接套用 UI buffer。
+該輪整合注意（現已由本次 OCR 主流程取代）：保留 OCR `ExtractionSession`、payload format 3 與來源稽核資料。當時人工輸入不自動啟動辨識；OCR 工具藏在按需展開的區塊，成功後刷新同筆已保存表單，重新辨識仍須原本的取代確認。以後若有 background writer，仍必須遵守 revision／圖片 membership 檢查，不能直接套用 UI buffer。
 
 ## 多對多 matching
 
@@ -295,14 +330,14 @@ sum(line printedTotal) + sum(Add adjustments) - sum(Subtract adjustments)
     = receipt total
 ```
 
-`referenceOriginalTotal` 只用於節省金額分析，不參與發票總額對帳。個人／代墊 split 的精確不變量會在 review feature 實作時另加；目前尚未宣稱完成。不符合時回傳可解釋的 reconciliation issue，不能讓模型補出一個剛好平衡的數字。使用者確認過的 override 也要保留原值、原因與 revision。
+`referenceOriginalTotal` 只用於節省金額分析，不參與發票總額對帳。個人／代墊分配的不變量已由 `PersonalExpenseCalculator` 與 review gate 實作，詳見「個人支出與品項歸屬」。不符合時回傳可解釋的 issue，不能讓模型補出一個剛好平衡的數字。使用者確認過的 override 也要保留原值、原因與 revision。
 
 ## AI routing 與上雲同意
 
-`AiRouter` 是 SDK-neutral domain use case，不是單一廠商 wrapper。它的 capability、foreground、network 與 consent gates 已完成；兩個實際 adapter 尚待接入：
+`AiRouter` 是 SDK-neutral domain use case，不是單一廠商 wrapper。它的 capability、foreground、network 與 consent gates 已完成；目前實際接入 Nano 與 bundled 中文 OCR，App 的雲端 adapter 仍待實作：
 
-1. `MlKitNanoAnalyzer`：直接使用 [ML Kit GenAI APIs](https://developers.google.com/ml-kit/genai) 所提供、由 Gemini Nano／AICore 支援的裝置端能力。每次依任務做 availability check；不透過 Gemini 消費者 App，也不能讀取該 App 的對話、登入狀態或私人模型介面。[Prompt API](https://developers.google.com/ml-kit/genai/prompt/android/get-started) 要求 API 26+。
-2. `FirebaseCloudAnalyzer`：透過 Firebase AI Logic 呼叫雲端模型，release 依 [Firebase App Check 指引](https://firebase.google.com/docs/ai-logic/app-check) 使用 Play Integrity，且 APK 不含可直接濫用的 Gemini API key。
+1. `MlKitNanoAnalyzer`（已接入，實機品質待驗證）：直接使用 [ML Kit GenAI APIs](https://developers.google.com/ml-kit/genai) 所提供、由 Gemini Nano／AICore 支援的裝置端能力。每次依任務做 availability check；不透過 Gemini 消費者 App，也不能讀取該 App 的對話、登入狀態或私人模型介面。[Prompt API](https://developers.google.com/ml-kit/genai/prompt/android/get-started) 要求 API 26+。
+2. `FirebaseCloudAnalyzer`（規劃）：透過 Firebase AI Logic 呼叫雲端模型，release 依 [Firebase App Check 指引](https://firebase.google.com/docs/ai-logic/app-check) 使用 Play Integrity，且 APK 不含可直接濫用的 Gemini API key。
 
 Router 採 local-first，但「本機不可用」不等於可以自動上雲。`CloudProcessingConsent.Granted` 綁定 case ID、每個 image ID 的 SHA-256、用途、analyzer ID、service ID 與同意時間；任一內容或處理服務不同都會回 `CloudConsentScopeMismatch`。Phase 1B 畫面仍須在送出前列出 evidence、目的、服務與敏感資訊；新增／修改圖片、改變用途或切換服務都要再次確認。拒絕上雲時保留本機／人工流程，不能阻止使用者手動完成記帳。
 
@@ -354,21 +389,41 @@ DM 可能有全國、區域專櫃或新店版本；活動也可能受日期、�
 
 ## 自動擷取架構
 
-`ExtractionControls → ExtractionSession → ExtractReceipt → AiRouter(OnDeviceOnly) → MlKitReceiptAnalyzer → LocalReceiptParser → MapReceiptRecognition → CAS → ReviewSession`。
+`ExtractionControls → ExtractionSession → ExtractReceipt → analyzer.prepare() → AiRouter(OnDeviceOnly) → MlKitNanoAnalyzer 或使用者選擇的 MlKitReceiptAnalyzer → MapReceiptRecognition → CAS → ReviewSession`。
 
-`MlKitReceiptAnalyzer` 實際呼叫 bundled Chinese Text Recognition。中文 SDK 有時省略欄間空白，或提供包含空白的字元框；adapter 以字元位置與只讀像素空白帶重建分欄，並同時保存原始 OCR 文字。未知欄標保留位置，不擅自當成單價；像素掃描在 Default executor 執行，不阻塞 UI。每次 SDK 只接收一張已驗證 SHA-256 的本機圖片；adapter 順序處理選取頁面，再交本機 parser 處理欄位與多頁候選。`MultipleImageInput` 表示這個 adapter 的協調能力，不是宣稱 ML Kit 或 Nano 單次 API 支援多圖。選路沒有 cloud adapter；固定 bundled model 不需要執行 Nano availability probe，Nano 狀態在 UI 明示為未接入／未檢查。
+`MlKitReceiptAnalyzer` 實際呼叫 bundled Chinese Text Recognition。中文 SDK 有時省略欄間空白，或提供包含空白的字元框；adapter 以字元位置與只讀像素空白帶重建分欄，並同時保存原始 OCR 文字。未知欄標保留位置，不擅自當成單價；像素掃描在 Default executor 執行，不阻塞 UI。每次 SDK 只接收一張已驗證 SHA-256 的本機圖片；adapter 順序處理選取頁面，再交本機 parser 處理欄位與多頁候選。`MultipleImageInput` 表示 adapter 的逐頁協調能力，不是宣稱 ML Kit 或 Nano 單次 API 支援多圖。選路沒有 cloud adapter；固定 bundled OCR 的 prepare 不需要 Nano probe，不能將此狀態視為 Nano 可用。
+
+`MlKitNanoAnalyzer` 使用 Prompt beta4 與 schema compiler alpha1 的公開 typed API。先 runtime probe／必要時前景下載，核對模型名稱及 structured capability；每次持有獨立 client，推論 mutex 序列化，finally 關閉。B 傳圖，C 傳圖＋實際 OCR rawText（不是人工標註），C 沒有文字時不靜默降成 B。影像沿用 ImageStore 的 SHA-256／EXIF／4096px 限制；原圖不改寫。每頁 temperature 0、seed 17、output 3500，countTokens 及模型 token limit 檢查後送出；finishReason 必須 STOP。前景／coroutine 檢查、240 秒逾時與各類 quota／unsupported／invalid-output 映射保留草稿，沒有自動重跑或上雲。
+
+`NanoReceiptOutput` 限制資料欄位，不含 ID、workflow 或金額計算。`NanoReceiptValidation` 拒絕外幣、非法日期、非整數／溢位、超限及無商品列，輸出只形成待核對候選。單價與行額分離，缺少數量保留 Unknown；零元／同頁重複保留。非商品列保存在 audit；已含折扣不再扣、是否已含不明時金額 Unknown、另列 scope Unknown。資料與其中文字中的指令都不授予工具／程式執行權限。
 
 官方文件核對於 2026-09-09：[ML Kit Text Recognition Android](https://developers.google.com/ml-kit/vision/text-recognition/v2/android) 列出 bundled Chinese 16.0.1 與文字／區域輸出；[Prompt API](https://developers.google.com/ml-kit/genai/prompt/android/get-started) 要求自行檢查 AVAILABLE／DOWNLOADABLE／DOWNLOADING／UNAVAILABLE。本次不用手機型號推論 Nano 能力。
 
-不可信的 `ReceiptRecognition` 只有文字、頁面／行索引與座標，沒有本機 ID、revision、stage 或最終帳務結果。Mapper 檢查長度、數量、座標、來源索引、數值與日期，才產生本機 UUID、Fact 與 Candidate evidence links。來源無法解析保留 Unknown，多個交易欄位候選不一致使用 Conflicting；金額以整數 parsing，僅接受合法千分位及小數部分全為零的 TWD 表示。UI 明確限定 TWD，發現已標示外幣的 OCR 輸出拒絕。
+不可信的 `ReceiptRecognition` 只有觀察文字、頁面／行索引、可得座標與可選的 Nano 觀察 JSON，沒有本機 ID、revision、stage 或最終帳務結果。Mapper 檢查長度、數量、座標、來源索引、數值與日期，才產生本機 UUID、Fact 與 Candidate evidence links。`line=-1` 明確表示整張原圖、沒有可靠座標；Nano 不產生虛構 OCR region。來源無法解析保留 Unknown，多個交易欄位候選不一致使用 Conflicting；金額以整數 parsing，僅接受合法千分位及小數部分全為零的 TWD 表示。UI 明確限定 TWD，發現已標示外幣的 OCR 輸出拒絕。
 
-`ReceiptExtractionRecord` 保存來源 SHA-256、版本、帶 rawText 的 EvidenceRegion、警告與原始金額試算／gate 狀態。人工編輯保留這份原始擷取快照，讓修正後的平衡不會冒充原始擷取正確。Region 的寬高定義 OCR EXIF-oriented、降採樣座標空間；畫面提供原圖與原文比對。
+`ReceiptExtractionRecord` 保存來源 SHA-256、版本、帶 rawText 的 EvidenceRegion、警告與原始金額試算／gate 狀態。Nano 另保存最多 100,000 字的 nullable `unlocalizedObservationsJson`，核對頁顯示分類／品名／數量／單價／行額；只能引用整張照片。人工編輯保留這份原始擷取快照，讓修正後的平衡不會冒充原始擷取正確。Region 的寬高定義 OCR EXIF-oriented、降採樣座標空間；畫面提供原圖與原文比對。Payload 維持 format 4，舊資料缺少新增 audit 時為 null，SQL v1 不變；實際 Room reopen 測試涵蓋此相容與 Unknown 保存。
 
 沒有在 Room 寫入暫態 Analyzing stage：執行工作保存在 ViewModel，SavedState 只標示中斷，不自動重播；成功結果一次 CAS 寫入 NeedsReview 且保持未核對完整。這是避免取消、程序死亡與暫時性模型失敗把人工入口鎖死的選擇。離開 RESUMED 取消 coroutine；ML Kit Task 不支援真正取消，晚到 callback 只負責釋放資源，不能寫入草稿。SDK 正在使用的 bitmap 不會在取消瞬間提前回收。
 
 套用前重新核對完整 evidence metadata、選取圖片實際 SHA-256 與 expected revision。成功以一次 Room transaction 保存 facts、provenance 與 audit；任何失敗保留原草稿。重新辨識必須對目前 base 版本明確授權取代，不保留另一套可被誤用的最終帳務值。帶促銷／分攤相依的草稿拒絕取代。Confirmed 與後續匯出階段均唯讀。
 
-payload format 3 向前相容 format 1／2：新增 nullable extraction，舊格式未具 audit 時保持 null。SQL schema v1 未改；decoder 不以破壞性重建處理版本。`ReceiptAmountPreview` 是額外的 BigInteger 診斷，既有 `ReceiptReconciler`、`ReceiptValidator`、`TransitionReceiptStage` 及 ±1 容差不變。
+OCR 基線的 payload format 3 向前相容 format 1／2（本次已升 format 4）：新增 nullable extraction，舊格式未具 audit 時保持 null。SQL schema v1 未改；decoder 不以破壞性重建處理版本。`ReceiptAmountPreview` 是額外的 BigInteger 診斷，`ReceiptReconciler`、`ReceiptValidator` 及 ±1 容差不變；本次 `TransitionReceiptStage` 另加個人支出分配 gate。
+
+## 本機收據診斷工具
+
+2026-09-11 新增 `tools/receipt_lab` 與根目錄 `receipt-lab.ps1`。使用者在對話提供的獲授權照片可由 CLI 直接加入；瀏覽器上傳只是另一個入口。工具的 SQLite 只保存不可混淆的測試案例、原圖 hashes、每次辨識結果和分析，不替代 App Room、不建立另一套交易工作流。
+
+路徑為 `CLI／localhost HTTP → dedicated emulator test APK → MlKitReceiptAnalyzer → LocalReceiptParser → MapReceiptRecognition → JSON result`。不呼叫 Activity、不讀寫 Room、不列舉手機照片。HTTP 僅監聽 127.0.0.1，有 Host／Origin／Fetch-Site 與 mutation header 檢查，不開 CORS 或遠端服務。每次 Android 操作驗證 `receipt-lab-test`／emulator 屬性；照片經 Base64 ASCII 傳入該 emulator 的 app-private、UUID 子目錄，以避開 Windows ADB stdin 的二進位 EOF 問題。ImageStore 解碼及原始 SHA-256 均通過才執行辨識。
+
+`MlKitReceiptAnalyzer` 新增預設 no-op 的診斷 callback，在 parser 前保存 OCR pages，因此 parser 拒絕時仍能對照原始文字；正常 App 組合不訂閱，也不增加網路。rawText 仍是 SDK 文字經既有行合併後的內容，不宣稱未加工的完整 SDK 原始回應。每次結果保存 input hashes、已安裝主／test APK SHA-256、引擎 descriptor、candidate 與原始解析資料，沒有賦予品項精確照片證據或確認狀態。
+
+案例圖片和 run 的請求內容不可變；新一次辨識產生新 run。`requestId` 對同內容冪等，內容改動則拒絕。取消阻止晚到結果覆寫，但不保證中止已送出的 SDK／Google 請求；adapter 未收尾前不可刪除它的案例。程序重啟標示 interrupted，沒有自動 replay。分析 note 明示不是 ground truth；不從 itemCount 或 Unknown 數產生準確率。
+
+可選的 Gemini 測試 adapter 使用主機環境憑證、固定 Google HTTPS API、結構化候選 schema，限制尺寸／整數溢位／日期與幣別，保留模型原始回覆，不建立 Ledger 值。Consent 精確綁模型、目的與有序 photo hashes；缺少 key 或同意不送出，沒有 redirect 或自動雲端重試。這是實驗 adapter，App 的 Firebase 仍未接入；本次優先 Pixel Nano，沒有執行 Gemini 雲端測試。
+
+Nano 另走 `CLI／HTTP → 明確指定的 Pixel → debug NanoLabActivity → production Nano adapter／mapper → JSON`。不使用一般 instrumentation、不開 production Room，原本 OCR emulator-only 防護不變。每次 UUID＋輸入 hash 隔離，生成 client、bitmap、cache 隨該次生命週期結束；取消檔只影響該次測試，Activity 重建不重播。保留 SDK 公開的 typed response 與 finish reason，但不聲稱能取到原始生成 token 或精確 model revision（公開 API 未暴露）。測試室版本／hash／耗時與手機重新連線步驟見 README「Pixel Gemini Nano 整合」。
+
+五張使用者獲授權真實收據已完成原圖基線；交易總額全部 Unknown，存在 OCR 與 layout parsing 兩類錯誤。App 實際收到 3000×4000 圖片，不能把本批失敗歸因於 App 先降解析度；也不能當成 Nano 的表現。詳細數據與私人原文只存 Git 忽略的 `.receipt-lab/`，使用方法及驗證摘要见 README 的「收據測試室與 API」。此批屬開發診斷集，之後用於調整就不得再充當未見驗收集。以下 2026-09-09 的資料盤點及測試數量保留為歷史證據。
 
 ## 自動擷取驗證
 
@@ -412,4 +467,4 @@ payload format 3 向前相容 format 1／2：新增 nullable extraction，舊格
 
 仍未驗證：真實收據品質、實體 Pixel 10 Pro Fold／ARM64、折疊／旋轉／分割視窗、大字級與手機保留資料升級。多頁模糊對應可能需新增／刪除列，OCR 不保證找出全部重複；未知版面與影像品質仍需人工修正。Nano、cloud、菜單等排除項目未接入。
 
-整合注意：本 worktree 位於主 checkout 的 `.gradle/worktrees/` 以符合本任務可寫範圍；它是獨立 Git 工作目錄，不能把整個主 checkout `.gradle/` 當成一般快取刪除。未授權合回 main、推送或刪除 worktree。
+整合注意：功能 worktree 位於主 checkout 的 `.gradle/worktrees/`，是獨立 Git 工作目錄，不能把整個主 checkout `.gradle/` 當成一般快取刪除。`feat/receipt-nano-integration` 承接個人支出、測試室與 Nano 成果；推送與合併依當次授權執行，私人樣本／模型輸出及既有 worktree 仍保留在本機。

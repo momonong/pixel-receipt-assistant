@@ -5,9 +5,9 @@ import java.text.Normalizer
 
 /** Conservative receipt grammar, not a language model. Never calculates an amount. */
 class LocalReceiptParser {
-    companion object { const val VERSION = "receipt-layout-1" }
+    companion object { const val VERSION = "receipt-layout-2" }
     private val number = "(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\\.[0-9]+)?"
-    private val date = Regex("(?<![0-9])([0-9]{3,4})[-/.年]([0-9]{1,2})[-/.月]([0-9]{1,2})日?")
+    private val date = Regex("(?<![0-9])([0-9]{3,4})[-/.年]([0-9]{1,2})[-/.月]([0-9]{1,2})日?(?![0-9]|\\s+[0-9]+(?:\\s|$))")
     private val total = Regex("^(?:總計|總額|合計|應付(?:金額)?|實付(?:金額)?|交易總額|TOTAL)\\s*[:：]?\\s*(?:NT\\$|TWD|\\$)?\\s*($number)元?$", RegexOption.IGNORE_CASE)
     private val adjustment = Regex("^(.*?(?:折扣|折讓|折抵|優惠券|服務費|運費|手續費|COUPON|DISCOUNT|FEE))\\s*[:：]?\\s*([-−]?)\\s*(?:\\$)?($number)元?$", RegexOption.IGNORE_CASE)
     private val ignored = Regex("^(?:小計|現金|找零|找回|信用卡|刷卡|付款|支付|統編|統一編號|電話|TEL|地址|發票|交易序號|收銀|機台|會員|稅額|課稅|免稅|銷售額|營業稅|節省|已折|您已|含稅|頁碼|第\\s*[0-9]+\\s*頁|感謝|歡迎|謝謝|備註|CASH|CHANGE|SUBTOTAL).*", RegexOption.IGNORE_CASE)
@@ -33,7 +33,9 @@ class LocalReceiptParser {
             page.lines.forEachIndexed { l, row ->
                 val text = normalize(row.text)
                 fun obs(value: String) = TextObservation(value, p, l)
-                val dateMatch = date.find(text)
+                // Column-gap reconstruction is for tables, not atomic calendar tokens.
+                // E.g. raw 2026/09/11 can become 2026/09/1 1; never accept the prefix as day 1.
+                val dateMatch = date.find(normalize(row.rawText ?: row.text))
                 val totalMatch = total.matchEntire(text)
                 val adjustmentMatch = adjustment.matchEntire(text)
                 val headerPattern = Regex("品名|商品(?:名稱)?|名稱|數量|数量|單價|单价|金額|金额|行合計|ITEM|QTY|PRICE|AMOUNT", RegexOption.IGNORE_CASE)
