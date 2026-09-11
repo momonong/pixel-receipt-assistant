@@ -73,7 +73,7 @@ class ManualReceiptReviewTest {
         for (amount in listOf("99", "100", "101")) {
             val repo = ReviewTestRepository(base)
             val useCase = ManualReceiptReview(repo)
-            val saved = (useCase.save(base, complete(amount), 1) as ReviewSaveResult.Saved).draft
+            val saved = (useCase.save(base, complete(amount).withSelfExpenses(base), 1) as ReviewSaveResult.Saved).draft
             val result = ReceiptReconciler().reconcile(saved)
             if (amount == "100") assertTrue(result is ReceiptReconciliationResult.Balanced)
             else assertEquals((amount.toLong() - 100).toBigInteger(), (result as ReceiptReconciliationResult.WithinTolerance).differenceMinorUnits)

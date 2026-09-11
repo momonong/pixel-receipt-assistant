@@ -32,7 +32,18 @@ class ReceiptFlowUiTest {
     }
     private val graph get() = ui.activity.application as ReceiptApplication
     private fun form() = ui.onNodeWithTag("review-form")
-    private fun field(tag: String, value: String) { ui.onNodeWithTag(tag).performScrollTo().performTextReplacement(value) }
+    private fun field(tag: String, value: String) {
+        if (tag == "merchant") {
+            form().performScrollToIndex(0)
+            if (ui.onAllNodesWithTag("manual-fallback").fetchSemanticsNodes().isNotEmpty()) ui.onNodeWithTag("manual-fallback").performScrollTo().performClick()
+            ui.onNodeWithText("商家與日期 ＋").performScrollTo().performClick()
+        }
+        ui.onNodeWithTag(tag).performScrollTo().performTextReplacement(value)
+    }
+    private fun classifyAll() {
+        form().performScrollToNode(hasTestTag("batch-self")); ui.onNodeWithTag("batch-self").performClick()
+        ui.onNodeWithText("確定全部設為自用").performClick()
+    }
     private fun scroll(tag: String) { form().performScrollToNode(hasTestTag(tag)) }
     private fun shot(name: String) {
         File(ui.activity.getExternalFilesDir(null), "$name-${InstrumentationRegistry.getArguments().getString("profile", "compact")}.png").outputStream().use {
@@ -79,12 +90,12 @@ class ReceiptFlowUiTest {
         assertTrue(saved.transactionDate is Fact.Unknown)
         assertTrue(saved.evidenceLinks.isEmpty())
         ui.onNodeWithTag("transaction-${saved.id}").performScrollTo().performClick()
-        scroll("complete-check"); ui.onNodeWithTag("complete-check").performClick()
+        classifyAll(); scroll("complete-check"); ui.onNodeWithTag("complete-check").performClick()
         ui.onNodeWithTag("save-draft").performClick()
         ui.onNodeWithTag("confirm-transaction").performScrollTo().assertIsNotEnabled()
         shot("flow-unbalanced")
         field("total", "150")
-        ui.onNodeWithTag("complete-check").performScrollTo().performClick()
+        classifyAll(); scroll("complete-check"); ui.onNodeWithTag("complete-check").performClick()
         ui.onNodeWithTag("save-draft").performClick()
         ui.onNodeWithTag("reconciliation").performScrollTo().assertTextContains("完全平衡", substring = true)
         shot("flow-balanced")
@@ -123,7 +134,7 @@ class ReceiptFlowUiTest {
         assertTrue(saved.evidenceLinks.isEmpty())
         assertTrue((saved.items.single().printedTotal as Fact.Known).provenance.evidence.isEmpty())
         ui.onNodeWithTag("transaction-${saved.id}").performScrollTo().performClick()
-        scroll("complete-check"); ui.onNodeWithTag("complete-check").performClick()
+        classifyAll(); scroll("complete-check"); ui.onNodeWithTag("complete-check").performClick()
         ui.onNodeWithTag("save-draft").performClick()
         ui.onNodeWithTag("reconciliation").performScrollTo().assertTextContains("容差內", substring = true)
         shot("flow-tolerance")

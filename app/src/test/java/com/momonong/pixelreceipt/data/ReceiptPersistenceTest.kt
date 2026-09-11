@@ -121,7 +121,7 @@ class ReceiptPersistenceTest {
         db.close(); reopen()
         assertEquals(after, repository.observeDraft(after.id).first())
         assertTrue(repository.evidence(after.id).first().all { store.preview(it.contentSha256) != null })
-        val completed = (ManualReceiptReview(repository).save(after, ReviewInput.from(after).copy(complete = true), 124) as ReviewSaveResult.Saved).draft
+        val completed = (ManualReceiptReview(repository).save(after, ReviewInput.from(after).copy(complete = true).withSelfExpenses(after), 124) as ReviewSaveResult.Saved).draft
         val confirmed = (TransitionReceiptStage(repository)(completed, ReceiptStage.Confirmed) as TransitionReceiptStageResult.Updated).draft
         val refused = batch("flow-confirmed", after.id, input(png(0xff222222.toInt())))
         assertEquals("interrupted", refused.state)
@@ -136,9 +136,12 @@ class ReceiptPersistenceTest {
         val form = ReviewInput("商店", "2026-09-08", "99", true, refs,
             listOf(ReviewLineInput("line", "商品", "1", "100", refs)),
             listOf(ReviewAdjustmentInput("coupon", "1", scope = "order", evidenceIds = refs)))
-        val saved = (ManualReceiptReview(repository).save(opened, form, 42) as ReviewSaveResult.Saved).draft
+        val saved = (ManualReceiptReview(repository).save(opened, form.withSelfExpenses(opened), 42) as ReviewSaveResult.Saved).draft
         db.close(); reopen()
         assertEquals(saved, repository.observeDraft(saved.id).first())
+        assertEquals(1, saved.personalExpenses.size)
+        assertEquals(1, saved.expenseAdjustments.size)
+        assertEquals(99L, com.momonong.pixelreceipt.domain.rules.PersonalExpenseCalculator.calculate(saved).personalMinor)
         assertTrue(repository.evidence(saved.id).first().all { store.preview(it.contentSha256) != null })
         val confirmed = (TransitionReceiptStage(repository)(saved, ReceiptStage.Confirmed) as TransitionReceiptStageResult.Updated).draft
         db.close(); reopen()
@@ -158,10 +161,26 @@ class ReceiptPersistenceTest {
         assertEquals(payload, db.receipts().draft(legacy.id)!!.payload)
         val opened = (TransitionReceiptStage(repository)(legacy, ReceiptStage.NeedsReview) as TransitionReceiptStageResult.Updated).draft
         assertEquals(4L, opened.revision)
-        assertEquals(3, JsonParser.parseString(db.receipts().draft(legacy.id)!!.payload).asJsonObject["format"].asInt)
+        assertEquals(4, JsonParser.parseString(db.receipts().draft(legacy.id)!!.payload).asJsonObject["format"].asInt)
         assertEquals(DraftWriteResult.Conflict, repository.compareAndSetDraft(legacy.copy(revision = 4), 3))
         db.close(); reopen()
         assertEquals(opened, repository.observeDraft(legacy.id).first())
+        assertEquals(1, db.openHelper.readableDatabase.version)
+    }
+
+    @Test fun confirmedV3PayloadRemainsUnclassifiedReadOnlyAndUnchangedAfterDatabaseReopen() = runBlocking {
+        val payload = javaClass.getResource("/legacy-draft-v3-confirmed.json")!!.readText()
+        db.receipts().insertDraft(DraftRow("legacy-review", 3, 10, payload))
+        db.close(); reopen()
+        val legacy = repository.observeDraft("legacy-review").first()!!
+        assertEquals(ReceiptStage.Confirmed, legacy.stage)
+        assertEquals("100", legacy.total.inputText())
+        assertEquals(1, legacy.items.size)
+        assertTrue(legacy.personalExpenses.isEmpty())
+        assertFalse(com.momonong.pixelreceipt.domain.rules.PersonalExpenseCalculator.calculate(legacy).ready)
+        assertTrue(ManualReceiptReview(repository).save(legacy, ReviewInput.from(legacy).withSelfExpenses(legacy), 200) is ReviewSaveResult.Rejected)
+        assertEquals(payload, db.receipts().draft(legacy.id)!!.payload)
+        assertEquals(3L, repository.observeDraft(legacy.id).first()!!.revision)
         assertEquals(1, db.openHelper.readableDatabase.version)
     }
 

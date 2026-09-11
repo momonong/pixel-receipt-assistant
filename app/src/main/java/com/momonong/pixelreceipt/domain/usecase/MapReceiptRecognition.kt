@@ -110,6 +110,7 @@ class MapReceiptRecognition {
         val mapped = base.copy(merchant = fact(output.merchants, "商家") { it.trim() },
             transactionDate = fact(output.dates, "日期", ReviewParsing::date), total = fact(output.totals, "交易總額", ::amount),
             items = items, adjustments = adjustments, evidenceLinks = links,
+            personalExpenses = emptyList(), expenseAdjustments = emptyList(),
             assemblyStatus = if (duplicates) ReceiptAssemblyStatus.PossibleDuplicates else if (sources.size > 1) ReceiptAssemblyStatus.NeedsOrdering else ReceiptAssemblyStatus.Collecting,
             stage = ReceiptStage.NeedsReview)
         return mapped.copy(extraction = ReceiptExtractionRecord(provenance, sources.associate { it.id to it.contentSha256 },

@@ -6,6 +6,7 @@ import com.momonong.pixelreceipt.domain.port.DraftWriteResult
 import com.momonong.pixelreceipt.domain.port.ReceiptRepository
 import com.momonong.pixelreceipt.domain.rules.ReceiptReconciler
 import com.momonong.pixelreceipt.domain.rules.ReceiptReconciliationResult
+import com.momonong.pixelreceipt.domain.rules.PersonalExpenseCalculator
 
 /** Owns workflow legality while the repository provides atomic compare-and-set persistence. */
 class TransitionReceiptStage(
@@ -31,6 +32,8 @@ class TransitionReceiptStage(
             ) {
                 return TransitionReceiptStageResult.ConfirmationBlocked(reconciliation)
             }
+            val expenses = PersonalExpenseCalculator.calculate(current)
+            if (!expenses.ready) return TransitionReceiptStageResult.ExpenseBlocked(expenses.pending)
         }
 
         require(current.revision < Long.MAX_VALUE) { "Receipt revision is exhausted." }
@@ -57,6 +60,7 @@ class TransitionReceiptStage(
 }
 
 sealed interface TransitionReceiptStageResult {
+    data class ExpenseBlocked(val reasons: List<String>) : TransitionReceiptStageResult
     data class Updated(val draft: ReceiptDraft) : TransitionReceiptStageResult
 
     data class InvalidTransition(

@@ -46,11 +46,11 @@ class DraftCodec {
             "opaque" to PromotionTerms.Opaque::class.java,
         )).create()
 
-    fun encode(draft: ReceiptDraft): String = envelope(gson.toJsonTree(draft), 3)
+    fun encode(draft: ReceiptDraft): String = envelope(gson.toJsonTree(draft), 4)
     fun decode(payload: String): ReceiptDraft {
         val root = JsonParser.parseString(payload).asJsonObject
         val format = root["format"].asInt
-        require(format in 1..3) { "Unsupported persisted format" }
+        require(format in 1..4) { "Unsupported persisted format" }
         val value = root["value"].asJsonObject
         // Gson bypasses Kotlin constructor defaults. Explicitly migrate v1 in memory;
         // the next CAS write persists v3 without altering the SQL schema or revision here.
@@ -61,6 +61,10 @@ class DraftCodec {
         }
         require(value.has("transactionDate") && !value["transactionDate"].isJsonNull) {
             "Missing persisted transaction date fact"
+        }
+        listOf("personalExpenses", "expenseAdjustments").forEach { field ->
+            if (format < 4) value.add(field, JsonArray())
+            require(value.has(field) && value[field].isJsonArray) { "Missing persisted expense decisions" }
         }
         return gson.fromJson(value, ReceiptDraft::class.java)
     }

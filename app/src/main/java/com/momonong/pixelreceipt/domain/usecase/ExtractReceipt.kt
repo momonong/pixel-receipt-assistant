@@ -20,6 +20,9 @@ class ExtractReceipt(
         require(base.stage in setOf(ReceiptStage.Captured, ReceiptStage.NeedsReview)) { "此交易唯讀，不能辨識。" }
         require(base.revision < Long.MAX_VALUE)
         require(replaceApproved || !hasReviewContent(base)) { "重新辨識需明確同意取代目前核對欄位。" }
+        require(base.personalExpenses.isEmpty() && base.expenseAdjustments.isEmpty()) {
+            "已有品項歸屬決定，請保留清單並人工修正；不能以重新辨識取代。"
+        }
         require(base.promotionApplications.isEmpty() && base.promotionOffers.isEmpty() && base.allocations.isEmpty()) {
             "此交易含促銷或分攤關聯，請保留人工核對，不能取代。"
         }

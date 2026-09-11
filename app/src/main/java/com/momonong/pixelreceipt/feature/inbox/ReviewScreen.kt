@@ -6,6 +6,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,6 +25,7 @@ import com.momonong.pixelreceipt.data.ingestion.ImageStore
 import com.momonong.pixelreceipt.domain.model.*
 import com.momonong.pixelreceipt.domain.rules.ReceiptReconciler
 import com.momonong.pixelreceipt.domain.rules.ReceiptReconciliationResult
+import com.momonong.pixelreceipt.domain.rules.PersonalExpenseCalculator
 import com.momonong.pixelreceipt.domain.usecase.*
 import kotlinx.coroutines.launch
 
@@ -39,21 +42,25 @@ fun ReviewScreen(session: ReviewSession, state: ReviewState, assets: List<Eviden
     var append by remember { mutableStateOf(false) }
     var reload by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf(false) }
+    var manual by rememberSaveable(base.id) { mutableStateOf(false) }
+    var batch by remember { mutableStateOf(false) }
     var deleteLine by rememberSaveable(base.id) { mutableStateOf<String?>(null) }
     var openLine by rememberSaveable(base.id) { mutableStateOf<String?>(null) }
     var photoId by rememberSaveable(base.id) { mutableStateOf<String?>(null) }
     var showPhoto by rememberSaveable(base.id) { mutableStateOf(true) }
-    var showAdjustments by rememberSaveable(base.id) { mutableStateOf(input.adjustments.isNotEmpty()) }
+    var showAdjustments by rememberSaveable(base.id, input.adjustments.map { it.id }) { mutableStateOf(input.adjustments.isNotEmpty()) }
     val photo = assets.find { it.id == photoId } ?: assets.firstOrNull()
     val evaluation = remember(base, input) { session.evaluation() }
     val result = evaluation.draft?.let { ReceiptReconciler().reconcile(it) }
-    val canConfirm = result is ReceiptReconciliationResult.Balanced || result is ReceiptReconciliationResult.WithinTolerance
+    val expenses = evaluation.draft?.let(PersonalExpenseCalculator::calculate)
+    val canConfirm = (result is ReceiptReconciliationResult.Balanced || result is ReceiptReconciliationResult.WithinTolerance) && expenses?.ready == true
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val focus = LocalFocusManager.current
     val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val shortWindow = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() < 500.dp }
     val writableStage = base.stage == ReceiptStage.NeedsReview
+    val preRecognition = writableStage && assets.isNotEmpty() && !hasReviewContent(base) && input.lines.isEmpty() && !manual
     val back = { if (state.dirty) leave = true else session.close() }
     fun checkDetails() {
         focus.clearFocus()
@@ -61,7 +68,7 @@ fun ReviewScreen(session: ReviewSession, state: ReviewState, assets: List<Eviden
     }
     fun addLine() {
         val line = ReviewLineInput()
-        session.edit(input.copy(lines = input.lines + line))
+        session.update { it.copy(lines = it.lines + line) }
         openLine = line.id
         scope.launch { list.animateScrollToItem(input.lines.size + 2) }
     }
@@ -69,7 +76,7 @@ fun ReviewScreen(session: ReviewSession, state: ReviewState, assets: List<Eviden
     Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(horizontal = 16.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = back, enabled = !state.busy) { Text("返回") }
-            Text(if (writableStage) "填寫這筆消費" else "消費明細", style = MaterialTheme.typography.titleLarge,
+            Text(if (preRecognition) "建立收據清單" else if (writableStage) "核對與指定歸屬" else "消費明細", style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.weight(1f))
         }
         if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -106,27 +113,48 @@ fun ReviewScreen(session: ReviewSession, state: ReviewState, assets: List<Eviden
                     contentPadding = PaddingValues(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     item(key = "details") {
                         importStatus?.let { Text(it.lineSequence().first(), style = MaterialTheme.typography.bodySmall) }
-                        Text("1  消費資料", style = MaterialTheme.typography.titleLarge)
-                        if (writableStage) Text("手動填寫；空白表示尚未知道，不會當成 0。", style = MaterialTheme.typography.bodySmall)
-                        Field("商家", input.merchant, state.editable, required = true, tag = "merchant") { session.edit(input.copy(merchant = it)) }
-                        Field(if (writableStage) "消費日期（可稍後補）" else "消費日期", input.date, state.editable, kind = "date", hint = if (writableStage) "YYYY-MM-DD；不填會保留未知日期" else if (input.date.isBlank()) "這筆消費未記錄日期。" else null, tag = "date") { session.edit(input.copy(date = it)) }
-                        Advanced("消費資料的照片來源") {
-                            Text("以下選擇只關聯商家、日期與總額，不會替每個品項指定照片。")
-                            EvidenceChoices(assets, input.evidenceIds, initial.evidenceIds, state.editable) { session.edit(input.copy(evidenceIds = it)) }
-                            Text("商家：${factDescription(base.merchant)}\n日期：${factDescription(base.transactionDate)}\n總額：${factDescription(base.total)}")
+                        if (writableStage && assets.isNotEmpty()) {
+                            if (state.dirty && input.lines.isEmpty()) Text("先保存目前修改，再辨識建立清單。")
+                            if (preRecognition || input.lines.isEmpty()) extraction()
+                            else Advanced("重新辨識照片") {
+                                if (state.dirty) Text("先保存目前修改，再重新辨識；已指定歸屬的清單請直接修正。")
+                                extraction()
+                            }
+                        }
+                        if (preRecognition) TextButton(onClick = { manual = true }, enabled = state.editable,
+                            modifier = Modifier.testTag("manual-fallback")) { Text("改用人工輸入") }
+                        if (!preRecognition) {
+                            Text("1  核對收據內容", style = MaterialTheme.typography.titleLarge)
+                            if (writableStage) Text("先檢查品項與金額；歸屬選擇不代表內容已核對正確。", style = MaterialTheme.typography.bodySmall)
+                            Advanced("商家與日期") {
+                                Field("商家", input.merchant, state.editable, required = true, tag = "merchant") { session.update { current -> current.copy(merchant = it) } }
+                                Field(if (writableStage) "消費日期（可稍後補）" else "消費日期", input.date, state.editable, kind = "date", hint = if (writableStage) "YYYY-MM-DD；不填會保留未知日期" else if (input.date.isBlank()) "這筆消費未記錄日期。" else null, tag = "date") { session.update { current -> current.copy(date = it) } }
+                                Advanced("消費資料的照片來源") {
+                                    Text("以下選擇只關聯商家、日期與總額，不會替每個品項指定照片。")
+                                    EvidenceChoices(assets, input.evidenceIds, initial.evidenceIds, state.editable) { session.update { current -> current.copy(evidenceIds = it) } }
+                                    Text("商家：${factDescription(base.merchant)}\n日期：${factDescription(base.transactionDate)}\n總額：${factDescription(base.total)}")
+                                }
+                            }
+                            Text("${input.merchant.ifBlank { "商家待核對（展開上方補填）" }} · ${input.date.ifBlank { "日期未記錄" }}")
                         }
                     }
                     item(key = "items-heading") {
-                        Text("2  消費品項 · ${input.lines.size} 項", style = MaterialTheme.typography.titleLarge)
-                        if (input.lines.isEmpty()) Text("按「新增品項」開始輸入餐點或商品。照片已屬於這筆消費，無須逐項重選。")
+                        if (!preRecognition) {
+                            Text("2  品項清單與歸屬 · ${input.lines.size} 項", style = MaterialTheme.typography.titleLarge)
+                            if (input.lines.isEmpty()) Text("可新增漏列品項，或使用上方辨識建立清單。")
+                            if (writableStage && input.lines.isNotEmpty()) TextButton(onClick = { batch = true }, enabled = state.editable,
+                                modifier = Modifier.testTag("batch-self")) { Text("將全部品項設為自用") }
+                        }
                     }
                     itemsIndexed(input.lines, key = { _, line -> line.id }) { index, line ->
                         val original = base.items.find { it.id == line.id }
-                        fun update(next: ReviewLineInput) = session.edit(input.copy(lines = input.lines.map { if (it.id == next.id) next else it }))
+                        fun update(next: ReviewLineInput) = session.editLine(next)
                         Card(Modifier.fillMaxWidth().testTag("line-${line.id}")) {
                             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text("${index + 1}. ${line.name.ifBlank { "未填品項名稱" }}", style = MaterialTheme.typography.titleMedium)
                                 Text("數量 ${line.quantity.ifBlank { "未填" }} · 行合計 ${line.amount.ifBlank { "未填" }}", style = MaterialTheme.typography.bodyLarge)
+                                if (line.name.isBlank() || line.quantity.isBlank() || line.amount.isBlank()) Text("有欄位待核對，請展開對照照片。", color = MaterialTheme.colorScheme.error)
+                                LineExpenseControls(line, evaluation.draft, state.editable, openLine == line.id, ::update)
                                 TextButton(onClick = { openLine = if (openLine == line.id) null else line.id }) {
                                     Text(if (openLine == line.id) "收起品項" else if (writableStage) "修改品項 ${index + 1}" else "查看品項 ${index + 1}")
                                 }
@@ -135,7 +163,7 @@ fun ReviewScreen(session: ReviewSession, state: ReviewState, assets: List<Eviden
                                     Field("數量", line.quantity, state.editable, "quantity", required = true, hint = "購買的件數，例如 2", tag = "line-quantity") { update(line.copy(quantity = it)) }
                                     Field("行合計", line.amount, state.editable, "amount", required = true,
                                         hint = "這一列全部數量的金額，${(base.total as? Fact.Known)?.value?.currencyCode ?: "TWD"} 最小單位；不再乘以數量", tag = "line-amount") { update(line.copy(amount = it)) }
-                                    Text("單價未記錄；請直接填明細上的行合計，不會由數量推算單價。", style = MaterialTheme.typography.bodySmall)
+                                    Text("請使用明細上的行合計；原文若另有單價，不能再乘一次數量。", style = MaterialTheme.typography.bodySmall)
                                     photo?.let { TextButton(onClick = { focus.clearFocus(); preview(it.contentSha256) }) { Text("對照照片後繼續此品項") } }
                                     Advanced("此品項的照片關聯與來源") {
                                         Text("僅在能確認照片支撐此品項時選取。上方預覽的照片不會自動成為此品項的佐證。")
@@ -153,27 +181,29 @@ fun ReviewScreen(session: ReviewSession, state: ReviewState, assets: List<Eviden
                         }
                     }
                     item(key = "add-line") {
-                        if (writableStage) Button(onClick = ::addLine, enabled = state.editable && input.lines.size < 100,
+                        if (writableStage && !preRecognition) OutlinedButton(onClick = ::addLine, enabled = state.editable && input.lines.size < 100,
                             modifier = Modifier.fillMaxWidth().testTag("add-line")) { Text("新增品項") }
                     }
                     item(key = "check") {
+                        if (!preRecognition) {
                         HorizontalDivider()
                         Text(if (writableStage) "3  核對金額與完成記帳" else "3  記帳結果", style = MaterialTheme.typography.titleLarge)
                         Field("交易總額", input.total, state.editable, "amount", required = true,
-                            hint = "明細上的整筆消費總額（${(base.total as? Fact.Known)?.value?.currencyCode ?: "TWD"} 最小單位）", tag = "total") { session.edit(input.copy(total = it)) }
+                            hint = "明細上的整筆消費總額（${(base.total as? Fact.Known)?.value?.currencyCode ?: "TWD"} 最小單位）", tag = "total") { session.update { current -> current.copy(total = it) } }
                         if (writableStage) evaluation.draft?.let { Text(receiptAmountPreview(it), modifier = Modifier.testTag("amount-preview")) }
                         if (writableStage) Text("差額不為 0 時，請核對品項行合計、交易總額，以及是否有另列折扣或費用。", style = MaterialTheme.typography.bodySmall)
                         TextButton(onClick = { showAdjustments = !showAdjustments }) { Text(if (showAdjustments) "收起另列折扣／費用" else "另列折扣／費用（${input.adjustments.size} 筆）") }
                         if (showAdjustments) {
                             Text("只有明細另外列出的加減金額才填在這裡；已含在品項金額內的折扣不要再扣一次。")
                             input.adjustments.forEachIndexed { index, adjustment ->
-                                AdjustmentEditor(index, adjustment, input, base, assets, state.editable, session)
+                                AdjustmentEditor(index, adjustment, input, base, assets, state.editable, session, evaluation.draft)
                             }
-                            if (writableStage) OutlinedButton(onClick = { session.edit(input.copy(adjustments = input.adjustments + ReviewAdjustmentInput())) },
+                            if (writableStage) OutlinedButton(onClick = { session.update { it.copy(adjustments = it.adjustments + ReviewAdjustmentInput()) } },
                                 enabled = state.editable && input.adjustments.size < 50) { Text("新增折扣／費用") }
                         }
+                        evaluation.draft?.let { ExpenseSummary(it, writableStage) }
                         if (writableStage) Row(Modifier.fillMaxWidth().testTag("complete-check").toggleable(input.complete, enabled = state.editable,
-                            role = Role.Checkbox, onValueChange = { session.edit(input.copy(complete = it)) }), verticalAlignment = Alignment.CenterVertically) {
+                            role = Role.Checkbox, onValueChange = { session.update { current -> current.copy(complete = it) } }), verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(input.complete, null, enabled = state.editable)
                             Text("我已對照明細，所有品項與另列折扣／費用都已填完整。", Modifier.weight(1f).padding(vertical = 12.dp))
                         }
@@ -184,6 +214,7 @@ fun ReviewScreen(session: ReviewSession, state: ReviewState, assets: List<Eviden
                         if (writableStage && !canConfirm) Text("可以先保存草稿；請在上方對應區塊補齊資料，再確認記帳。")
                         if (writableStage) Button(onClick = { focus.clearFocus(); confirm = true }, enabled = state.editable && !state.dirty && canConfirm,
                             modifier = Modifier.fillMaxWidth().testTag("confirm-transaction")) { Text("確認記帳") }
+                        }
                     }
                     item(key = "notices") {
                         notice?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -199,11 +230,6 @@ fun ReviewScreen(session: ReviewSession, state: ReviewState, assets: List<Eviden
                         Advanced("照片附件與保存結果") {
                             Text("${assets.size} 張照片附在這筆消費；原圖不會被修改。只看照片不會確認任何品項來源。")
                             importStatus?.let { Text(it) }
-                        }
-                        if (writableStage) Advanced("其他工具：本機收據辨識") {
-                            Text("可以繼續手動填寫。本工具是現有的本機辨識功能，結果仍須人工核對。")
-                            if (state.dirty) Text("請先保存草稿才能使用辨識；重新辨識可能取代已填資料。")
-                            extraction()
                         }
                         base.extraction?.let { record -> Advanced("查看辨識原文與來源") {
                             Text("${record.provenance.extractorName} / ${record.provenance.extractorVersion} / ${record.provenance.promptVersion}")
@@ -229,7 +255,7 @@ fun ReviewScreen(session: ReviewSession, state: ReviewState, assets: List<Eviden
                     if (writableStage && state.dirty) Button(onClick = { focus.clearFocus(); session.save() }, enabled = state.editable,
                         modifier = Modifier.testTag("save-draft")) { Text("保存草稿") }
                     if (writableStage && !state.dirty && canConfirm) Button(onClick = { confirm = true }, enabled = state.editable) { Text("確認記帳") }
-                    else if (writableStage) TextButton(onClick = ::checkDetails, enabled = !state.busy) { Text("查看待完成項目") }
+                    else if (writableStage && !preRecognition) TextButton(onClick = ::checkDetails, enabled = !state.busy) { Text("查看待完成項目") }
                     if (!writableStage) Button(onClick = { session.close() }, enabled = !state.busy) { Text("完成，返回消費紀錄") }
                 }
             }
@@ -248,16 +274,24 @@ fun ReviewScreen(session: ReviewSession, state: ReviewState, assets: List<Eviden
         dismissButton = { TextButton(onClick = { append = false }) { Text("繼續填寫") } })
     deleteLine?.let { id -> AlertDialog(onDismissRequest = { deleteLine = null }, title = { Text("刪除此品項？") },
         text = { Text("${input.lines.find { it.id == id }?.name.orEmpty()}\n只刪除此列，照片仍保留在這筆消費。若有折扣引用此品項，需先修改該筆折扣。") },
-        confirmButton = { TextButton(onClick = { session.edit(input.copy(lines = input.lines.filterNot { it.id == id })); deleteLine = null; openLine = null }) { Text("刪除品項") } },
+        confirmButton = { TextButton(onClick = { session.update { current -> current.copy(lines = current.lines.filterNot { it.id == id }) }; deleteLine = null; openLine = null }) { Text("刪除品項") } },
         dismissButton = { TextButton(onClick = { deleteLine = null }) { Text("保留品項") } }) }
     if (reload) AlertDialog(onDismissRequest = { reload = false }, title = { Text("放棄本地輸入？") },
         text = { Text("將重新讀取最新版；目前未保存輸入會被捨棄。") },
         confirmButton = { TextButton(onClick = { reload = false; session.reload() }) { Text("放棄並重新載入") } },
         dismissButton = { TextButton(onClick = { reload = false }) { Text("保留本地畫面") } })
     if (confirm) AlertDialog(onDismissRequest = { confirm = false }, title = { Text("完成這筆消費記帳？") },
-        text = { Text("${input.merchant} · 總額 ${input.total}\n${result?.let { reviewResultText(it, input) }}\n確認後唯讀，無法修改；照片與明細一併保留。", modifier = Modifier.testTag("confirmation-summary")) },
+        text = { Text("${input.merchant} · 總額 ${input.total}\n${expenses?.let(::expenseSummaryText)}\n${result?.let { reviewResultText(it, input) }}\n確認後唯讀，無法修改；照片與明細一併保留。", modifier = Modifier.verticalScroll(rememberScrollState()).testTag("confirmation-summary")) },
         confirmButton = { TextButton(onClick = { confirm = false; session.confirm() }, modifier = Modifier.testTag("accept-confirmation")) { Text("確認完成記帳") } },
         dismissButton = { TextButton(onClick = { confirm = false }) { Text("繼續核對") } })
+    if (batch) AlertDialog(onDismissRequest = { batch = false }, title = { Text("全部設為自用且自己負擔？") },
+        text = { Text("會取代目前 ${input.lines.size} 項的歸屬選擇，包含部分件數分配。請確定這些商品都由自己使用及負擔；收據內容仍須另行核對。") },
+        confirmButton = { TextButton(onClick = {
+            session.update { current -> current.copy(lines = current.lines.map { it.copy(expense = ExpenseInput(ExpenseSplitMethod.WholeLine,
+                ExpensePurpose.Self, basisKey = evaluation.draft?.let { draft -> PersonalExpenseCalculator.lineBasis(draft, it.id) }, confirmedAtEpochMillis = System.currentTimeMillis())) }) }
+            batch = false
+        }, enabled = state.editable && evaluation.draft != null) { Text("確定全部設為自用") } },
+        dismissButton = { TextButton(onClick = { batch = false }) { Text("保留目前歸屬") } })
 }
 
 @Composable
@@ -307,8 +341,8 @@ private fun EvidenceChoices(assets: List<EvidenceAsset>, selected: Set<String>, 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AdjustmentEditor(index: Int, adjustment: ReviewAdjustmentInput, input: ReviewInput, base: ReceiptDraft,
-    assets: List<EvidenceAsset>, enabled: Boolean, session: ReviewSession) {
-    fun update(next: ReviewAdjustmentInput) = session.edit(input.copy(adjustments = input.adjustments.map { if (it.id == next.id) next else it }))
+    assets: List<EvidenceAsset>, enabled: Boolean, session: ReviewSession, evaluated: ReceiptDraft?) {
+    fun update(next: ReviewAdjustmentInput) = session.editAdjustment(next)
     Card(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("加減項 ${index + 1}", style = MaterialTheme.typography.titleMedium)
@@ -334,7 +368,8 @@ private fun AdjustmentEditor(index: Int, adjustment: ReviewAdjustmentInput, inpu
             Advanced("加減項 ${index + 1} 的照片來源") {
                 EvidenceChoices(assets, adjustment.evidenceIds, ReviewInput.from(base).adjustments.find { it.id == adjustment.id }?.evidenceIds.orEmpty(), enabled) { update(adjustment.copy(evidenceIds = it)) }
             }
-            if (enabled) TextButton(onClick = { session.edit(input.copy(adjustments = input.adjustments.filterNot { it.id == adjustment.id })) }) { Text("刪除此加減項") }
+            AdjustmentExpenseControls(adjustment, evaluated, enabled, ::update)
+            if (enabled) TextButton(onClick = { session.update { current -> current.copy(adjustments = current.adjustments.filterNot { it.id == adjustment.id }) } }) { Text("刪除此加減項") }
         }
     }
 }

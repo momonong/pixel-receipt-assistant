@@ -64,7 +64,11 @@ class RealOcrPipelineTest {
                 assertEquals(draft, repo.observeDraft(draft.id).first())
                 assertTrue(draft.extraction!!.regions.isNotEmpty())
                 assertTrue(ReceiptReconciler().reconcile(draft) is ReceiptReconciliationResult.Indeterminate)
-                val saved = ManualReceiptReview(repo).save(draft, ReviewInput.from(draft).copy(complete = true), 100) as ReviewSaveResult.Saved
+                val input = ReviewInput.from(draft)
+                val selected = input.copy(complete = true, lines = input.lines.map { it.copy(expense = ExpenseInput(
+                    ExpenseSplitMethod.WholeLine, ExpensePurpose.Self,
+                    basisKey = com.momonong.pixelreceipt.domain.rules.PersonalExpenseCalculator.lineBasis(draft, it.id), confirmedAtEpochMillis = 100)) })
+                val saved = ManualReceiptReview(repo).save(draft, selected, 100) as ReviewSaveResult.Saved
                 val confirmed = TransitionReceiptStage(repo)(saved.draft, ReceiptStage.Confirmed) as TransitionReceiptStageResult.Updated
                 assertEquals(ReceiptStage.Confirmed, confirmed.draft.stage)
             }
