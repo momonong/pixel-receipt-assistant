@@ -4,7 +4,7 @@ PixelReceipt AI 是以 **Google Pixel 10 Pro Fold** 為主要實機的原生 And
 
 目前已實作 **照片 → 本機辨識建立清單 → 核對內容 → 指定歸屬 → 個人支出／代墊 → 保存與確認**。首頁 Photo Picker 與外部分享匯入後直接開啟同一筆交易的「辨識並建立清單」，單圖不必額外勾選頁面；多圖先選這張收據的頁面。人工輸入是補正與失敗備援。照片不會上傳雲端。
 
-**核心產品驗收仍未完成**：已接入公開 ML Kit Prompt API／AICore Gemini Nano、嚴格候選驗證與既有核對流程，提供明確選擇的傳統 OCR 備援。2026-09-11 使用者離開並拔除手機，本次未安裝新版、未執行 Pixel Nano；主機與獨立模擬器驗證不能代表 Nano 品質。五張真實收據只有既有 OCR 基線，總額皆 Unknown。Firebase、共同分攤、Sheets 與收款管理尚未接入；AppFunctions 完成公開 API 的有界草稿試作，Gemini 助理端到端仍未驗證。詳見下方「Pixel Gemini Nano 整合」。
+**核心產品驗收仍未完成，主要缺口是辨識品質**：2026-09-13 已在 Pixel 真正執行 `nano-v3` 圖片／結構化推論。五張開發收據的 B／C 共 10 次第一版實測，只有 C 的 1 次通過候選格式驗證，仍有備註誤列商品及品名錯誤，無法視為可用清單。另完成數字／日期 schema 的有限改版，最新 `nano-fields-2.1` 尚待手機重接實測。App 保留明確選擇的傳統 OCR 備援，沒有雲端 fallback。Firebase、共同分攤、Sheets 與收款管理尚未接入；AppFunctions 有界草稿試作的 Gemini 助理端到端仍未驗證。詳見下方「Pixel Gemini Nano 整合」。
 
 本版整合個人支出 `3e05386`、收據測試室 `8fb69de` 與 Nano `cde7d9f`，交付分支為 `feat/receipt-nano-integration`。以下功能分支、舊 APK、裝置更新與驗證數據保留為各階段歷史；GitHub 推送與合併狀態以 PR 記錄為準。合併程式碼不代表手機已更新、Nano 品質通過或已發布產品。私人收據與模型輸出不在 Git 中，新 checkout 不會自動取得它們。
 
@@ -48,7 +48,7 @@ Gradle distribution 有固定 SHA-256，wrapper JAR 也已對照官方 checksum�
 系統 Photo Picker ────────────┘       │
                                      ├→ ReceiptPage／PriceTag／PromotionSign／Other
                                      ├→ Fact + provenance + EvidenceLink（domain 已完成）
-                                     └→ AiRouter → ML Kit Gemini Nano（已接入，實機待驗證）
+                                     └→ AiRouter → ML Kit Gemini Nano（已實機推論，品質未通過）
                                          ├→ 傳統 ML Kit 中文 OCR＋收據解析（明確選擇備援）
                                          └→ Firebase AI Logic（未接入；須明確同意）
                                                    ↓
@@ -262,7 +262,8 @@ Sharesheet 的 `onNewIntent` 會使 Android `ActivityScenario` 不再追蹤原 l
 - [x] Room v1 schema、schema 相容性／非破壞性升降版保護測試與 CAS repository adapter。
 - [x] Sharesheet、Photo Picker、多圖 evidence inbox 與 app-private 圖片保存實作；實機端到端驗收待完成。
 - [x] 使用者明確選取收據頁面，本機中文 OCR＋結構化品項候選；自動圖片分類仍未實作。
-- [ ] `MlKitNanoAnalyzer` 與 `FirebaseCloudAnalyzer` adapters；Firebase 路徑強制 App Check／Play Integrity。
+- [x] `MlKitNanoAnalyzer` adapter；實機推論已執行，品質驗收未通過。
+- [ ] `FirebaseCloudAnalyzer` adapter；Firebase 路徑強制 App Check／Play Integrity。
 - [ ] 寶雅等 retailer source adapters，保存 URL、抓取時間與適用條件，僅產生 candidate。
 - [ ] WorkManager 唯一工作與重試策略；不得假設 Nano 能在背景執行。
 - [x] 單筆交易人工 evidence／品項核對、明確 scope 加減調整、CAS 保存與唯讀 Confirmed；裝置驗收待完成。
@@ -291,7 +292,7 @@ Sharesheet 的 `onNewIntent` 會使 Android `ActivityScenario` 不再追蹤原 l
 
 匯入後在主畫面按「辨識並建立清單」，單圖直接使用，多圖先選同一交易的收據頁面。本機逐頁辨識後刷新同筆交易的待核對清單，不要求先填資料；已有人工內容時，重新辨識須先保存並明確同意取代，已有歸屬決定則禁止取代。完整操作見上方「核對、品項歸屬與確認保存」。
 
-- 主流程預選 Gemini Nano＋OCR 參考文字，這是待 Pixel 比較的暫定方案，不是實測勝出結論。可明確切換「傳統 OCR」：隨 APK 打包的 `com.google.mlkit:text-recognition-chinese:16.0.1`＋`receipt-layout-2`，此路徑無須 Nano 模型。以下版面解析規則描述傳統 OCR；兩者都不使用雲端，OCR 可用不代表 Nano 可用。
+- 主流程預選 Gemini Nano＋OCR 參考文字。Pixel 開發實測中 C 比 B 少了部分多列，但兩者都未達可用清單門檻；此預選仍是實驗設定。可明確切換「傳統 OCR」：隨 APK 打包的 `com.google.mlkit:text-recognition-chinese:16.0.1`＋`receipt-layout-2`，此路徑無須 Nano 模型。以下版面解析規則描述傳統 OCR；兩者都不使用雲端，OCR 可用不代表 Nano 可用。
 - 本次解析限 **TWD**。優先處理明確的「品名／數量／單價／金額」欄位或「品名 數量 × 單價 行合計」行式；可解析西元／民國日期、交易總額與另列折扣／費用。收據版面沒有明確欄位時仍可產生品名候選，但數量或行金額保持未知。單價不乘成行合計，也不代填未知數量 1。
 - 商家採第一個合適文字行作候選，可能需要修正；統編、電話、付款、找零、稅額摘要不作一般品項。複雜促銷、換行品名、無標題欄位、傾斜／模糊與非 TWD 不保證能處理。無任何可用品項會顯示失敗，不以純 OCR 文字當成擷取成功。
 - 跨頁同名或差一字的候選保守合組；同頁的重複列保留。跨頁組合的數量與金額保持未知、原文都保留，請核對後填值，若實際是不同品項可新增。其他漏頁、不同 OCR 名稱的重複仍需人工檢查。
@@ -317,26 +318,39 @@ Nano 開發來源為 `feat/pixel-nano-receipt`／`.gradle/worktrees/pixel-nano-r
 | 能力 | 本次狀態 |
 | --- | --- |
 | 傳統 ML Kit 中文 OCR | bundled 16.0.1＋receipt-layout-2；明確選擇的本機備援 |
-| App 內 Gemini Nano | 真正呼叫公開 Prompt beta4／AICore；圖片＋結構化輸出 adapter 已接入，Pixel 推論待驗證 |
+| App 內 Gemini Nano | Pixel 已回報 AVAILABLE／nano-v3／structured output，已完成真實圖片推論；品質未通過 |
 | 手機 Gemini 助理 App | 不是本 App 的模型 API；不使用其登入 token 或私人介面 |
 | Gemini 雲端 API | 測試室既有可選實驗 adapter；本次未呼叫、不要求 API key、不自動上雲 |
 | AppFunctions | alpha11 公開 service／KSP 試作，只建立空白 `NeedsReview` 草稿；未驗證平台呼叫或 Gemini 助理端到端 |
 
 2026-09-11 核對的 [GenAI 官方清單](https://developers.google.com/ml-kit/genai)列出 Pixel 10 Pro Fold／nano-v3；[Prompt API](https://developers.google.com/ml-kit/genai/prompt/android/get-started)與[結構化輸出](https://developers.google.com/ml-kit/genai/prompt/android/structured-output)提供圖片＋文字及 typed schema。支援清單不等於此手機已就緒。App 每次準備辨識都檢查 AVAILABLE／DOWNLOADABLE／DOWNLOADING／UNAVAILABLE、實際 `getBaseModelName()` 與 structured-output capability；使用者點辨識後可下載模型，保持前景、可取消，沒有背景自動重試。首次下載裝置模型需要網路，但收據推論留在裝置端。
 
-Nano 分成 **B：直接原圖**、**C：原圖＋實際 OCR 文字**；測試室可逐張重跑。C 保存原始 OCR／parser 結果，parser 失敗仍可提供已取得的文字；完全沒有 OCR 文字則失敗，不暗中改成 B。主 App 暫定 C，尚未以五張樣本選出勝出方案。[官方 Prompt 用途](https://developers.google.com/ml-kit/genai/prompt/android)支持收據與 OCR 輔助的方向，不能代替品質實驗。
+Nano 分成 **B：直接原圖**、**C：原圖＋實際 OCR 文字**；測試室可逐張重跑。C 保存原始 OCR／parser 結果，parser 失敗仍可提供已取得的文字；完全沒有 OCR 文字則失敗，不暗中改成 B。主 App 暫定 C，五張開發樣本尚無達標方案。[官方 Prompt 用途](https://developers.google.com/ml-kit/genai/prompt/android)支持收據與 OCR 輔助的方向，不能代替品質實驗。
 
-輸出 schema `nano-observations-1`／prompt `nano-receipt-1` 分離品名、數量、單價、行額、交易總額及非商品列；不填預期答案。嚴格驗證 TWD、數值範圍、日期、筆數與結束原因，拒絕截斷、外幣、溢位或無商品輸出。逐頁處理的輸入與預留輸出須符合裝置 token limit，單次 output 上限 3500；不自動裁切、修造數字或無限制重試。
+目前輸出 schema 為 `nano-fields-2.1`／prompt `nano-receipt-2`。`NanoReceiptFields` 以 nullable 整數承接數量、單價、行額、總額及分開的年月日，避免字串欄位混入稅碼、時間；日期不完整則 Unknown，完整但非法則拒絕。轉為既有 `NanoReceiptOutput` observation／audit 格式，再經原嚴格驗證；不修改資料庫格式，也不填預期答案。TWD、範圍、日期、筆數及結束原因檢查不放寬；單價不計算行額。每頁輸入 token <4000，輸入加預留輸出須符合裝置 token limit，output 上限 3500。這是待實機重測的有限改版，不能聲稱已改善辨識品質。
 
 商品零元及同頁重複列保留。已含在行額的折扣不再扣除；另列調整 scope 保持 Unknown，不明是否已含時金額也保持 Unknown。單價只保留為觀察，不相乘或代填行額。沒有可靠位置時引用整張原圖，核對頁明示無逐字定位，保留人可讀的分類快照。最終金額、歸屬、±1 對帳容差仍由既有 deterministic domain 判定。
 
-診斷保存 SDK／model／prompt／schema／generation 參數、來源 hash／尺寸、輸入 token、SDK 公開回應、驗證錯誤與分段耗時。**目前 typed SDK 只提供已解析物件與 finish reason，未公開生成前的原始 token 字串或精確模型 revision**；因此保存可取得的 response，明記 `rawTokenTextAvailable=false`／`modelRevision=not_exposed_by_public_api`，不宣稱有原始 token audit。
+診斷保存 SDK／model／prompt／schema／generation 參數、來源 hash／尺寸、輸入 token、SDK 公開回應、驗證錯誤與分段耗時。成功的 typed API 提供已解析物件與 finish reason，沒有獨立原始 token 字串或精確模型 revision；明記 `rawTokenTextAvailable=false`／`modelRevision=not_exposed_by_public_api`。部分失敗例外包含截斷生成內容，另原樣保存在私人 `sdkError`，不冒充完整回應。新版另保存穩定欄名的 `typedCandidates-*`／`totalTokens`，避免只依賴 SDK 內部的 Gson 混淆欄名。
 
-### 手機重接後的測試入口
+### 2026-09-13 Pixel 實測與測試工具修正
 
-本次只讀取 Pixel 10 Pro Fold／Android 16 API 36、AICore 版本與當時安裝 APK 簽章，沒有讀取手機交易／相簿、安裝新版或執行推論。AICore 當時回報 `0.release.prod_aicore_20260723.00_RC11.964081323`。新 APK 與當時手機安裝憑證同為 `6fa1a1e710134668a0443876160ee821b3fd044705ef319bbcfb88ee993f4db2`；手機重接後仍需重新核對指定 serial 與現有簽章，再 `adb -s <PixelSerial> install -r ...` 保留資料更新，不能卸載／清資料。
+從已合併 main `84058e0` 建立 `feat/pixel-nano-device-validation`，位於 `.gradle/worktrees/pixel-nano-device-validation`。重新核對 Pixel 10 Pro Fold／Android API 36、locked bootloader、AICore production `0.release.prod_aicore_20260723.00_RC11.964081323` 與既有 App 簽章後，`adb install -r` 成功；未卸載、清資料或讀取使用者交易／Room。初次安裝的 Nano APK SHA-256 為 `c0fd48c6d579e4b06c5d56eace97914479dd5e2c76a8648383f561ccf81d5a27`。
 
-以下命令是待執行步驟，需先安裝本分支 debug APK；`nano-probe` 不會自行安裝，`--download` 只有明確指定才下載：
+- 初始為 `DOWNLOADABLE`，一次下載等待 240 秒沒有 SDK download event，逾時取消並保存結果。後續 probe 已回報 `AVAILABLE`、`nano-v3`、structured output true、token limit 8192；接著實際執行收據推論。沒有改 AICore 設定、加入預覽或繞過限制；先前觀察到的 Wi-Fi 未連線並非已證實根因。
+- 修正真機重現的 bridge 啟動錯誤：連續 `am start` 可回 `Status: ok` 卻只把 intent 交給已完成的 Activity，沒有執行新 job。現在以 `--activity-clear-top` 建立新的 standard Activity，拒絕 `Activity not started`；20 秒沒有本次 `started.json` 就取消並報錯，不再等完整推論期限。`progress.json` 原子更新最新能力／下載事件；主機總逾時也送出本次 UUID 的取消檔。
+- 五張原圖逐一核對 SHA-256 並保留 case IDs。第一版 `nano-observations-1` 完成 B／C 各 5 次：B 0/5、C 1/5 通過候選驗證；7 次被日期／數字格式拒絕，1 次 SDK 11 回應檢查失敗，1 次 SDK -106 超出結構化輸出上限。唯一接受的候選仍把備註當商品。部分原始輸出把折前小計當總額，另有重複幻覺直到 100 列；不因金額偶然相等而判定正確。
+- `nano-fields-2` 在 C 完成 3 次：2 次數字與日期已可解析，但幣別 Unknown 被嚴格拒絕，1 次仍 -106；第 4 張開始即因離開前景取消，不列入模型品質分母，第 5 張未跑。`2.1` 恢復原先的幣別 guide，沒有將 null 自動改成 TWD；手機離線前未安裝或測試此版，不宣稱改版勝出。
+- 主機 scoped cancellation 的實機回報已驗證；鎖定時亦保存取消結果。尚未完成長推論途中切背景、真實配額耗盡與程序重啟的全部真機情境。
+- 私人逐張 A／B／C 比較、版本／hash／耗時與原始輸出保存在此 worktree 的 `.receipt-lab/reports/2026-09-13-pixel-nano/`；照片在 `.receipt-lab/images/`，裝置診斷在 `.receipt-lab/device/`。參考由助理視覺判讀，未經使用者逐列確認，本批屬開發集，不是未見驗收集。尚無實際人工補正操作數或使用者完成時間。
+
+下一個有界的本機選項是先完成 `2.1` 同五張重測；若名稱、備註／商品、折扣與長列表錯誤仍在，再評估保留原圖來源的 OCR 行區域裁切／小批次 Nano 擷取。這只是下一步候選，不預先增加店家答案、海量 prompt 或雲端 fallback。
+
+### Pixel 測試入口
+
+2026-09-11 只核對裝置，當時沒有安裝新版或執行推論；2026-09-13 更新結果見上節。已知更新憑證為 `6fa1a1e710134668a0443876160ee821b3fd044705ef319bbcfb88ee993f4db2`；每次重新接手仍須核對指定 serial 與現有簽章，再 `adb -s <PixelSerial> install -r ...` 保留資料更新，不能卸載／清資料。
+
+以下命令需先安裝與主機工具配套、含 `started.json` 回報的本分支 debug APK；`nano-probe` 不會自行安裝，`--download` 只有明確指定才下載：
 
 ```powershell
 .\receipt-lab.ps1 nano-probe --adb <adb.exe路徑> --serial <PixelSerial> --output .receipt-lab/nano-probe.json
@@ -350,6 +364,8 @@ Nano 分成 **B：直接原圖**、**C：原圖＋實際 OCR 文字**；測試�
 
 Nano bridge 是僅 debug APK 的獨立前景 Activity，只處理指定 UUID／hash 的單張樣本，使用獨立 cache、不初始化 Room 或 production repository。Python 必須指定實體 Pixel serial，每次檢查 Pixel／非 emulator；傳統 OCR 的 emulator-only 保護原樣保留。取消檔只作用於該 UUID，離開前景或重建不自動重跑；輸入與結果位於 app-private `files/nano-lab/<uuid>`，需要保留供診斷，請勿用清除 App 資料來清理。HTTP 的 Nano configured 狀態僅表示已提供 adb／serial，不宣稱手機連線或模型 AVAILABLE。
 
+另有 debug-only `NanoReviewLabActivity`：以 `--es job <既有成功UUID>` 開啟該次結果，重新驗證 observation 及原圖 hash，將候選交給正式 mapper／ReviewSession／ReviewScreen。它只使用 `files/nano-lab/<uuid>/review.db` 與該次照片副本，不取得 App 的個人帳本；畫面明示測試收據，歸屬操作為模擬情境。這讓 agent 可重播已保存結果、測試保存與重開，不必重新跑模型或操作個人交易。此入口不能代替首頁／分享匯入、Nano 推論及完整產品驗收。
+
 ### AppFunctions 試作
 
 `BaseReceiptFunctionService` 透過 alpha11 KSP 產生公開 service 與 `receipt_functions.xml`，manifest 限制平台 `BIND_APP_FUNCTION_SERVICE` 權限、API 36 以下停用。唯一函式 `createReviewDraft` 透過原 repository 建立本機 UUID、revision 0、所有金額及歸屬未定的空白待核對草稿。每次明確呼叫建立一筆，不讀取舊交易或照片、不推論、不自動確認，回應不確定時不可自動重試。
@@ -358,18 +374,25 @@ Nano bridge 是僅 debug APK 的獨立前景 Activity，只處理指定 UUID／h
 
 ### 驗證與剩餘驗收
 
-- 主機：196 項 JVM／Robolectric 測試通過（含 Nano schema、取消／前景／不可用不 fallback、Unknown、零元與重複商品、保留人工修改、實際 Room reopen），lint 無問題，debug／Android test APK 建置通過。Python／HTTP 21 項測試通過；不視為模型準確率。
+- 歷史整合（2026-09-11）：196 項 JVM／Robolectric、21 項 Python／HTTP 通過，lint 與 APK 建置通過。2026-09-13 本分支新增 typed 欄位 Unknown／非法日期／負數驗證，以及 bridge 假啟動、未開始與逾時取消測試；最新主機及離線 UI 證據見本節後續記錄，不視為模型準確率。
 - 獨立 API 35 x86_64 AVD `receipt-nano-host-test`／emulator-5586：Compact 的 9 項既有實際 ML Kit／Compose 流程通過；Expanded 與 Compact 1.5 倍字級各 1 項個人支出完整流程通過，截圖確認摘要及保存按鈕可用。共 11 次執行、9 個不同案例，全部為合成輸入。新版 debug 診斷頁另在此 emulator 實際呼叫 SDK capability probe，正確保存 UNAVAILABLE／structuredOutput=false；沒有執行 Nano 推論，不能代表 Pixel 能力。
 - 為通過既有嚴格 lint，更新 Compose BOM 2026.09.00、Room 2.8.5、Robolectric 4.17，沒有停用檢查。SQL v1 schema 無 diff；payload 維持 format 4，新增 nullable 觀察快照，舊格式缺省為 null，沒有 migration 或自動補造歸屬。
-- 五張開發樣本 bytes、case IDs 與保存的 A 基線已逐檔核對並複製至 Nano 來源 worktree。B／C 沒有執行，不能報告品質勝出或實際補正時間；私人比較表位於主 checkout 下 `.gradle/worktrees/pixel-nano-receipt/.receipt-lab/reports/2026-09-11-nano-comparison/report.md`。新整合 worktree／GitHub 不含這些私人樣本；重跑前須按明確授權來源複製並核對 hash。照片、收據原文、API 輸出與工具／簽章都未提交。
+- 五張第一版 B／C 已執行，最新數據見 2026-09-13 實測節；2026-09-11 私人比較表保留為當時尚未推論的歷史。GitHub 不含私人樣本；重跑須沿用明確授權來源並核對 hash。照片、收據原文、API 輸出與簽章檔不提交。
 
 手機重接後需完成以下五組驗收，完成前不宣稱核心產品通過：
 
-1. 實際 availability、首次下載、圖片＋typed output，並驗證取消、離開前景、逾時及 AICore 配額的真實狀態。
-2. 同一五張 hash 的 A／B／C 比較，逐列評估漏列、多列、名稱、數量、行額、總額、折扣及零元／跨行商品；參考仍須使用者核定。
+1. 重新確認 availability 並保留資料安裝最新版本；補測長推論途中離開前景、程序中斷及配額情境。AVAILABLE 與圖片推論已驗證，不必把它們列為從未執行。
+2. 同一五張 hash 重測最新 `nano-fields-2.1`，與保存的 A／B／C 基線比較漏列、多列、名稱、數量、行額、總額及折扣；參考仍須使用者核定。
 3. 至少三張真實收據走辨識→少量修正→歸屬→個人支出→確認→重開，記錄實際操作數與整段時間，與模型耗時分開。
 4. Pixel 同簽章保留資料更新與 Compact／展開／旋轉／分割視窗；舊草稿、Confirmed 唯讀及新結果 CAS。
 5. 未見收據驗收集與 API 36 AppFunctions 開發工具呼叫分別驗證；Gemini 助理測試須具備官方開放資格，ADB 成功不等於助理成功。
+
+2026-09-13 使用者離開並拔掉手機後，本分支完成下列離線驗證：
+
+- `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest --offline --no-daemon --max-workers=1` 通過：197 tests、0 failures／errors／skipped，lint 無問題；88 tasks，2m16s，證據 `.gradle/offline-final-gate.log`。本批 Python bridge／HTTP 24 tests 通過。
+- 新的 API 35 專用 AVD `receipt-nano-offline-review`／emulator-5588，重播 1 張既有真實 Nano 成功結果，實際點選模擬歸屬、保存、退出，停止 App 程序後重開保留 4 列及歸屬。Compact 1080×2400／420 dpi、Expanded 2400×1800／320 dpi 皆檢視畫面；錯誤內容保留待核對，沒有確認成個人交易。這是離線 UI／Room 驗證，不是新的模型推論或 Pixel 完整驗收。
+- 既有 `PersonalExpenseFlowUiTest` 在新 AVD 通過：1 test／15.496s，實際分享→OCR→修正→部分數量／送禮／自用／折扣分配→保存→重開→確認，輸入為合成照片。證據 `.gradle/offline-expense-flow.log`，不能當成 Nano 或真實收據品質。
+- 最新 APK SHA-256 `9aa82fe0bdc2f888eae9c41a5f2e22e2966090d0feeb6cf1cd8b9cab67cd9e77`，已核對上述同一憑證；只安裝於本次模擬器，尚未更新 Pixel。Pixel 拔除前最後版本為 `nano-fields-2`／APK `96d4aca55ed2be1b8e5ffa377fabed3a50645e7af5080f3c8d6507e9b3b65d56`。
 
 ## 收據測試室與 API
 
