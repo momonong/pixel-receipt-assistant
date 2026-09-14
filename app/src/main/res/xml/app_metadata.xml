@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AppFunctionAppMetadata xmlns:appfn="http://schemas.android.com/apk/androidx.appfunctions"
+    appfn:description="PixelReceipt stores receipt drafts for human review.
+    Use importReceiptForReview for user-provided TWD receipt fields and product rows.
+    Use createReviewDraft only when the user wants an empty draft.
+    These actions do not run an AI model, disclose the existing ledger, assign ownership,
+    or confirm spending. Unknown fields must remain null. Never infer missing amounts.
+    Retry imports using the same requestId and identical fields; use a new token for a new receipt.
+    Users review and confirm in PixelReceipt."
+    appfn:displayDescription="@string/assistant_app_description" />

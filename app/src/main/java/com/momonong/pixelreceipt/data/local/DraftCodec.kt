@@ -19,6 +19,7 @@ class DraftCodec {
             "extracted" to FactProvenance.Extracted::class.java,
             "user" to FactProvenance.UserConfirmed::class.java,
             "derived" to FactProvenance.Derived::class.java,
+            "assistant" to FactProvenance.AssistantSuggested::class.java,
         ))
         .registerTypeAdapter(EvidenceLinkTarget::class.java, Tagged(
             "receipt" to EvidenceLinkTarget.Receipt::class.java,
@@ -46,11 +47,11 @@ class DraftCodec {
             "opaque" to PromotionTerms.Opaque::class.java,
         )).create()
 
-    fun encode(draft: ReceiptDraft): String = envelope(gson.toJsonTree(draft), 4)
+    fun encode(draft: ReceiptDraft): String = envelope(gson.toJsonTree(draft), 5)
     fun decode(payload: String): ReceiptDraft {
         val root = JsonParser.parseString(payload).asJsonObject
         val format = root["format"].asInt
-        require(format in 1..4) { "Unsupported persisted format" }
+        require(format in 1..5) { "Unsupported persisted format" }
         val value = root["value"].asJsonObject
         // Gson bypasses Kotlin constructor defaults. Explicitly migrate v1 in memory;
         // the next CAS write persists v3 without altering the SQL schema or revision here.

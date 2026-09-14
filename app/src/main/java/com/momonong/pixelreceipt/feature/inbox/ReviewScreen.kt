@@ -106,7 +106,11 @@ fun ReviewScreen(session: ReviewSession, state: ReviewState, assets: List<Eviden
                     if (showPhoto && !shortWindow) {
                         if (assets.size > 1) PhotoChoices(assets, photo?.id) { photoId = it }
                         photo?.let { EvidencePhoto(it.contentSha256, images, Modifier.fillMaxWidth().height(140.dp)) }
-                        if (assets.isEmpty()) Text(if (writableStage) "照片可稍後補；先手動填寫這筆消費。" else "這筆消費沒有照片附件。", style = MaterialTheme.typography.bodySmall)
+                        if (assets.isEmpty()) Text(when {
+                            writableStage && base.assistantImport != null -> "已帶入外部整理的品項，尚待核對。可補上原收據照片，檢查品名、數量與金額。"
+                            writableStage -> "照片可稍後補；先手動填寫這筆消費。"
+                            else -> "這筆消費沒有照片附件。"
+                        }, style = MaterialTheme.typography.bodySmall)
                     }
                 }
                 LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("review-form"), state = list,
@@ -231,6 +235,15 @@ fun ReviewScreen(session: ReviewSession, state: ReviewState, assets: List<Eviden
                             Text("${assets.size} 張照片附在這筆消費；原圖不會被修改。只看照片不會確認任何品項來源。")
                             importStatus?.let { Text(it) }
                         }
+                        base.assistantImport?.let { record -> Advanced("查看外部回覆原文") {
+                            Text("外部提供的收據候選，來源身分與辨識準確度未驗證。原文保留，後續修改不會覆蓋它。")
+                            Text("匯入方式：${when (record.channel) {
+                                AssistantImportChannel.PastedText -> "貼上文字"
+                                AssistantImportChannel.SharedText -> "分享文字"
+                                AssistantImportChannel.AppFunction -> "助理函式"
+                            }}")
+                            Text(record.rawInput)
+                        } }
                         base.extraction?.let { record -> Advanced("查看辨識原文與來源") {
                             Text("${record.provenance.extractorName} / ${record.provenance.extractorVersion} / ${record.provenance.promptVersion}")
                             record.warnings.forEach { Text(it) }
@@ -318,7 +331,7 @@ private fun Field(label: String, value: String, enabled: Boolean, kind: String =
 }
 
 private fun factDescription(fact: Fact<*>?): String = when (fact) {
-    is Fact.Known -> "${fact.inputText()}（${when (fact.provenance) { is FactProvenance.UserConfirmed -> "人工填寫"; is FactProvenance.Extracted -> "辨識候選"; is FactProvenance.Derived -> "規則計算" }}；${fact.provenance.evidence.size} 個照片引用）"
+    is Fact.Known -> "${fact.inputText()}（${when (fact.provenance) { is FactProvenance.UserConfirmed -> "人工填寫"; is FactProvenance.Extracted -> "辨識候選"; is FactProvenance.Derived -> "規則計算"; is FactProvenance.AssistantSuggested -> "外部回覆候選" }}；${fact.provenance.evidence.size} 個照片引用）"
     is Fact.Conflicting -> "來源有衝突：${fact.candidates.joinToString { it.inputText() }}；請核對後填寫"
     is Fact.NotApplicable -> "不適用：${fact.reason}"
     is Fact.Unknown, null -> "未知"

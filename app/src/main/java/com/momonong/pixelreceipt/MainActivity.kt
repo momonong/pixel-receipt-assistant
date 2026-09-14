@@ -52,6 +52,12 @@ class MainActivity : ComponentActivity() {
 
     private fun receive(intent: Intent) {
         try {
+            if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain") {
+                val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+                if (text.isNullOrBlank()) inbox.showError("分享內容沒有收據文字，請複製 Gemini 的完整回覆。")
+                else inbox.assistantShared(shareOperationId, text)
+                return
+            }
             val uris = SharedImages.from(intent) ?: return
             if (uris.isEmpty()) inbox.showError("分享內容沒有可讀取的圖片，請從相簿重新分享。")
             else inbox.shared(shareOperationId, uris)

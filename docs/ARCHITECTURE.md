@@ -2,7 +2,17 @@
 
 ## 目標與範圍
 
-這個專案以 **Google Pixel 10 Pro Fold** 為主要實機，採原生 Android 架構，同時保持對一般 Android 手機與不同視窗尺寸的相容性。Sharesheet、Photo Picker、多圖 inbox、Room、ML Kit Gemini Nano／中文 OCR、人工核對、自用／代買／送禮、部分件數分配、個人支出及確認記帳已接入。Nano 使用公開 Prompt／AICore，2026-09-11 因使用者離開拔除手機，實機能力與收據品質尚未驗證。Firebase AI Logic、共同分攤與 Google Sheets adapters 仍待實作；下圖包含這些目標，現行流程見「自動擷取架構」。AppFunctions 僅完成公開 service 建立空白待核對草稿的試作，尚無 Gemini 助理端到端證據。
+這個專案以 **Google Pixel 10 Pro Fold** 為主要實機，採原生 Android 架構，同時保持對一般 Android 手機與不同視窗尺寸的相容性。Sharesheet、Photo Picker、多圖 inbox、Room、ML Kit Gemini Nano／中文 OCR、人工核對、自用／代買／送禮、部分件數分配、個人支出及確認記帳已接入。Nano 使用公開 Prompt／AICore，2026-09-13 已真正實機推論，但收據品質未通過驗收。Firebase AI Logic、共同分攤與 Google Sheets adapters 仍待實作。2026-09-14 加入外部助理回覆匯入與 typed AppFunctions 收據入口；AppFunctions 的 Gemini 助理端到端仍受私人預覽資格限制，尚未驗證。現行資料路徑見「自動擷取架構」與「外部助理收據入口」。
+
+## 外部助理收據入口
+
+`ACTION_SEND(text/plain)／首頁貼上 → AssistantReceiptText → AssistantReceipt → ImportAssistantReceipt → Room → ReviewSession`。Android 16+ 的 `importReceiptForReview` 將 typed 參數轉成同一份候選及匯入 use case。外部 JSON 不經過內部 DraftCodec；只有固定的收據 observation 欄位，沒有既有交易更新、歸屬決策或帳務確認入口。
+
+輸入只允許單筆 TWD，null 保留 Unknown；缺少照片不建立虛構 EvidenceAsset 或 Extracted provenance。新 `FactProvenance.AssistantSuggested` 指向原文 SHA-256，`AssistantImportRecord` 保存原文、來源通道與本機接收時間，不能據此斷言實際模型名稱或版本。人工編輯及照片補入都保留原始快照；使用者之後自行確認照片關聯。所有金額對帳與個人支出仍由既有規則計算。
+
+匯入依來源通道及請求 token 在本機 namespace 產生草稿 ID，資料庫 create transaction 處理競爭。相同 token／內容重試返回原紀錄，不改寫人工修正、revision 或 stage；同 token 不同內容拒絕。使用者開始另一筆相同消費時使用新的 token，不依商家／金額合併交易。原文與草稿同一次 Room transaction 保存，不另寫容易失同步的重試索引。
+
+SQL schema v1 不變，payload v5 新增 nullable assistantImport 與 assistant provenance tag，保留 v1–v4 讀取。未新增網路權限、雲端 adapter、公開網址讀取或帳號設定；Gemini 端傳圖由使用者在 Gemini 內明確操作。文字匯入功能是可測試的交接路徑，並非 Gemini 自動調用或辨識品質驗收。詳細操作與官方可用性來源見 README 的「Gemini 回覆匯入與 AppFunctions」。
 
 App 支援下限採 `minSdk 26`。這只是安裝下限，不代表每台 Android 8+ 裝置都能執行 Gemini Nano；Nano 必須另外在 runtime 檢查裝置、Android／AICore、模型下載與個別 ML Kit GenAI API 的可用性。
 
@@ -181,7 +191,7 @@ Confirmed 仍唯讀，包括 v1／v2／v3 舊資料。沒有歸屬記錄時顯�
 | `draft_evidence` | draft／asset 外鍵、同草稿唯一 asset 關聯及穩定 position |
 | `imports` | operation ID、目標／結果草稿 ID、running／completed／interrupted、逐張結果；不保存外部 URI |
 
-`DraftCodec` 是只用於 app-private DB 的 JSON 格式，使用固定 allowlist tag 保存所有 Fact 狀態、generic values、provenance、links、promotion 與整數 Money；不得拿來解析 AI／外部 JSON。草稿目前寫入 format 4（OCR 基線為 format 3），evidence metadata 繼續 format 1。format 1／2／3 的 personalExpenses／expenseAdjustments 明確初始化為空集合（未記錄），format 4 缺少這些必要集合則拒絕讀取；Gson 不會自動補 Kotlin constructor defaults。`ReceiptDraft.transactionDate` 是 ISO 日期 `Fact<String>`；format 1 缺省日期明確遷移為 `Unknown(NotObserved)`，不能依賴 Gson 執行 Kotlin constructor default（Gson 可略過 constructor）。讀取不寫 DB／遞增 revision，下次合法 CAS 才保存新 payload。SQL 表結構無變動，`ReceiptDatabase` 保持 v1，無需 SQL migration；固定 legacy fixture 與實際 SQLite 重開測試驗證相容。缺少日期的損壞 v2 或未知格式拒絕讀取，沒有 destructive fallback。僅支援 v1 的舊 APK 無法讀 v2，勿將降版當成相容操作。
+`DraftCodec` 是只用於 app-private DB 的 JSON 格式，使用固定 allowlist tag 保存所有 Fact 狀態、generic values、provenance、links、promotion 與整數 Money；不得拿來解析 AI／外部 JSON。草稿目前寫入 format 5（個人支出與 Nano 基線為 format 4），evidence metadata 繼續 format 1。format 1／2／3 的 personalExpenses／expenseAdjustments 明確初始化為空集合（未記錄），format 4／5 缺少這些必要集合則拒絕讀取；Gson 不會自動補 Kotlin constructor defaults。`ReceiptDraft.transactionDate` 是 ISO 日期 `Fact<String>`；format 1 缺省日期明確遷移為 `Unknown(NotObserved)`，不能依賴 Gson 執行 Kotlin constructor default（Gson 可略過 constructor）。讀取不寫 DB／遞增 revision，下次合法 CAS 才保存新 payload。SQL 表結構無變動，`ReceiptDatabase` 保持 v1，無需 SQL migration；固定 legacy fixture 與實際 SQLite 重開測試驗證相容。缺少日期的損壞 v2 或未知格式拒絕讀取，沒有 destructive fallback。僅支援 v1 的舊 APK 無法讀 v2，勿將降版當成相容操作。
 
 草稿 evidence membership 與關聯表在同一 Room transaction 更新。金額不經過浮點數，既有帳務語意未更動。Gson 欄位名稱是持久化格式的一部分，ProGuard 已保留 domain model 欄位；未來欄位／enum／tag 變更必須提供 payload migration，不能直接改名。
 
@@ -401,13 +411,13 @@ DM 可能有全國、區域專櫃或新店版本；活動也可能受日期、�
 
 不可信的 `ReceiptRecognition` 只有觀察文字、頁面／行索引、可得座標與可選的 Nano 觀察 JSON，沒有本機 ID、revision、stage 或最終帳務結果。Mapper 檢查長度、數量、座標、來源索引、數值與日期，才產生本機 UUID、Fact 與 Candidate evidence links。`line=-1` 明確表示整張原圖、沒有可靠座標；Nano 不產生虛構 OCR region。來源無法解析保留 Unknown，多個交易欄位候選不一致使用 Conflicting；金額以整數 parsing，僅接受合法千分位及小數部分全為零的 TWD 表示。UI 明確限定 TWD，發現已標示外幣的 OCR 輸出拒絕。
 
-`ReceiptExtractionRecord` 保存來源 SHA-256、版本、帶 rawText 的 EvidenceRegion、警告與原始金額試算／gate 狀態。Nano 另保存最多 100,000 字的 nullable `unlocalizedObservationsJson`，核對頁顯示分類／品名／數量／單價／行額；只能引用整張照片。人工編輯保留這份原始擷取快照，讓修正後的平衡不會冒充原始擷取正確。Region 的寬高定義 OCR EXIF-oriented、降採樣座標空間；畫面提供原圖與原文比對。Payload 維持 format 4，舊資料缺少新增 audit 時為 null，SQL v1 不變；實際 Room reopen 測試涵蓋此相容與 Unknown 保存。
+`ReceiptExtractionRecord` 保存來源 SHA-256、版本、帶 rawText 的 EvidenceRegion、警告與原始金額試算／gate 狀態。Nano 另保存最多 100,000 字的 nullable `unlocalizedObservationsJson`，核對頁顯示分類／品名／數量／單價／行額；只能引用整張照片。人工編輯保留這份原始擷取快照，讓修正後的平衡不會冒充原始擷取正確。Region 的寬高定義 OCR EXIF-oriented、降採樣座標空間；畫面提供原圖與原文比對。Nano 原始整合使用 format 4，現在因外部助理匯入升至 format 5；舊資料缺少新增 audit 時為 null，SQL v1 不變；實際 Room reopen 測試涵蓋此相容與 Unknown 保存。
 
 沒有在 Room 寫入暫態 Analyzing stage：執行工作保存在 ViewModel，SavedState 只標示中斷，不自動重播；成功結果一次 CAS 寫入 NeedsReview 且保持未核對完整。這是避免取消、程序死亡與暫時性模型失敗把人工入口鎖死的選擇。離開 RESUMED 取消 coroutine；ML Kit Task 不支援真正取消，晚到 callback 只負責釋放資源，不能寫入草稿。SDK 正在使用的 bitmap 不會在取消瞬間提前回收。
 
 套用前重新核對完整 evidence metadata、選取圖片實際 SHA-256 與 expected revision。成功以一次 Room transaction 保存 facts、provenance 與 audit；任何失敗保留原草稿。重新辨識必須對目前 base 版本明確授權取代，不保留另一套可被誤用的最終帳務值。帶促銷／分攤相依的草稿拒絕取代。Confirmed 與後續匯出階段均唯讀。
 
-OCR 基線的 payload format 3 向前相容 format 1／2（本次已升 format 4）：新增 nullable extraction，舊格式未具 audit 時保持 null。SQL schema v1 未改；decoder 不以破壞性重建處理版本。`ReceiptAmountPreview` 是額外的 BigInteger 診斷，`ReceiptReconciler`、`ReceiptValidator` 及 ±1 容差不變；本次 `TransitionReceiptStage` 另加個人支出分配 gate。
+OCR 基線的 payload format 3 向前相容 format 1／2（後續個人支出升為 format 4，外部助理匯入升為 format 5）：新增 nullable extraction，舊格式未具 audit 時保持 null。SQL schema v1 未改；decoder 不以破壞性重建處理版本。`ReceiptAmountPreview` 是額外的 BigInteger 診斷，`ReceiptReconciler`、`ReceiptValidator` 及 ±1 容差不變；本次 `TransitionReceiptStage` 另加個人支出分配 gate。
 
 ## 本機收據診斷工具
 

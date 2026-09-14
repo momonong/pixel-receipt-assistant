@@ -12,6 +12,8 @@ PixelReceipt AI 是以 **Google Pixel 10 Pro Fold** 為主要實機的原生 And
 
 ## 核心原則
 
+2026-09-14 新增 Gemini 回覆匯入：可從首頁取得整理指令、貼上回覆，或接收文字分享，自動建立待核對品項。這是使用者操作 Gemini 後的資料交接；App 不自動呼叫雲端或上傳收據。詳細流程與 AppFunctions 開放限制見「Gemini 回覆匯入與 AppFunctions」。
+
 2026-09-09 整合基線包含圖片匯入 `1a2f624`、人工核對 `d31e104` 與本機 OCR `40e6a82`。主專案重新執行 `testDebugUnitTest lintDebug assembleDebug --offline --no-daemon --max-workers=1` 通過；162 項測試結果由 Gradle build cache 還原，0 failures／errors／skipped，lint 無問題，debug APK 組裝成功。這次未重跑裝置測試；真實收據品質、完整 Pixel 操作及保留資料升級仍待驗收。這是歷史整合結果；2026-09-11 的完整流程與新驗證見下方「核對、品項歸屬與確認保存」。
 
 上述主專案歷史 APK 僅為建置驗證產物，不可直接推定與手機同簽章。新任務應核對指定功能基線與 ancestry；`main` 可能落後尚未合併的功能，不能只從它開始而遺失成果。保留現有 worktree 與測試資料，不以卸載解決簽章衝突。
@@ -303,7 +305,7 @@ Sharesheet 的 `onNewIntent` 會使 Android `ActivityScenario` 不再追蹤原 l
 - 單次最多 20 圖、100 品項、50 調整；OCR 最多 500 行、每行 500 字、總文字 50,000 字。超限拒絕整批，不靜默截斷品項。
 - 核對畫面分別顯示「已知金額試算差額」與既有 reconciliation 阻擋原因；試算平衡不代表完整或辨識正確。容差仍是 ±1 最小單位，沒有自動確認。
 
-持久化 draft payload 現為 **format 4**，讀取 format 1／2／3；舊資料缺少 extraction 或歸屬時保持未記錄、revision 不變。SQL schema 仍為 v1，沒有 destructive migration。升級後不可假設舊 APK 能讀取新版資料。
+持久化 draft payload 現為 **format 5**，讀取 format 1／2／3／4；舊資料缺少 extraction、assistantImport 或歸屬時保持未記錄、revision 不變。SQL schema 仍為 v1，沒有 destructive migration。寫入 v5 後，僅支援 v4 的舊 APK 無法讀取新紀錄，不可用降版 APK 當成回復資料的方法。
 
 本次隔離 worktree：`D:\projects\pixel-receipt-assistant\.gradle\worktrees\receipt-auto-extraction`，分支 `feat/receipt-auto-extraction`；起始 SHA `d31e1049e69dd4c6de818ddb963c337e1e808b43` 已包含人工核對。工具與快取均在本 worktree 的 `.gradle/`，不共用其他任務的建置輸出。交付 APK `app/build/outputs/apk/debug/app-debug-manual-review-signature.apk` 已使用人工核對基線的 debug key 簽署，憑證與來源 APK 相同；手機現有安裝簽章仍未比對，**不要卸載或清除資料解決簽章衝突**。一般 `app-debug.apk` 使用本 worktree 獨立測試簽章，供 emulator 驗證，不應直接拿來更新手機。
 
@@ -366,11 +368,28 @@ Nano bridge 是僅 debug APK 的獨立前景 Activity，只處理指定 UUID／h
 
 另有 debug-only `NanoReviewLabActivity`：以 `--es job <既有成功UUID>` 開啟該次結果，重新驗證 observation 及原圖 hash，將候選交給正式 mapper／ReviewSession／ReviewScreen。它只使用 `files/nano-lab/<uuid>/review.db` 與該次照片副本，不取得 App 的個人帳本；畫面明示測試收據，歸屬操作為模擬情境。這讓 agent 可重播已保存結果、測試保存與重開，不必重新跑模型或操作個人交易。此入口不能代替首頁／分享匯入、Nano 推論及完整產品驗收。
 
-### AppFunctions 試作
+### Gemini 回覆匯入與 AppFunctions
 
-`BaseReceiptFunctionService` 透過 alpha11 KSP 產生公開 service 與 `receipt_functions.xml`，manifest 限制平台 `BIND_APP_FUNCTION_SERVICE` 權限、API 36 以下停用。唯一函式 `createReviewDraft` 透過原 repository 建立本機 UUID、revision 0、所有金額及歸屬未定的空白待核對草稿。每次明確呼叫建立一筆，不讀取舊交易或照片、不推論、不自動確認，回應不確定時不可自動重試。
+2026-09-14 新增「外部回覆 → 品項草稿」入口。保留本機 Room 作為帳務核心，Gemini 是可替換的輸入端；這不是 Nano 的雲端 fallback，也不宣稱已改善辨識準確度。此次從 `e008f2e` 建立 `feat/gemini-receipt-intake`，保留之前的 Nano 實測修正。
+
+可先使用的流程：
+
+1. 在首頁選「匯入 Gemini 整理的收據」，複製 App 提供的整理指令。
+2. 在手機現有 Gemini 中貼上指令，提供該筆照片或口述消費。這一步由使用者選擇把內容交給 Gemini，依其雲端／帳號設定處理；PixelReceipt 不自動上傳圖片或帳本。
+3. 複製完整的收據 JSON 回覆回 App，或從支援文字分享的介面分享至 PixelReceipt。聊天公開分享網址不能代替收據內容，App 不開啟或下載該網址。
+4. 預覽品項，按「建立待核對清單」。接續既有品項補正、用途分配、金額核對、保存及確認記帳流程；可補上原始照片。
+
+匯入接受 `pixelreceipt-1` 格式、明確 TWD、1–100 個品項、最多 50 筆另列加減項、最多 64,000 字。未知值為 null；TWD 金額以元為整數，不乘 100；行總額不再乘數量。拒絕小數、科學記號、溢位、非法日期、重複 JSON key、格式以外的欄位及過深資料。範圍未知的折扣交給人工核對，AI 不能指定個人支出、用途、ID、revision、確認狀態或原圖來源。
+
+回覆以 `AssistantImportRecord` 保留原文、SHA-256、匯入方式與時間，欄位來源是 `AssistantSuggested`，不冒充模型身分、原圖辨識或人工確認。SQL schema 仍為 v1，draft payload 升至 v5 並讀取 v1–v4；舊紀錄不因讀取而寫回。正在編輯其他交易時，匯入動作先保存該交易，成功後才切換。
+
+`BaseReceiptFunctionService` 透過 alpha11 KSP 產生公開 service 與 `receipt_functions.xml`，manifest 限制平台 `BIND_APP_FUNCTION_SERVICE` 權限、API 36 以下停用。新增 typed `importReceiptForReview(receipt)`，接收商家、日期、品項、金額、另列加減項與 requestId，使用同一個 `ImportAssistantReceipt` 寫入待核對草稿。相同 requestId、channel 和原始內容重試只回傳原草稿，不覆寫後續人工修改或已確認交易；不同交易必須使用不同 requestId，即使內容相同。舊的 `createReviewDraft` 仍只建立空白草稿，沒有重試去重能力。
 
 [AppFunctions 官方說明](https://developer.android.com/ai/appfunctions)指出 Gemini 整合仍受私人預覽資格限制；[新增公開函式的流程](https://developer.android.com/ai/appfunctions/add-appfunctions)可用 Android 16+ 開發工具驗證。此處完成編譯／manifest／生成資產及建立草稿的 repository 測試；本次只有 API 35 模擬器，**尚未執行 API 36 的平台索引或 ADB 呼叫，更沒有 Gemini 助理端到端證據**。
+
+截至 2026-09-14，[Spark 自訂 MCP 連接](https://support.google.com/gemini/answer/17209137)另外要求美國、英文及 Spark 資格，不能因 Spark 本身在某地區可用就推定自訂 MCP 也可用。因此本版不建立公開 MCP 服務、不要求 Gemini API key，也不更改使用者帳號或連接設定。未來取得 AppFunctions 資格或另行接入雲端 API 時可重用資料入口。
+
+此輪驗證：210 項主機測試、lint、debug／androidTest APK 建置通過。API 35 專用模擬器在 1080×2400／420dpi 與 2400×1800／320dpi 各通過 2 項 UI 測試，涵蓋貼上、旋轉還原、文字分享、無效網址拒絕、保存正在編輯的交易、用途分配、保存重開與確認。合成案例付款 450、個人支出 300、代墊 150；實際 force-stop 冷啟動後再次開啟，金額及 Confirmed 唯讀狀態保留。原文、Unknown、並行請求重試及舊 payload／SQL 相容另有 Room reopen 測試。UI 測試後只補入官方 app metadata 宣告，未修改 UI 或 domain 邏輯；最終建置另驗證該宣告。測試不是實際 Gemini 回覆或辨識準確度證據，手機尚未安裝本版。測試紀錄與截圖在此 worktree 的忽略目錄 `.gradle/assistant-*`，未提交私人收據或既有模型輸出。
 
 ### 驗證與剩餘驗收
 

@@ -20,14 +20,14 @@ class DraftCodecTest {
         val payload = javaClass.getResource("/legacy-draft-v3-confirmed.json")!!.readText().replace("\"format\": 3", "\"format\": 4")
         assertThrows(IllegalArgumentException::class.java) { codec.decode(payload) }
     }
-    @Test fun legacyPayloadMigratesMissingDateToUnknownAndWritesV4() {
+    @Test fun legacyPayloadMigratesMissingDateToUnknownAndWritesV5() {
         val payload = javaClass.getResource("/legacy-draft-v1.json")!!.readText()
         val draft = codec.decode(payload)
         assertEquals(Fact.Unknown(UnknownFactReason.NotObserved), draft.transactionDate)
         assertEquals(3L, draft.revision)
         assertEquals("舊商店", (draft.merchant as Fact.Known).value)
         val updated = draft.copy(transactionDate = Fact.Known("2026-09-08", FactProvenance.UserConfirmed(40)))
-        assertTrue(codec.encode(updated).contains("\"format\":4"))
+        assertTrue(codec.encode(updated).contains("\"format\":5"))
         assertEquals(updated, codec.decode(codec.encode(updated)))
         assertNotEquals(draft, updated)
     }
@@ -39,7 +39,7 @@ class DraftCodecTest {
     @Test fun manualReviewV2ReadsWithNullExtractionWithoutChangingRevision() {
         val draft = ReceiptDraft("legacy-manual", stage = ReceiptStage.NeedsReview, revision = 7,
             transactionDate = Fact.Known("2026-09-08", FactProvenance.UserConfirmed(1)))
-        val v2 = codec.encode(draft).replace("\"format\":4", "\"format\":2")
+        val v2 = codec.encode(draft).replace("\"format\":5", "\"format\":2")
         val restored = codec.decode(v2)
         assertEquals(draft, restored)
         assertNull(restored.extraction)
