@@ -6,7 +6,11 @@ PixelReceipt AI 是以 **Google Pixel 10 Pro Fold** 為主要實機的原生 And
 
 **核心產品驗收仍未完成，主要缺口是辨識品質**：2026-09-13 已在 Pixel 真正執行 `nano-v3` 圖片／結構化推論。五張開發收據的 B／C 共 10 次第一版實測，只有 C 的 1 次通過候選格式驗證，仍有備註誤列商品及品名錯誤，無法視為可用清單。另完成數字／日期 schema 的有限改版，最新 `nano-fields-2.1` 尚待手機重接實測。App 保留明確選擇的傳統 OCR 備援，沒有雲端 fallback。Firebase、共同分攤、Sheets 與收款管理尚未接入；AppFunctions 有界草稿試作的 Gemini 助理端到端仍未驗證。詳見下方「Pixel Gemini Nano 整合」。
 
-本版整合個人支出 `3e05386`、收據測試室 `8fb69de` 與 Nano `cde7d9f`，交付分支為 `feat/receipt-nano-integration`。以下功能分支、舊 APK、裝置更新與驗證數據保留為各階段歷史；GitHub 推送與合併狀態以 PR 記錄為準。合併程式碼不代表手機已更新、Nano 品質通過或已發布產品。私人收據與模型輸出不在 Git 中，新 checkout 不會自動取得它們。
+2026-09-14 整合基線在既有個人支出、收據測試室與 Nano 功能上，納入實機診斷及 typed schema 修正 `e008f2e`、外部助理候選草稿匯入 `8f28e13`。SQL schema v1、payload v5 與舊格式讀取相容保持；候選仍須核對，不自動確認記帳。
+
+本次於整合目錄執行 `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest --offline --no-daemon --max-workers=1` 成功（2m4s）：210 項主機測試結果由 Gradle cache 還原，0 failures／errors／skipped，lint 無問題，debug／Android test APK 建置成功；既有隔離 Python 環境的 24 項 bridge／HTTP 測試通過。這次沒有執行手機或模擬器測試，沒有重測最新 Nano 推論品質，也沒有更新手機。研究任務應從包含上述提交的最新 `main` 建立獨立工作分支。
+
+以下功能分支、舊 APK、裝置更新與驗證數據保留為各階段歷史；GitHub 推送與合併狀態以 PR 記錄為準。合併程式碼不代表手機已更新、Nano 品質通過或已發布產品。私人收據與模型輸出不在 Git 中，新 checkout 不會自動取得它們。
 
 2026-09-11 整合 worktree 執行 `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest --offline --no-daemon --max-workers=1` 通過，196 項主機測試結果（包含 build cache 還原）、0 failures／errors／skipped，lint 無問題；21 項 Python／HTTP 測試通過。SQL schema v1 相對原 main 沒有變更，payload format 4 保持舊資料相容。此次 GitHub 整合沒有再操作手機或重跑裝置測試，裝置及品質證據沿用下方明確標示的來源階段。
 
