@@ -50,6 +50,23 @@ class ReceiptPersistenceTest {
         importer = ReceiptImporter(db, repository, store)
     }
     @After fun cleanup() { db.close(); directory.deleteRecursively(); context.deleteDatabase(name) }
+
+    @Test fun assistantImportReopenAndRetry() = runBlocking {
+        val text = """{"schema":"pixelreceipt-1","currency":"TWD","merchant":"Gemini fixture","date":null,"totalMinor":0,"items":[{"name":"贈品","quantity":null,"lineTotalMinor":0}]}"""
+        val input = AssistantReceiptText.parse(text)
+        val results = coroutineScope { List(4) { async {
+            ImportAssistantReceipt(repository).create(input, text, "same-request", AssistantImportChannel.AppFunction)
+        } }.awaitAll() }
+        assertEquals(1, results.map { it.id }.distinct().size)
+        val first = results.first()
+        val edited = first.copy(revision = 1, merchant = Fact.Known("人工修正", FactProvenance.UserConfirmed(50)))
+        assertEquals(DraftWriteResult.Written(1), repository.compareAndSetDraft(edited, 0))
+        db.close(); reopen()
+        assertEquals(edited, repository.observeDraft(first.id).first())
+        assertEquals(edited, ImportAssistantReceipt(repository).create(input, text, "same-request", AssistantImportChannel.AppFunction))
+        assertEquals(text, repository.observeDraft(first.id).first()!!.assistantImport!!.rawInput)
+        assertEquals(1, repository.drafts.first().size)
+    }
     private fun png(color: Int = 0xffaabbcc.toInt()): ByteArray = ByteArrayOutputStream().use { output ->
         Bitmap.createBitmap(8, 12, Bitmap.Config.ARGB_8888).also { bitmap ->
             bitmap.eraseColor(color); bitmap.compress(Bitmap.CompressFormat.PNG, 100, output); bitmap.recycle()
@@ -181,7 +198,7 @@ class ReceiptPersistenceTest {
         assertEquals(payload, db.receipts().draft(legacy.id)!!.payload)
         val opened = (TransitionReceiptStage(repository)(legacy, ReceiptStage.NeedsReview) as TransitionReceiptStageResult.Updated).draft
         assertEquals(4L, opened.revision)
-        assertEquals(4, JsonParser.parseString(db.receipts().draft(legacy.id)!!.payload).asJsonObject["format"].asInt)
+        assertEquals(5, JsonParser.parseString(db.receipts().draft(legacy.id)!!.payload).asJsonObject["format"].asInt)
         assertEquals(DraftWriteResult.Conflict, repository.compareAndSetDraft(legacy.copy(revision = 4), 3))
         db.close(); reopen()
         assertEquals(opened, repository.observeDraft(legacy.id).first())

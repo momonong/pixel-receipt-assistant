@@ -63,6 +63,37 @@ class NanoBridgeTests(unittest.TestCase):
                 device.run("nano-image", [(hashlib.sha256(b"original").hexdigest(), b"changed")], job="b" * 32)
         self.assertFalse(any("tee" in args or "start" in args for args, _ in self.calls))
 
+    def test_android_reused_activity_is_not_a_successful_job_launch(self):
+        device = NanoDevice(str(self.adb), "PIXEL123")
+        def reused(*args, **kwargs):
+            if "start" in args:
+                return "Warning: Activity not started, intent has been delivered to currently running top-most instance.\nStatus: ok"
+            return self.fake_call(*args, **kwargs)
+        with patch.object(device, "call", side_effect=reused):
+            with self.assertRaisesRegex(LabError, "未建立新作業"):
+                device.run("probe", job="b" * 32)
+        self.assertFalse(any("ls" in args for args, _ in self.calls))
+
+    def test_host_timeout_requests_scoped_cancellation(self):
+        device = NanoDevice(str(self.adb), "PIXEL123")
+        with patch.object(device, "call", side_effect=self.fake_call), patch(
+                "tools.receipt_lab.nano.time.monotonic", side_effect=[0, 0, 256]):
+            with self.assertRaisesRegex(LabError, "已要求取消"):
+                device.run("probe", job="b" * 32)
+        self.assertTrue(any(args[-1] == "files/nano-lab/" + "b" * 32 + "/cancel"
+                            and body == b"cancel" for args, body in self.calls))
+
+    def test_unstarted_job_is_cancelled_without_waiting_for_inference_timeout(self):
+        device = NanoDevice(str(self.adb), "PIXEL123")
+        def not_started(*args, **kwargs):
+            if "ls" in args: return "input.json"
+            return self.fake_call(*args, **kwargs)
+        with patch.object(device, "call", side_effect=not_started), patch(
+                "tools.receipt_lab.nano.time.monotonic", side_effect=[0, 0, 1, 21]):
+            with self.assertRaisesRegex(LabError, "作業未開始"):
+                device.run("probe", job="b" * 32)
+        self.assertTrue(any(args[-1].endswith('/cancel') for args, _ in self.calls))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -20,6 +20,8 @@ import com.momonong.pixelreceipt.domain.model.*
 import com.momonong.pixelreceipt.domain.port.*
 import com.momonong.pixelreceipt.domain.usecase.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import java.io.File
 
 /** Foreground diagnostics using production adapter/mapper, with no access to the user's repository. */
@@ -59,6 +61,15 @@ class NanoLabActivity : ComponentActivity() {
             val result = linkedMapOf<String, Any?>("schemaVersion" to 1, "jobId" to identity,
                 "device" to Build.MODEL, "androidApi" to Build.VERSION.SDK_INT, "accuracy" to "not_evaluated")
             val started = System.nanoTime()
+            val progress = MutableStateFlow<Map<String, Any?>>(mapOf("jobId" to identity, "stage" to "started"))
+            val progressWriter = launch(Dispatchers.IO) {
+                // One writer and atomic replacement: the host never reads a partially written state.
+                progress.collectLatest { value ->
+                    val temporary = File(root, "progress.tmp")
+                    temporary.writeText(GsonBuilder().serializeNulls().create().toJson(value))
+                    check(temporary.renameTo(File(root, "progress.json")))
+                }
+            }
             val cache = File(cacheDir, "nano-lab/$identity")
             val owner = currentCoroutineContext().job
             val cancellation = launch(Dispatchers.IO) {
@@ -72,10 +83,22 @@ class NanoLabActivity : ComponentActivity() {
                     val manifest = withContext(Dispatchers.IO) { JsonParser.parseString(input.readText()).asJsonObject }
                     val mode = manifest["mode"].asString
                     require(mode in setOf("probe", "nano-image", "nano-ocr"))
+                    withContext(Dispatchers.IO) {
+                        val acknowledgement = File(root, "started.tmp")
+                        acknowledgement.writeText("{\"jobId\":\"$identity\"}")
+                        check(acknowledgement.renameTo(File(root, "started.json")))
+                    }
                     result["engine"] = mode
                     val images = ImageStore(cache)
                     val analyzer = MlKitNanoAnalyzer(images, { resumed },
-                        if (mode == "nano-image") NanoInputMode.Image else NanoInputMode.ImageWithOcr) { key, value -> result[key] = value }
+                        if (mode == "nano-image") NanoInputMode.Image else NanoInputMode.ImageWithOcr) { key, value ->
+                        result[key] = value
+                        if (key == "initialFeatureStatus" || key == "download" || key == "capability") {
+                            progress.value = mapOf("jobId" to identity, "stage" to key, "detail" to value,
+                                "elapsedMs" to (System.nanoTime() - started) / 1_000_000)
+                            if (key == "download") runOnUiThread { status.text = getString(R.string.nano_lab_download, value.toString()) }
+                        }
+                    }
                     status.setText(R.string.nano_lab_probe)
                     val capability = analyzer.probe(download = manifest["download"]?.asBoolean == true)
                     result["capability"] = capability
@@ -129,8 +152,10 @@ class NanoLabActivity : ComponentActivity() {
                 if (error is com.google.mlkit.genai.common.GenAiException) result["errorCode"] = error.errorCode
             } finally {
                 cancellation.cancel()
+                progressWriter.cancel()
                 result["totalElapsedMs"] = (System.nanoTime() - started) / 1_000_000
                 withContext(NonCancellable + Dispatchers.IO) {
+                    progressWriter.join()
                     val temporary = File(root, "result.tmp")
                     temporary.writeText(GsonBuilder().serializeNulls().setPrettyPrinting().create().toJson(result))
                     check(temporary.renameTo(File(root, "result.json")))

@@ -30,6 +30,9 @@ fun InboxScreen(viewModel: InboxViewModel) {
     val review by viewModel.review.state.collectAsStateWithLifecycle()
     val extraction by viewModel.extraction.state.collectAsStateWithLifecycle()
     val pendingShare by viewModel.pendingShare.collectAsStateWithLifecycle()
+    val assistantText by viewModel.assistantText.collectAsStateWithLifecycle()
+    val assistantBusy by viewModel.assistantBusy.collectAsStateWithLifecycle()
+    val assistantError by viewModel.assistantError.collectAsStateWithLifecycle()
     val expanded = currentWindowAdaptiveInfoV2().windowSizeClass.minWidthDp >= 840
     var preview by rememberSaveable { mutableStateOf<String?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(20), viewModel::picked)
@@ -65,6 +68,8 @@ fun InboxScreen(viewModel: InboxViewModel) {
                                 modifier = Modifier.fillMaxWidth().testTag("new-transaction")) { Text("新增消費・選照片") }
                             TextButton(onClick = viewModel::createDraft, enabled = progress == null && !review.busy,
                                 modifier = Modifier.fillMaxWidth()) { Text("沒有照片，直接填寫") }
+                            OutlinedButton(onClick = viewModel::openAssistantImport, enabled = progress == null && !review.busy,
+                                modifier = Modifier.fillMaxWidth().testTag("gemini-import")) { Text("匯入 Gemini 整理的收據") }
                             Text("也可以在相簿或相機檢視照片時，分享至 PixelReceipt AI。", style = MaterialTheme.typography.bodySmall)
                         }
                     }
@@ -97,6 +102,10 @@ fun InboxScreen(viewModel: InboxViewModel) {
         }
     }
     preview?.let { hash -> PhotoPreviewDialog(hash, viewModel.images) { preview = null } }
+    assistantText?.let { text ->
+        AssistantImportDialog(text, assistantBusy || review.busy, assistantError ?: review.message, review.dirty,
+            viewModel::editAssistantText, viewModel::importAssistantText, viewModel::closeAssistantImport)
+    }
     pendingShare?.let { pending ->
         AlertDialog(onDismissRequest = viewModel::cancelPendingShare,
             title = { Text("收到 ${pending.uris.size} 張新消費照片") },

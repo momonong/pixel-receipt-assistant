@@ -4,5 +4,7 @@
         <!-- Debug-only entry: requires an unguessable pre-staged app-private job. No Room access. -->
         <activity android:name=".lab.NanoLabActivity" android:exported="true"
             android:excludeFromRecents="true" />
+        <activity android:name=".lab.NanoReviewLabActivity" android:exported="true"
+            android:excludeFromRecents="true" />
     </application>
 </manifest>

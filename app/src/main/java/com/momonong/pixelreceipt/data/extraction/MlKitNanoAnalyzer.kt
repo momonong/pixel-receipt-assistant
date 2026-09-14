@@ -89,7 +89,7 @@ class MlKitNanoAnalyzer(
             diagnostics("prompt", NanoReceiptPrompt.text)
             diagnostics("promptSha256", sha256(NanoReceiptPrompt.text))
             diagnostics("generation", mapOf("temperature" to "0.0", "seed" to 17, "maxOutputTokens" to 3500,
-                "schemaVersion" to NanoReceiptPrompt.SCHEMA, "schemaClass" to NanoReceiptOutput::class.java.name,
+                "schemaVersion" to NanoReceiptPrompt.SCHEMA, "schemaClass" to NanoReceiptFields::class.java.name,
                 "schemaCompiler" to "genai-schema-compiler-1.0.0-alpha1",
                 "rawTokenTextAvailable" to false))
             val recognized = request.imageIds.mapIndexed { pageIndex, id ->
@@ -121,9 +121,9 @@ class MlKitNanoAnalyzer(
                         candidateCount = 1
                         maxOutputTokens = 3500
                     }
-                    val typed = generateTypedContentRequest(base, NanoReceiptOutput::class)
+                    val typed = generateTypedContentRequest(base, NanoReceiptFields::class)
                     val tokens = client.countTokens(typed)
-                    diagnostics("tokens-$pageIndex", tokens)
+                    diagnostics("tokens-$pageIndex", mapOf("totalTokens" to tokens.totalTokens))
                     require(tokens.totalTokens in 1..3999 && tokens.totalTokens.toLong() + 3500 <= client.getTokenLimit()) {
                         "Nano 輸入加預留輸出超過 token 限制。"
                     }
@@ -133,12 +133,15 @@ class MlKitNanoAnalyzer(
                     diagnostics("inferenceMs-$pageIndex", (System.nanoTime() - inferenceStart) / 1_000_000)
                     // Public typed API exposes parsed response + finish reason, not raw token text.
                     diagnostics("sdkResponse-$pageIndex", response)
+                    diagnostics("typedCandidates-$pageIndex", response.candidates.map {
+                        mapOf("finishReasonCode" to it.finishReason, "response" to it.response)
+                    })
                     currentCoroutineContext().ensureActive()
                     check(foreground())
                     val candidate = response.candidates.singleOrNull()
                     require(candidate?.finishReason == TypedCandidate.TypedFinishReason.STOP) { "Nano 回應未完整結束。" }
                     val output = requireNotNull(candidate.response) { "Nano 結構化回應無效。" }
-                    NanoReceiptValidation.recognition(output, bitmap.width, bitmap.height)
+                    NanoReceiptValidation.recognition(output.observations(), bitmap.width, bitmap.height)
                 } finally { bitmap.recycle() }
             }
             fun List<TextObservation>.at(page: Int) = map { it.copy(page = page) }
@@ -181,6 +184,8 @@ internal fun nanoError(code: Int): AnalysisError = when (code) {
     GenAiException.ErrorCode.PER_APP_BATTERY_USE_QUOTA_EXCEEDED -> AnalysisError(AnalysisErrorKind.RateLimited, "Nano 已達裝置電量使用配額；稍後再試，或改用傳統 OCR／人工修正。")
     GenAiException.ErrorCode.STRUCTURED_OUTPUT_MAX_TOKENS_ERROR,
     GenAiException.ErrorCode.STRUCTURED_OUTPUT_RESPONSE_ERROR -> AnalysisError(AnalysisErrorKind.InvalidOutput, "Nano 輸出被截斷或結構不完整；未套用任何欄位。")
+    GenAiException.ErrorCode.RESPONSE_PROCESSING_ERROR -> AnalysisError(AnalysisErrorKind.InvalidOutput,
+        "AICore 未允許本次模型輸出（代碼 $code）；結果未套用，請核對原圖或人工修正。")
     GenAiException.ErrorCode.REQUEST_TOO_LARGE -> AnalysisError(AnalysisErrorKind.InvalidOutput, "Nano 輸入超出限制；請減少收據頁面或改用直接圖片方案。")
     else -> AnalysisError(AnalysisErrorKind.ServiceUnavailable, "Nano 暫時無法辨識（代碼 $code）；草稿保留，沒有上傳雲端。")
 }

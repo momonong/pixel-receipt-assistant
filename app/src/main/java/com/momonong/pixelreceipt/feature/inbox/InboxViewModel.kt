@@ -9,6 +9,8 @@ import com.momonong.pixelreceipt.app.ReceiptApplication
 import com.momonong.pixelreceipt.data.ingestion.*
 import com.momonong.pixelreceipt.domain.model.EvidenceImportSource
 import com.momonong.pixelreceipt.domain.model.EvidenceAsset
+import com.momonong.pixelreceipt.domain.model.AssistantImportChannel
+import com.momonong.pixelreceipt.domain.usecase.ImportAssistantReceipt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
@@ -45,6 +47,11 @@ class InboxViewModel(application: Application, private val saved: SavedStateHand
     private var creating = false
     private val _pendingShare = MutableStateFlow<PendingSharedPhotos?>(null)
     val pendingShare = _pendingShare.asStateFlow()
+    val assistantText = saved.getStateFlow<String?>("assistantText", null)
+    private val _assistantBusy = MutableStateFlow(false)
+    val assistantBusy = _assistantBusy.asStateFlow()
+    private val _assistantError = MutableStateFlow<String?>(null)
+    val assistantError = _assistantError.asStateFlow()
     fun cancelImport() { importJob?.cancel() }
 
     init {
@@ -57,6 +64,7 @@ class InboxViewModel(application: Application, private val saved: SavedStateHand
     }
 
     fun select(id: String?) {
+        if (_assistantBusy.value) return
         if (extraction.state.value.busy || review.state.value.busy || review.state.value.base != null) return
         saved["selected"] = id
     }
@@ -82,6 +90,7 @@ class InboxViewModel(application: Application, private val saved: SavedStateHand
     }
 
     fun createDraft() {
+        if (_assistantBusy.value) return
         if (creating) return
         if (extraction.state.value.busy) return
         if (_progress.value != null || review.state.value.busy || review.state.value.base != null) return
@@ -95,6 +104,10 @@ class InboxViewModel(application: Application, private val saved: SavedStateHand
     }
 
     private fun ingest(id: String, target: String?, uris: List<Uri>, source: EvidenceImportSource) {
+        if (_assistantBusy.value || assistantText.value != null) {
+            _error.value = "請先完成或關閉 Gemini 回覆匯入，再重新分享照片。"
+            return
+        }
         if (id in accepted) return
         if (source == EvidenceImportSource.ShareSheet && review.state.value.base != null) {
             if (_pendingShare.value == null) _pendingShare.value = PendingSharedPhotos(id, uris)
@@ -133,5 +146,64 @@ class InboxViewModel(application: Application, private val saved: SavedStateHand
                 }
             }
         }
+    }
+
+    fun openAssistantImport() = assistantShared(UUID.randomUUID().toString(), "", false)
+
+    fun assistantShared(id: String, text: String, shared: Boolean = true) {
+        if (saved.get<String>("assistantHandled") == id || saved.get<String>("assistantOperation") == id) return
+        if (text.length > AssistantReceiptText.MAX_CHARS) { showError("分享文字太長，請一次只整理一筆收據。"); return }
+        if (assistantText.value != null || _pendingShare.value != null || _progress.value != null || extraction.state.value.busy) {
+            showError("已有內容正在處理，請完成後重新分享這筆收據。")
+            return
+        }
+        saved["assistantOperation"] = id
+        saved["assistantShared"] = shared
+        saved["assistantText"] = text
+        _assistantError.value = null
+    }
+
+    fun editAssistantText(text: String) {
+        if (_assistantBusy.value) return
+        if (text.length > AssistantReceiptText.MAX_CHARS) { _assistantError.value = "收據內容最多 64,000 字。"; return }
+        saved["assistantText"] = text
+        _assistantError.value = null
+    }
+
+    fun closeAssistantImport() {
+        if (_assistantBusy.value) return
+        saved["assistantHandled"] = saved.get<String>("assistantOperation")
+        saved["assistantOperation"] = null
+        saved["assistantText"] = null
+        _assistantError.value = null
+    }
+
+    fun importAssistantText() {
+        if (_assistantBusy.value || review.state.value.busy || extraction.state.value.busy || _progress.value != null) return
+        val text = assistantText.value ?: return
+        val id = saved.get<String>("assistantOperation") ?: return
+        val candidate = try { AssistantReceiptText.parse(text) } catch (error: IllegalArgumentException) {
+            _assistantError.value = error.message; return
+        }
+        val channel = if (saved.get<Boolean>("assistantShared") == true) AssistantImportChannel.SharedText else AssistantImportChannel.PastedText
+        val start = {
+            _assistantBusy.value = true
+            _assistantError.value = null
+            viewModelScope.launch {
+                try {
+                    val draft = ImportAssistantReceipt(graph.repository).create(candidate, text, id, channel)
+                    // Close current review only after the incoming draft is safely saved.
+                    review.close()
+                    _assistantBusy.value = false
+                    closeAssistantImport()
+                    openTransaction(draft.id)
+                } catch (error: Exception) {
+                    if (error is CancellationException) throw error
+                    _assistantError.value = "匯入未完成，請重試；相同請求不會重複建立消費。"
+                } finally { _assistantBusy.value = false }
+            }
+            Unit
+        }
+        if (review.state.value.dirty) review.save(start) else start()
     }
 }

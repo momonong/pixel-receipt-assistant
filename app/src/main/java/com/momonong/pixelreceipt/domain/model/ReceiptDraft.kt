@@ -24,6 +24,7 @@ class ReceiptDraft(
     /** ISO calendar date (yyyy-MM-dd); legacy receipts remain explicitly unknown. */
     val transactionDate: Fact<String> = Fact.Unknown(UnknownFactReason.NotObserved),
     val extraction: ReceiptExtractionRecord? = null,
+    val assistantImport: AssistantImportRecord? = null,
     personalExpenses: Collection<LineExpenseDecision> = emptyList(),
     expenseAdjustments: Collection<ExpenseAdjustmentDecision> = emptyList(),
 ) {
@@ -71,6 +72,7 @@ class ReceiptDraft(
         revision: Long = this.revision,
         transactionDate: Fact<String> = this.transactionDate,
         extraction: ReceiptExtractionRecord? = this.extraction,
+        assistantImport: AssistantImportRecord? = this.assistantImport,
         personalExpenses: Collection<LineExpenseDecision> = this.personalExpenses,
         expenseAdjustments: Collection<ExpenseAdjustmentDecision> = this.expenseAdjustments,
     ) = ReceiptDraft(
@@ -89,6 +91,7 @@ class ReceiptDraft(
         revision = revision,
         transactionDate = transactionDate,
         extraction = extraction,
+        assistantImport = assistantImport,
         personalExpenses = personalExpenses,
         expenseAdjustments = expenseAdjustments,
     )
@@ -98,6 +101,7 @@ class ReceiptDraft(
         merchant == other.merchant &&
         transactionDate == other.transactionDate &&
         extraction == other.extraction &&
+        assistantImport == other.assistantImport &&
         personalExpenses == other.personalExpenses &&
         expenseAdjustments == other.expenseAdjustments &&
         total == other.total &&
@@ -117,6 +121,7 @@ class ReceiptDraft(
         result = 31 * result + merchant.hashCode()
         result = 31 * result + transactionDate.hashCode()
         result = 31 * result + (extraction?.hashCode() ?: 0)
+        result = 31 * result + (assistantImport?.hashCode() ?: 0)
         result = 31 * result + personalExpenses.hashCode()
         result = 31 * result + expenseAdjustments.hashCode()
         result = 31 * result + total.hashCode()

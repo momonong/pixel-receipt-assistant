@@ -52,9 +52,15 @@ class NanoDevice:
             self.call("shell", "-T", "run-as", PACKAGE, "tee", f"{remote}/{index}.image.b64", body=base64.b64encode(body))
         manifest = {"mode": mode, "hashes": [x[0] for x in images], "download": download}
         self.call("shell", "-T", "run-as", PACKAGE, "tee", f"{remote}/input.json", body=json.dumps(manifest).encode())
-        launch = self.call("shell", "am", "start", "-W", "-n", f"{PACKAGE}/.lab.NanoLabActivity", "--es", "job", job)
-        require("Error" not in launch and "Status: ok" in launch, "Nano 前景診斷頁未成功開啟；請安裝本任務 debug 版本。", 503)
+        # am start can otherwise deliver new extras to the completed top activity, whose
+        # onCreate will not run again. Standard launch mode + CLEAR_TOP recreates it.
+        launch = self.call("shell", "am", "start", "-W", "--activity-clear-top", "-n",
+                           f"{PACKAGE}/.lab.NanoLabActivity", "--es", "job", job)
+        require("Error" not in launch and "Status: ok" in launch and "Activity not started" not in launch,
+                "Nano 前景診斷頁未建立新作業；請解鎖手機並確認本任務 debug 版本。", 503)
         deadline = time.monotonic() + 255
+        start_deadline = time.monotonic() + 20
+        started = False
         cancel_sent = False
         while time.monotonic() < deadline:
             if cancelled() and not cancel_sent:
@@ -71,5 +77,14 @@ class NanoDevice:
                 result["serial"] = self.serial
                 result["installedApkSha256"] = {PACKAGE: apk_hash}
                 return result
+            if not started and "started.json" in ready.split():
+                acknowledgement = json.loads(self.call("exec-out", "run-as", PACKAGE, "cat", f"{remote}/started.json"))
+                require(acknowledgement.get("jobId") == job, "Nano 啟動回報不是本次作業。", 503)
+                started = True
+            if not started and time.monotonic() >= start_deadline:
+                self.call("shell", "-T", "run-as", PACKAGE, "tee", f"{remote}/cancel", body=b"cancel")
+                raise LabError("Nano 作業未開始；已要求取消。請解鎖手機並安裝含啟動回報的 debug 版本。", 503)
             time.sleep(1)
-        raise LabError(f"Nano 測試逾時；沒有自動重跑。結果位置 {remote}", 503)
+        if not cancel_sent:
+            self.call("shell", "-T", "run-as", PACKAGE, "tee", f"{remote}/cancel", body=b"cancel")
+        raise LabError(f"Nano 測試逾時；已要求取消，沒有自動重跑。結果位置 {remote}", 503)

@@ -82,4 +82,16 @@ class NanoReceiptValidationTest {
         assertNull(legacy.extraction!!.unlocalizedObservationsJson)
         assertEquals(draft.items, legacy.items)
     }
+    @Test fun typedFieldsPreserveUnknownDateAndMoneyWithoutComputingMissingValues() {
+        val row = NanoReceiptFieldsRow("product", "茶", null, 50, null, "unknown")
+        val output = NanoReceiptFields("TWD", "測試店", null, 9, 11, 100, listOf(row,
+            NanoReceiptFieldsRow("product", "贈品", 1, null, 0, "unknown")))
+        val draft = mapped(output.observations())
+        assertTrue(draft.transactionDate is Fact.Unknown)
+        assertTrue(draft.items.first().quantity is Fact.Unknown)
+        assertTrue(draft.items.first().printedTotal is Fact.Unknown)
+        assertEquals("0", draft.items.last().printedTotal.inputText())
+        assertThrows(IllegalArgumentException::class.java) { output.copy(year = 2026, month = 2, day = 30).observations() }
+        assertThrows(IllegalArgumentException::class.java) { mapped(output.copy(total = -1).observations()) }
+    }
 }

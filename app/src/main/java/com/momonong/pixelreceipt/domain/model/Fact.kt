@@ -63,6 +63,18 @@ enum class UnknownFactReason {
 sealed interface FactProvenance {
     val evidence: Set<EvidenceReference>
 
+    /** Text supplied by an external assistant, without claiming an original photo or verified model. */
+    data class AssistantSuggested(
+        val inputSha256: String,
+        val importedAtEpochMillis: Long,
+    ) : FactProvenance {
+        override val evidence: Set<EvidenceReference> get() = emptySet()
+        init {
+            require(inputSha256.matches(Regex("[0-9a-f]{64}")))
+            require(importedAtEpochMillis >= 0)
+        }
+    }
+
     class Extracted(
         val extraction: ExtractionProvenance,
         evidence: Collection<EvidenceReference>,
