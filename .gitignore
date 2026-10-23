@@ -55,3 +55,15 @@ lint-results*
 .receipt-lab/
 __pycache__/
 *.pyc
+
+# Central candidate backend: private evidence/database/token and local tooling
+backend/.private/
+.pixelreceipt-private/
+backend/.venv/
+backend/.pytest_cache/
+backend/.ruff_cache/
+
+# Local design runs and Python tool caches
+.taste-skill/
+.pytest_cache/
+.ruff_cache/

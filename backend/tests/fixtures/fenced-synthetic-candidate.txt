@@ -1,0 +1,34 @@
+```json
+{
+  "schema": "pixelreceipt-central-candidate-1",
+  "currency": "TWD",
+  "amount_unit": "TWD_YUAN",
+  "merchant": "SYNTHETIC TEST CAFE",
+  "receipt_date": "2026-10-21",
+  "printed_total_yuan": 110,
+  "items": [
+    {
+      "raw_name": "Tea",
+      "quantity": 2,
+      "printed_unit_price_yuan": 50,
+      "printed_line_total_yuan": 100
+    },
+    {
+      "raw_name": "Cookie",
+      "quantity": 1,
+      "printed_unit_price_yuan": 30,
+      "printed_line_total_yuan": 30
+    }
+  ],
+  "adjustments": [
+    {
+      "raw_label": "Order discount",
+      "direction": "subtract",
+      "amount_yuan": 20,
+      "scope": "receipt",
+      "amount_effect": "separate_from_line_totals",
+      "item_positions": []
+    }
+  ]
+}
+```

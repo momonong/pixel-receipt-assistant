@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">PixelReceipt AI</string>
+    <string name="app_name">PixelReceipt 收件匣</string>
     <string name="home_title">PixelReceipt AI</string>
     <string name="home_subtitle">Pixel 10 Pro Fold 證據優先架構基線</string>
     <string name="home_window_mode">目前視窗：%1$s</string>

@@ -1,0 +1,33 @@
+# CANDIDATE ONLY: HP-side dedicated encrypted local forward to ASUS loopback.
+[Unit]
+Description=PixelReceipt HP to ASUS private SSH forward
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=pixelreceipt-forward
+Group=pixelreceipt-forward
+ExecStart=/usr/bin/ssh -F /etc/pixelreceipt-forward/ssh_config -NT receipt-asus
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+MemoryMax=64M
+TasksMax=8
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

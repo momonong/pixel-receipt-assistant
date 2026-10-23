@@ -1,0 +1,129 @@
+{
+  "$defs": {
+    "ItemMapping": {
+      "additionalProperties": false,
+      "properties": {
+        "item_position": {
+          "maximum": 99,
+          "minimum": 0,
+          "title": "Item Position",
+          "type": "integer"
+        },
+        "product_id": {
+          "pattern": "^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$",
+          "title": "Product Id",
+          "type": "string"
+        },
+        "unit_match": {
+          "const": "confirmed_same_product_and_unit",
+          "title": "Unit Match",
+          "type": "string"
+        }
+      },
+      "required": [
+        "item_position",
+        "product_id",
+        "unit_match"
+      ],
+      "title": "ItemMapping",
+      "type": "object"
+    },
+    "ItemPriceAllocation": {
+      "additionalProperties": false,
+      "properties": {
+        "item_position": {
+          "maximum": 99,
+          "minimum": 0,
+          "title": "Item Position",
+          "type": "integer"
+        },
+        "amount_yuan": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Amount Yuan",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "item_position",
+        "amount_yuan"
+      ],
+      "title": "ItemPriceAllocation",
+      "type": "object"
+    },
+    "PriceAdjustmentDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "adjustment_position": {
+          "maximum": 49,
+          "minimum": 0,
+          "title": "Adjustment Position",
+          "type": "integer"
+        },
+        "method": {
+          "enum": [
+            "proportional_line_amount",
+            "explicit_amounts"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "amounts_by_item": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ItemPriceAllocation"
+              },
+              "maxItems": 100,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Amounts By Item"
+        }
+      },
+      "required": [
+        "adjustment_position",
+        "method"
+      ],
+      "title": "PriceAdjustmentDecision",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "item_mappings": {
+      "items": {
+        "$ref": "#/$defs/ItemMapping"
+      },
+      "maxItems": 100,
+      "title": "Item Mappings",
+      "type": "array"
+    },
+    "adjustment_decisions": {
+      "items": {
+        "$ref": "#/$defs/PriceAdjustmentDecision"
+      },
+      "maxItems": 50,
+      "title": "Adjustment Decisions",
+      "type": "array"
+    },
+    "expected_revision": {
+      "exclusiveMaximum": 9223372036854775807,
+      "minimum": 0,
+      "title": "Expected Revision",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "item_mappings",
+    "adjustment_decisions",
+    "expected_revision"
+  ],
+  "title": "ReviewPrices",
+  "type": "object"
+}

@@ -18,6 +18,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.After
+import org.junit.Before
 import org.junit.Test
 import java.io.File
 import java.util.UUID
@@ -25,6 +26,10 @@ import java.util.UUID
 /** Real Compose actions and Room persistence on an isolated emulator; synthetic receipts only. */
 class ReceiptFlowUiTest {
     @get:Rule val ui = createAndroidComposeRule<MainActivity>()
+    @Before fun openLegacyLedger() {
+        ui.onNodeWithTag("mobile-settings").performClick()
+        ui.onNodeWithTag("legacy-ledger-entry").performScrollTo().performClick()
+    }
     private var launchIntent: Intent? = null
     @After fun restoreScenarioIntent() {
         // ActivityScenario tracks the launch Intent; MainActivity legitimately replaces it on SEND.
@@ -107,15 +112,14 @@ class ReceiptFlowUiTest {
         shot("flow-confirmed")
     }
 
-    @Test fun sharedPhotoIsAttachedAndUnsavedExitCanSaveThenResumeWithTolerance() {
+    @Test fun legacyPhotoIsAttachedAndUnsavedExitCanSaveThenResumeWithTolerance() {
         val uri = makePhoto()
-        launchIntent = Intent(ui.activity.intent)
-        val intent = Intent(ui.activity, MainActivity::class.java).apply {
-            action = Intent.ACTION_SEND; type = "image/png"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        }
-        ui.runOnUiThread { ui.activity.startActivity(intent) }
+        // Image SEND now belongs to central intake; legacy OCR imports explicitly into its own store.
+        val importedId = runBlocking { graph.importer.import(UUID.randomUUID().toString(), null,
+            listOf(com.momonong.pixelreceipt.data.ingestion.ImportInput { ui.activity.contentResolver.openInputStream(uri) }),
+            EvidenceImportSource.Other).draftId!! }
+        ui.waitUntil(10_000) { ui.onAllNodesWithTag("transaction-$importedId").fetchSemanticsNodes().isNotEmpty() }
+        ui.onNodeWithTag("transaction-$importedId").performScrollTo().performClick()
         ui.waitUntil(15_000) { ui.onAllNodesWithTag("review-form").fetchSemanticsNodes().isNotEmpty() }
         val merchant = "照片驗收-${UUID.randomUUID().toString().take(5)}"
         field("merchant", merchant)

@@ -19,6 +19,10 @@ import java.util.UUID
 /** Exercises app handoff, not Gemini inference or an actual assistant invocation. */
 class AssistantReceiptFlowUiTest {
     @get:Rule val ui = createAndroidComposeRule<MainActivity>()
+    @Before fun openLegacyLedger() {
+        ui.onNodeWithTag("mobile-settings").performClick()
+        ui.onNodeWithTag("legacy-ledger-entry").performScrollTo().performClick()
+    }
     private val graph get() = ui.activity.application as ReceiptApplication
     private var originalIntent: Intent? = null
     private fun drafts() = runBlocking { graph.repository.drafts.first() }

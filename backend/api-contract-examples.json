@@ -1,0 +1,622 @@
+{
+  "review_request": {
+    "expected_revision": 1,
+    "candidate": {
+      "schema": "pixelreceipt-central-candidate-1",
+      "currency": "TWD",
+      "amount_unit": "TWD_YUAN",
+      "merchant": "合成測試商店",
+      "receipt_date": "2026-10-20",
+      "printed_total_yuan": 100,
+      "items": [
+        {
+          "raw_name": "合成茶飲",
+          "quantity": 3,
+          "printed_unit_price_yuan": null,
+          "printed_line_total_yuan": 100,
+          "brand": null,
+          "specification": null,
+          "content_quantity": null
+        }
+      ],
+      "adjustments": []
+    },
+    "schema": "pixelreceipt-central-review-2",
+    "assembly_status": "complete_by_user",
+    "line_decisions": [
+      {
+        "item_position": 0,
+        "method": "by_quantity",
+        "whole_purpose": null,
+        "quantities": {
+          "self": 1,
+          "advance": 2,
+          "gift": 0
+        },
+        "amounts_yuan": null
+      }
+    ],
+    "adjustment_decisions": [],
+    "tolerance_acknowledgement": "none",
+    "review_note": "合成核對"
+  },
+  "draft_response": {
+    "id": "00000000-0000-4000-8000-000000000001",
+    "revision": 2,
+    "status": "needs_review",
+    "ledger_id": null,
+    "original_candidate": {
+      "schema": "pixelreceipt-central-candidate-1",
+      "currency": "TWD",
+      "amount_unit": "TWD_YUAN",
+      "merchant": "合成測試商店",
+      "receipt_date": "2026-10-20",
+      "printed_total_yuan": 100,
+      "items": [
+        {
+          "raw_name": "合成茶飲",
+          "quantity": 3,
+          "printed_unit_price_yuan": null,
+          "printed_line_total_yuan": 100,
+          "brand": null,
+          "specification": null,
+          "content_quantity": null
+        }
+      ],
+      "adjustments": []
+    },
+    "candidate": {
+      "schema": "pixelreceipt-central-candidate-1",
+      "currency": "TWD",
+      "amount_unit": "TWD_YUAN",
+      "merchant": "合成測試商店",
+      "receipt_date": "2026-10-20",
+      "printed_total_yuan": 100,
+      "items": [
+        {
+          "raw_name": "合成茶飲",
+          "quantity": 3,
+          "printed_unit_price_yuan": null,
+          "printed_line_total_yuan": 100,
+          "brand": null,
+          "specification": null,
+          "content_quantity": null
+        }
+      ],
+      "adjustments": []
+    },
+    "evidence": [
+      {
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "pages": [
+          1
+        ]
+      }
+    ],
+    "source": {
+      "kind": "ai_candidate",
+      "label": "SYNTHETIC",
+      "provider": null,
+      "model": null
+    },
+    "review_document": {
+      "schema": "pixelreceipt-central-review-2",
+      "assembly_status": "complete_by_user",
+      "line_decisions": [
+        {
+          "item_position": 0,
+          "method": "by_quantity",
+          "whole_purpose": null,
+          "quantities": {
+            "self": 1,
+            "advance": 2,
+            "gift": 0
+          },
+          "amounts_yuan": null
+        }
+      ],
+      "adjustment_decisions": [],
+      "tolerance_acknowledgement": "none"
+    },
+    "calculation": {
+      "ruleset": "pixelreceipt-central-ledger-1",
+      "basis_sha256": "52e8da16a518b0d6827c2cb1a8b20043b0b668db0d29567c6b01b94e5e891ab0",
+      "ready": true,
+      "blockers": [],
+      "reconciliation_status": "balanced",
+      "tolerance_yuan": 1,
+      "computed_total_yuan": 100,
+      "printed_total_yuan": 100,
+      "allocated_total_yuan": 100,
+      "difference_yuan": 0,
+      "reconciliation_difference_yuan": 0,
+      "expenses_ready": true,
+      "self_yuan": 33,
+      "gift_yuan": 0,
+      "advance_yuan": 67,
+      "personal_yuan": 33,
+      "line_shares": [
+        {
+          "item_position": 0,
+          "self_yuan": 33,
+          "advance_yuan": 67,
+          "gift_yuan": 0
+        }
+      ],
+      "adjustment_shares": []
+    },
+    "created_at": "2026-10-20T00:00:00.000000+00:00",
+    "updated_at": "2026-10-20T00:01:00.000000+00:00"
+  },
+  "session_response": {
+    "role": "reviewer",
+    "auth_method": "session",
+    "csrf_token": "SYNTHETIC-NOT-A-REAL-CSRF-TOKEN",
+    "expires_at": "2026-10-20T08:00:00+00:00"
+  },
+  "confirm_request": {
+    "expected_revision": 2
+  },
+  "confirm_response": {
+    "id": "00000000-0000-4000-8000-000000000002",
+    "draft_id": "00000000-0000-4000-8000-000000000001",
+    "revision": 1,
+    "status": "active",
+    "snapshot": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "revision": 3,
+      "status": "confirmed",
+      "ledger_id": "00000000-0000-4000-8000-000000000002",
+      "original_candidate": {
+        "schema": "pixelreceipt-central-candidate-1",
+        "currency": "TWD",
+        "amount_unit": "TWD_YUAN",
+        "merchant": "合成測試商店",
+        "receipt_date": "2026-10-20",
+        "printed_total_yuan": 100,
+        "items": [
+          {
+            "raw_name": "合成茶飲",
+            "quantity": 3,
+            "printed_unit_price_yuan": null,
+            "printed_line_total_yuan": 100,
+            "brand": null,
+            "specification": null,
+            "content_quantity": null
+          }
+        ],
+        "adjustments": []
+      },
+      "candidate": {
+        "schema": "pixelreceipt-central-candidate-1",
+        "currency": "TWD",
+        "amount_unit": "TWD_YUAN",
+        "merchant": "合成測試商店",
+        "receipt_date": "2026-10-20",
+        "printed_total_yuan": 100,
+        "items": [
+          {
+            "raw_name": "合成茶飲",
+            "quantity": 3,
+            "printed_unit_price_yuan": null,
+            "printed_line_total_yuan": 100,
+            "brand": null,
+            "specification": null,
+            "content_quantity": null
+          }
+        ],
+        "adjustments": []
+      },
+      "evidence": [
+        {
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "pages": [
+            1
+          ]
+        }
+      ],
+      "source": {
+        "kind": "ai_candidate",
+        "label": "SYNTHETIC",
+        "provider": null,
+        "model": null
+      },
+      "review_document": {
+        "schema": "pixelreceipt-central-review-2",
+        "assembly_status": "complete_by_user",
+        "line_decisions": [
+          {
+            "item_position": 0,
+            "method": "by_quantity",
+            "whole_purpose": null,
+            "quantities": {
+              "self": 1,
+              "advance": 2,
+              "gift": 0
+            },
+            "amounts_yuan": null
+          }
+        ],
+        "adjustment_decisions": [],
+        "tolerance_acknowledgement": "none"
+      },
+      "calculation": {
+        "ruleset": "pixelreceipt-central-ledger-1",
+        "basis_sha256": "52e8da16a518b0d6827c2cb1a8b20043b0b668db0d29567c6b01b94e5e891ab0",
+        "ready": true,
+        "blockers": [],
+        "reconciliation_status": "balanced",
+        "tolerance_yuan": 1,
+        "computed_total_yuan": 100,
+        "printed_total_yuan": 100,
+        "allocated_total_yuan": 100,
+        "difference_yuan": 0,
+        "reconciliation_difference_yuan": 0,
+        "expenses_ready": true,
+        "self_yuan": 33,
+        "gift_yuan": 0,
+        "advance_yuan": 67,
+        "personal_yuan": 33,
+        "line_shares": [
+          {
+            "item_position": 0,
+            "self_yuan": 33,
+            "advance_yuan": 67,
+            "gift_yuan": 0
+          }
+        ],
+        "adjustment_shares": []
+      },
+      "created_at": "2026-10-20T00:00:00.000000+00:00",
+      "updated_at": "2026-10-20T00:02:00.000000+00:00"
+    },
+    "confirmed_at": "2026-10-20T00:02:00.000000+00:00",
+    "confirmed_by": "reviewer",
+    "events": [
+      {
+        "revision": 1,
+        "action": "confirmed",
+        "actor": "reviewer",
+        "reason": null,
+        "created_at": "2026-10-20T00:02:00.000000+00:00"
+      }
+    ]
+  },
+  "ledger_response": {
+    "id": "00000000-0000-4000-8000-000000000002",
+    "draft_id": "00000000-0000-4000-8000-000000000001",
+    "revision": 1,
+    "status": "active",
+    "snapshot": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "revision": 3,
+      "status": "confirmed",
+      "ledger_id": "00000000-0000-4000-8000-000000000002",
+      "original_candidate": {
+        "schema": "pixelreceipt-central-candidate-1",
+        "currency": "TWD",
+        "amount_unit": "TWD_YUAN",
+        "merchant": "合成測試商店",
+        "receipt_date": "2026-10-20",
+        "printed_total_yuan": 100,
+        "items": [
+          {
+            "raw_name": "合成茶飲",
+            "quantity": 3,
+            "printed_unit_price_yuan": null,
+            "printed_line_total_yuan": 100,
+            "brand": null,
+            "specification": null,
+            "content_quantity": null
+          }
+        ],
+        "adjustments": []
+      },
+      "candidate": {
+        "schema": "pixelreceipt-central-candidate-1",
+        "currency": "TWD",
+        "amount_unit": "TWD_YUAN",
+        "merchant": "合成測試商店",
+        "receipt_date": "2026-10-20",
+        "printed_total_yuan": 100,
+        "items": [
+          {
+            "raw_name": "合成茶飲",
+            "quantity": 3,
+            "printed_unit_price_yuan": null,
+            "printed_line_total_yuan": 100,
+            "brand": null,
+            "specification": null,
+            "content_quantity": null
+          }
+        ],
+        "adjustments": []
+      },
+      "evidence": [
+        {
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "pages": [
+            1
+          ]
+        }
+      ],
+      "source": {
+        "kind": "ai_candidate",
+        "label": "SYNTHETIC",
+        "provider": null,
+        "model": null
+      },
+      "review_document": {
+        "schema": "pixelreceipt-central-review-2",
+        "assembly_status": "complete_by_user",
+        "line_decisions": [
+          {
+            "item_position": 0,
+            "method": "by_quantity",
+            "whole_purpose": null,
+            "quantities": {
+              "self": 1,
+              "advance": 2,
+              "gift": 0
+            },
+            "amounts_yuan": null
+          }
+        ],
+        "adjustment_decisions": [],
+        "tolerance_acknowledgement": "none"
+      },
+      "calculation": {
+        "ruleset": "pixelreceipt-central-ledger-1",
+        "basis_sha256": "52e8da16a518b0d6827c2cb1a8b20043b0b668db0d29567c6b01b94e5e891ab0",
+        "ready": true,
+        "blockers": [],
+        "reconciliation_status": "balanced",
+        "tolerance_yuan": 1,
+        "computed_total_yuan": 100,
+        "printed_total_yuan": 100,
+        "allocated_total_yuan": 100,
+        "difference_yuan": 0,
+        "reconciliation_difference_yuan": 0,
+        "expenses_ready": true,
+        "self_yuan": 33,
+        "gift_yuan": 0,
+        "advance_yuan": 67,
+        "personal_yuan": 33,
+        "line_shares": [
+          {
+            "item_position": 0,
+            "self_yuan": 33,
+            "advance_yuan": 67,
+            "gift_yuan": 0
+          }
+        ],
+        "adjustment_shares": []
+      },
+      "created_at": "2026-10-20T00:00:00.000000+00:00",
+      "updated_at": "2026-10-20T00:02:00.000000+00:00"
+    },
+    "confirmed_at": "2026-10-20T00:02:00.000000+00:00",
+    "confirmed_by": "reviewer",
+    "events": [
+      {
+        "revision": 1,
+        "action": "confirmed",
+        "actor": "reviewer",
+        "reason": null,
+        "created_at": "2026-10-20T00:02:00.000000+00:00"
+      }
+    ]
+  },
+  "ledger_list_response": {
+    "entries": [
+      {
+        "id": "00000000-0000-4000-8000-000000000002",
+        "draft_id": "00000000-0000-4000-8000-000000000001",
+        "revision": 1,
+        "status": "active",
+        "snapshot": {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "revision": 3,
+          "status": "confirmed",
+          "ledger_id": "00000000-0000-4000-8000-000000000002",
+          "original_candidate": {
+            "schema": "pixelreceipt-central-candidate-1",
+            "currency": "TWD",
+            "amount_unit": "TWD_YUAN",
+            "merchant": "合成測試商店",
+            "receipt_date": "2026-10-20",
+            "printed_total_yuan": 100,
+            "items": [
+              {
+                "raw_name": "合成茶飲",
+                "quantity": 3,
+                "printed_unit_price_yuan": null,
+                "printed_line_total_yuan": 100,
+                "brand": null,
+                "specification": null,
+                "content_quantity": null
+              }
+            ],
+            "adjustments": []
+          },
+          "candidate": {
+            "schema": "pixelreceipt-central-candidate-1",
+            "currency": "TWD",
+            "amount_unit": "TWD_YUAN",
+            "merchant": "合成測試商店",
+            "receipt_date": "2026-10-20",
+            "printed_total_yuan": 100,
+            "items": [
+              {
+                "raw_name": "合成茶飲",
+                "quantity": 3,
+                "printed_unit_price_yuan": null,
+                "printed_line_total_yuan": 100,
+                "brand": null,
+                "specification": null,
+                "content_quantity": null
+              }
+            ],
+            "adjustments": []
+          },
+          "evidence": [
+            {
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "pages": [
+                1
+              ]
+            }
+          ],
+          "source": {
+            "kind": "ai_candidate",
+            "label": "SYNTHETIC",
+            "provider": null,
+            "model": null
+          },
+          "review_document": {
+            "schema": "pixelreceipt-central-review-2",
+            "assembly_status": "complete_by_user",
+            "line_decisions": [
+              {
+                "item_position": 0,
+                "method": "by_quantity",
+                "whole_purpose": null,
+                "quantities": {
+                  "self": 1,
+                  "advance": 2,
+                  "gift": 0
+                },
+                "amounts_yuan": null
+              }
+            ],
+            "adjustment_decisions": [],
+            "tolerance_acknowledgement": "none"
+          },
+          "calculation": {
+            "ruleset": "pixelreceipt-central-ledger-1",
+            "basis_sha256": "52e8da16a518b0d6827c2cb1a8b20043b0b668db0d29567c6b01b94e5e891ab0",
+            "ready": true,
+            "blockers": [],
+            "reconciliation_status": "balanced",
+            "tolerance_yuan": 1,
+            "computed_total_yuan": 100,
+            "printed_total_yuan": 100,
+            "allocated_total_yuan": 100,
+            "difference_yuan": 0,
+            "reconciliation_difference_yuan": 0,
+            "expenses_ready": true,
+            "self_yuan": 33,
+            "gift_yuan": 0,
+            "advance_yuan": 67,
+            "personal_yuan": 33,
+            "line_shares": [
+              {
+                "item_position": 0,
+                "self_yuan": 33,
+                "advance_yuan": 67,
+                "gift_yuan": 0
+              }
+            ],
+            "adjustment_shares": []
+          },
+          "created_at": "2026-10-20T00:00:00.000000+00:00",
+          "updated_at": "2026-10-20T00:02:00.000000+00:00"
+        },
+        "confirmed_at": "2026-10-20T00:02:00.000000+00:00",
+        "confirmed_by": "reviewer",
+        "events": [
+          {
+            "revision": 1,
+            "action": "confirmed",
+            "actor": "reviewer",
+            "reason": null,
+            "created_at": "2026-10-20T00:02:00.000000+00:00"
+          }
+        ]
+      }
+    ],
+    "limit": 20,
+    "offset": 0
+  },
+  "void_request": {
+    "expected_revision": 1,
+    "reason": "合成訂正，另建新草稿"
+  },
+  "void_revision_semantics": "expected_revision is ledger revision, not draft revision. Confirm request uses draft revision. Both POSTs require Idempotency-Key.",
+  "error_response": {
+    "detail": "revision_conflict"
+  },
+  "confirmation_blocked_response": {
+    "detail": "confirmation_blocked",
+    "calculation": {
+      "ruleset": "pixelreceipt-central-ledger-1",
+      "basis_sha256": "2a57edcc92ad302f436871be46c90851442fa15bcd73d4a102206261f777505c",
+      "ready": false,
+      "blockers": [
+        {
+          "code": "tolerance_acknowledgement_required"
+        }
+      ],
+      "reconciliation_status": "within_tolerance",
+      "tolerance_yuan": 1,
+      "computed_total_yuan": 100,
+      "printed_total_yuan": 99,
+      "allocated_total_yuan": 100,
+      "difference_yuan": 1,
+      "reconciliation_difference_yuan": 1,
+      "expenses_ready": true,
+      "self_yuan": 33,
+      "gift_yuan": 0,
+      "advance_yuan": 67,
+      "personal_yuan": 33,
+      "line_shares": [
+        {
+          "item_position": 0,
+          "self_yuan": 33,
+          "advance_yuan": 67,
+          "gift_yuan": 0
+        }
+      ],
+      "adjustment_shares": []
+    }
+  },
+  "blocker_codes": [
+    "receipt_completeness_unconfirmed",
+    "merchant_unknown",
+    "printed_total_unknown",
+    "no_items",
+    "item_name_unknown",
+    "item_quantity_unknown",
+    "item_amount_unknown",
+    "adjustment_amount_unknown",
+    "adjustment_direction_unknown",
+    "adjustment_scope_unknown",
+    "adjustment_effect_unknown",
+    "computed_total_out_of_range",
+    "tolerance_acknowledgement_required",
+    "receipt_total_mismatch",
+    "item_purpose_unconfirmed",
+    "item_quantity_allocation_mismatch",
+    "item_amount_allocation_mismatch",
+    "item_allocation_without_quantity",
+    "adjustment_allocation_unconfirmed",
+    "adjustment_item_purpose_unconfirmed",
+    "zero_allocation_basis",
+    "adjustment_allocation_mismatch",
+    "adjustment_allocation_outside_scope",
+    "negative_purpose_burden",
+    "expense_total_out_of_range",
+    "receipt_date_unknown"
+  ],
+  "logout_response": {
+    "status": "logged_out"
+  },
+  "difference_definition": "difference_yuan = allocated_total_yuan - printed_total_yuan; null when allocation incomplete. reconciliation_difference_yuan = computed_total_yuan - printed_total_yuan.",
+  "reconciliation_statuses": [
+    "indeterminate",
+    "invalid",
+    "balanced",
+    "within_tolerance",
+    "unbalanced"
+  ]
+}

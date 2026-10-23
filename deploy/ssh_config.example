@@ -1,0 +1,19 @@
+# CANDIDATE. Host/user/key/known_hosts must be initialized and verified on HP.
+# This file contains no key. Never disable host-key checking to make it connect.
+Host receipt-asus
+    HostName __VERIFIED_ASUS_HOST__
+    Port __VERIFIED_ASUS_SSH_PORT__
+    User pixelreceipt-forward
+    IdentityFile /etc/pixelreceipt-forward/id_ed25519
+    UserKnownHostsFile /etc/pixelreceipt-forward/known_hosts
+    GlobalKnownHostsFile /dev/null
+    StrictHostKeyChecking yes
+    IdentitiesOnly yes
+    BatchMode yes
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    ExitOnForwardFailure yes
+    ServerAliveInterval 30
+    ServerAliveCountMax 3
+    LogLevel ERROR
+    LocalForward 127.0.0.1:18992 127.0.0.1:18991

@@ -1,0 +1,49 @@
+# CANDIDATE ONLY: install after ASUS inventory, reviewed release and human initialization.
+[Unit]
+Description=PixelReceipt private API and review dashboard
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=pixelreceipt
+Group=pixelreceipt
+WorkingDirectory=/srv/pixelreceipt/current/backend
+Environment=PATH=/usr/local/bin:/usr/bin
+Environment=UV_CACHE_DIR=/var/cache/pixelreceipt
+Environment=UV_OFFLINE=1
+ExecStart=/usr/bin/env uv run --locked --no-sync pixelreceipt-backend serve --data-dir /var/lib/pixelreceipt --port 18991 --root-path /receipts --public-origin https://momonong.me --static-dir /srv/pixelreceipt/current/backend/src/pixelreceipt_backend/static
+StateDirectory=pixelreceipt
+StateDirectoryMode=0700
+CacheDirectory=pixelreceipt
+CacheDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+MemoryAccounting=true
+MemoryHigh=384M
+MemoryMax=512M
+CPUQuota=75%
+TasksMax=32
+LimitNOFILE=1024
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
