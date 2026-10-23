@@ -9,12 +9,12 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.momonong.pixelreceipt"
+        applicationId = "com.momonong.pixelreceipt.mobile"
         // ML Kit GenAI Prompt API requires API 26. Pixel 10 Pro Fold is the primary device.
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 7
+        versionName = "0.5.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -35,6 +35,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     testOptions.unitTests.isIncludeAndroidResources = true
@@ -81,6 +82,12 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit4)
+    testImplementation(composeBom)
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.androidx.test.ext.junit)
+    testImplementation(libs.androidx.test.runner)
+    // Align the UI test annotation dependency with the version already used by this build.
+    testImplementation(libs.jsr305)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
@@ -92,4 +99,6 @@ dependencies {
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(composeBom)
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    // Compose 1.12.1 transitively uses Espresso 3.5.0; 3.7.0 fixes API 37 input setup.
+    androidTestImplementation(libs.androidx.espresso.core)
 }

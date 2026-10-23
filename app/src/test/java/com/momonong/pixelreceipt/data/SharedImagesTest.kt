@@ -30,6 +30,15 @@ class SharedImagesTest {
         assertEquals(emptyList<Uri>(), SharedImages.from(Intent(Intent.ACTION_SEND)))
         assertNull(SharedImages.from(Intent(Intent.ACTION_MAIN)))
     }
+    @Test fun imageShareTextRemainsBatchContextInOriginalOrder() {
+        val intent = Intent(Intent.ACTION_SEND_MULTIPLE).setType("image/png")
+            .putParcelableArrayListExtra(Intent.EXTRA_STREAM, arrayListOf(first, second))
+            .putExtra(Intent.EXTRA_TEXT, "第一張收據，第二張牙膏價標；幫朋友買。")
+        assertEquals(listOf(first, second), SharedImages.from(intent))
+        assertEquals("第一張收據，第二張牙膏價標；幫朋友買。", SharedImages.notes(intent))
+        assertEquals("", SharedImages.notes(Intent(Intent.ACTION_MAIN)))
+        assertEquals("", SharedImages.notes(Intent(Intent.ACTION_SEND)))
+    }
     @Test fun oversizedShareCarriesOverflowSentinel() {
         val intent = Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(List(100) { first }))
         assertEquals(21, SharedImages.from(intent)!!.size)

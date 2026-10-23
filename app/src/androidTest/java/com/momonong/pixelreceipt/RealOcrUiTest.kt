@@ -9,6 +9,7 @@ import com.momonong.pixelreceipt.data.ingestion.ImportInput
 import com.momonong.pixelreceipt.domain.model.EvidenceImportSource
 import kotlinx.coroutines.runBlocking
 import org.junit.Rule
+import org.junit.Before
 import org.junit.Test
 import java.io.ByteArrayOutputStream
 import java.util.UUID
@@ -16,6 +17,10 @@ import java.io.File
 
 class RealOcrUiTest {
     @get:Rule val ui = createAndroidComposeRule<MainActivity>()
+    @Before fun openLegacyLedger() {
+        ui.onNodeWithTag("mobile-settings").performClick()
+        ui.onNodeWithTag("legacy-ledger-entry").performScrollTo().performClick()
+    }
 
     @Test fun recognizeButtonOpensReviewWithAutomaticallyCreatedItem() {
         val bitmap = Bitmap.createBitmap(1500, 1000, Bitmap.Config.ARGB_8888)

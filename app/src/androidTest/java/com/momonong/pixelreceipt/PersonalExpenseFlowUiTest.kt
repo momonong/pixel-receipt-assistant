@@ -21,9 +21,13 @@ import org.junit.Assert.*
 import java.io.File
 import java.util.UUID
 
-/** Synthesized image through the real SEND intent, bundled OCR, Compose and Room. Not an accuracy benchmark. */
+/** Explicit legacy import, bundled OCR, Compose and Room. Central image SEND has its own regression. */
 class PersonalExpenseFlowUiTest {
     @get:Rule val ui = createAndroidComposeRule<MainActivity>()
+    @Before fun openLegacyLedger() {
+        ui.onNodeWithTag("mobile-settings").performClick()
+        ui.onNodeWithTag("legacy-ledger-entry").performScrollTo().performClick()
+    }
     private var originalIntent: Intent? = null
     private var source: Uri? = null
     private val graph get() = ui.activity.application as ReceiptApplication
@@ -41,7 +45,7 @@ class PersonalExpenseFlowUiTest {
         source?.let { ui.activity.contentResolver.delete(it, null, null) }
     }
 
-    @Test fun shareRecognizeCorrectSplitDiscountSaveReopenAndConfirm() {
+    @Test fun legacyRecognizeCorrectSplitDiscountSaveReopenAndConfirm() {
         val startedAt = android.os.SystemClock.elapsedRealtime()
         val bitmap = Bitmap.createBitmap(1600, 1400, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap); canvas.drawColor(Color.WHITE)
@@ -55,11 +59,11 @@ class PersonalExpenseFlowUiTest {
         })!!
         resolver.openOutputStream(source!!)!!.use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }; bitmap.recycle()
         val before = runBlocking { graph.repository.drafts.first().map { it.id }.toSet() }
-        originalIntent = Intent(ui.activity.intent)
-        ui.runOnUiThread { ui.activity.startActivity(Intent(ui.activity, MainActivity::class.java).apply {
-            action = Intent.ACTION_SEND; type = "image/png"; putExtra(Intent.EXTRA_STREAM, source)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        }) }
+        val importedId = runBlocking { graph.importer.import(UUID.randomUUID().toString(), null,
+            listOf(com.momonong.pixelreceipt.data.ingestion.ImportInput { resolver.openInputStream(source!!) }),
+            EvidenceImportSource.Other).draftId!! }
+        ui.waitUntil(10_000) { ui.onAllNodesWithTag("transaction-$importedId").fetchSemanticsNodes().isNotEmpty() }
+        ui.onNodeWithTag("transaction-$importedId").performScrollTo().performClick()
         ui.waitUntil(15_000) { ui.onAllNodesWithTag("recognize-receipt").fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithTag("merchant").assertDoesNotExist()
         node("engine-ocr").performClick()

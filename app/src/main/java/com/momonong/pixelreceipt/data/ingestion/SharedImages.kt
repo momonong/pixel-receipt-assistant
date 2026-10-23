@@ -6,6 +6,10 @@ import androidx.core.content.IntentCompat
 
 /** Only reads image references. Ignores all caller-supplied draft ids, paths and operation ids. */
 object SharedImages {
+    /** Image-share EXTRA_TEXT is context for the entire batch, not a legacy receipt JSON import. */
+    fun notes(intent: Intent): String = if (intent.action in setOf(Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE))
+        intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString().orEmpty() else ""
+
     fun from(intent: Intent): List<Uri>? {
         if (intent.action !in setOf(Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE)) return null
         return when (intent.action) {

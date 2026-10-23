@@ -1,0 +1,29 @@
+{
+  "schema": "pixelreceipt-central-candidate-1",
+  "currency": "TWD",
+  "amount_unit": "TWD_YUAN",
+  "merchant": "合成示例商店（非真實收據）",
+  "receipt_date": "2026-10-01",
+  "printed_total_yuan": 149,
+  "items": [
+    {
+      "raw_name": "合成茶飲 500ml",
+      "quantity": null,
+      "printed_unit_price_yuan": null,
+      "printed_line_total_yuan": 149,
+      "brand": null,
+      "specification": "500ml",
+      "content_quantity": {"value_decimal": "500", "unit": "ml"}
+    }
+  ],
+  "adjustments": [
+    {
+      "raw_label": "合成活動折100：已含在149元行金額",
+      "direction": "subtract",
+      "amount_yuan": 100,
+      "amount_effect": "included_in_line_totals",
+      "scope": "items",
+      "item_positions": [0]
+    }
+  ]
+}

@@ -14,6 +14,7 @@ import java.util.UUID
 
 class MainActivity : ComponentActivity() {
     private val inbox: InboxViewModel by viewModels()
+    private val mobile: com.momonong.pixelreceipt.mobile.MobileViewModel by viewModels()
     private var shareOperationId = UUID.randomUUID().toString()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -22,7 +23,7 @@ class MainActivity : ComponentActivity() {
         receive(intent)
         setContent {
             PixelReceiptTheme {
-                PixelReceiptApp(inbox)
+                PixelReceiptApp(inbox, mobile)
             }
         }
     }
@@ -43,6 +44,11 @@ class MainActivity : ComponentActivity() {
         super.onPause()
     }
 
+    override fun onStop() {
+        if (!isChangingConfigurations) mobile.background()
+        super.onStop()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -52,17 +58,19 @@ class MainActivity : ComponentActivity() {
 
     private fun receive(intent: Intent) {
         try {
-            if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain") {
+            val uris = SharedImages.from(intent)
+            if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain" && uris.isNullOrEmpty()) {
+                mobile.openLegacy(true)
                 val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
                 if (text.isNullOrBlank()) inbox.showError("分享內容沒有收據文字，請複製 Gemini 的完整回覆。")
                 else inbox.assistantShared(shareOperationId, text)
                 return
             }
-            val uris = SharedImages.from(intent) ?: return
-            if (uris.isEmpty()) inbox.showError("分享內容沒有可讀取的圖片，請從相簿重新分享。")
-            else inbox.shared(shareOperationId, uris)
+            if (uris == null) return
+            if (uris.isEmpty()) mobile.report("分享內容沒有可讀取的圖片，請從相簿重新分享。")
+            else mobile.receive(shareOperationId, uris, SharedImages.notes(intent))
         } catch (_: RuntimeException) {
-            inbox.showError("無法讀取分享內容，請重新選取圖片。")
+            mobile.report("無法讀取分享內容，請重新選取圖片。")
         }
     }
 }

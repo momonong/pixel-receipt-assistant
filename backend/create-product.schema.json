@@ -1,0 +1,84 @@
+{
+  "$defs": {
+    "ContentQuantity": {
+      "additionalProperties": false,
+      "properties": {
+        "value_decimal": {
+          "pattern": "^(0|[1-9][0-9]{0,8})(\\.[0-9]{1,6})?$",
+          "title": "Value Decimal",
+          "type": "string"
+        },
+        "unit": {
+          "enum": [
+            "g",
+            "kg",
+            "ml",
+            "l",
+            "piece"
+          ],
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value_decimal",
+        "unit"
+      ],
+      "title": "ContentQuantity",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "display_name": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Display Name",
+      "type": "string"
+    },
+    "brand": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Brand"
+    },
+    "specification": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Specification",
+      "type": "string"
+    },
+    "purchase_unit": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Purchase Unit",
+      "type": "string"
+    },
+    "content_quantity": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContentQuantity"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "display_name",
+    "specification",
+    "purchase_unit"
+  ],
+  "title": "CreateProduct",
+  "type": "object"
+}

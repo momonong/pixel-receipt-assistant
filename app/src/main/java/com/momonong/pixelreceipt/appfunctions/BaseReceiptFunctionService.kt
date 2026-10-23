@@ -1,7 +1,7 @@
 package com.momonong.pixelreceipt.appfunctions
 
 import androidx.annotation.RequiresApi
-import androidx.appfunctions.AppFunction
+import androidx.appfunctions.AppFunctionDeclaration
 import androidx.appfunctions.AppFunctionService
 import androidx.appfunctions.AppFunctionServiceEntryPoint
 import com.momonong.pixelreceipt.app.ReceiptApplication
@@ -27,7 +27,7 @@ abstract class BaseReceiptFunctionService : AppFunctionService() {
      * @param receipt The observed receipt fields and stable retry token.
      * @return Local draft ID. Success means saved for review, not confirmed or financially verified.
      */
-    @AppFunction(isDescribedByKDoc = true)
+    @AppFunctionDeclaration(isDescribedByKDoc = true)
     suspend fun importReceiptForReview(receipt: AssistantReceiptParameters): String = withContext(Dispatchers.IO) {
         try {
             val input = AssistantReceipt("pixelreceipt-1", receipt.currency, receipt.merchant, receipt.date, receipt.totalMinor,
@@ -49,7 +49,7 @@ abstract class BaseReceiptFunctionService : AppFunctionService() {
      * The user must open PixelReceipt to add a photo or edit and confirm the draft.
      * @return The locally generated ID of the new draft, which is still awaiting user review.
      */
-    @AppFunction(isDescribedByKDoc = true)
+    @AppFunctionDeclaration(isDescribedByKDoc = true)
     suspend fun createReviewDraft(): String = withContext(Dispatchers.IO) {
         CreateAssistantReviewDraft((application as ReceiptApplication).repository).create().id
     }

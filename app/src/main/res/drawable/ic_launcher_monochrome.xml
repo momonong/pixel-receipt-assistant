@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- The themed icon uses alpha cutouts rather than flattening the color artwork. -->
+    <group>
+        <clip-path
+            android:fillType="evenOdd"
+            android:pathData="M0,0H108V108H0ZM81.5,68A11.5,11.5 0,1 0,58.5,68A11.5,11.5 0,1 0,81.5,68Z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M38,26H64L73,35V76L68,79L63,75.5L58,79L53,75.5L48,79L43,75.5L38,79L34,76V30Q34,26 38,26ZM65,29.5V34H69.5ZM42,41.5H64V44.5H42ZM42,49.5H62V52.5H42ZM42,57.5H54V60.5H42Z" />
+    </group>
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M65,68L68,65L71,68L76.5,62.5L79.5,65.5L71,74Z" />
+</vector>

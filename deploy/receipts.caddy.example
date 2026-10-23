@@ -1,0 +1,31 @@
+# CANDIDATE ONLY. Add inside the existing HP :18080 server, before its 404 fallback.
+# Never replace the full Caddyfile or the /sites/ managed include with this fragment.
+@receipts path /receipts /receipts/*
+handle @receipts {
+	@receipts_not_https not header X-Forwarded-Proto https
+	route {
+		redir @receipts_not_https https://momonong.me{uri} 308
+		redir /receipts /receipts/ 308
+		header Cache-Control "no-store"
+		request_body {
+			max_size 20MiB
+		}
+		# Backend ASGI root_path=/receipts; its router receives an unprefixed path.
+		uri strip_prefix /receipts
+		# Bearer/website Cookie stay intact; reviewer session Origin is checked by app.
+		reverse_proxy 127.0.0.1:18992 {
+			header_up -Forwarded
+			header_up -X-Forwarded-Host
+			header_up -X-Forwarded-For
+			header_up -X-Forwarded-Prefix
+			header_up -True-Client-IP
+			header_up X-Forwarded-Proto https
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 45s
+				read_timeout 45s
+				write_timeout 45s
+			}
+		}
+	}
+}

@@ -12,6 +12,15 @@ import com.momonong.pixelreceipt.domain.usecase.ExtractReceipt
 import kotlinx.coroutines.flow.first
 
 class ReceiptApplication : Application() {
+    val mobile by lazy {
+        val root = File(noBackupFilesDir, "mobile-intake").apply { mkdirs() }
+        com.momonong.pixelreceipt.mobile.MobileRepository(
+            com.momonong.pixelreceipt.mobile.MobileStore(root),
+            ImageStore(File(root, "images")),
+            com.momonong.pixelreceipt.mobile.KeystoreTokenVault(root),
+            com.momonong.pixelreceipt.mobile.HttpsMobileApi(),
+        )
+    }
     val database by lazy { ReceiptDatabase.open(this) }
     val repository by lazy { RoomReceiptRepository(database) }
     val images by lazy { ImageStore(File(filesDir, "evidence")) }
