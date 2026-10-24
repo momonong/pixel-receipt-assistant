@@ -236,3 +236,27 @@ test("editing hides saved calculation amounts until a new server result is avail
   assert.match(JSON.stringify(content), /內容已修改/);
   assert.doesNotMatch(JSON.stringify(content), /987654|987,654|確認入帳/);
 });
+
+
+test("deleted draft deep link renders a final read-only notice without editing controls", async () => {
+  const app = await appHarness(`#draft/${A}`);
+  await app.run(`openDraft("${A}")`);
+  const rendered = app.run(`
+    state.selected.status = "deleted";
+    const workspace = el("main"); workspace.querySelector = () => null;
+    renderWorkspace(workspace);
+    workspace;
+  `);
+  const text = JSON.stringify(plain(rendered));
+  assert.match(text, /已刪除/);
+  assert.doesNotMatch(text, /這張收據目前無法修改，請查看帳本狀態/);
+  const tags = [];
+  function visit(node) {
+    if (!node || typeof node !== "object") return;
+    tags.push(node.tag);
+    for (const child of node.children || []) visit(child);
+  }
+  visit(rendered);
+  assert.equal(tags.includes("form"), false);
+  assert.equal(tags.includes("fieldset"), false);
+});

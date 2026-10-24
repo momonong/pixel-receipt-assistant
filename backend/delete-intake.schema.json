@@ -1,0 +1,30 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "expected_draft_revision": {
+      "anyOf": [
+        {
+          "exclusiveMaximum": 9223372036854775807,
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Expected Draft Revision"
+    },
+    "reason": {
+      "maxLength": 1000,
+      "minLength": 1,
+      "title": "Reason",
+      "type": "string"
+    }
+  },
+  "required": [
+    "expected_draft_revision",
+    "reason"
+  ],
+  "title": "DeleteIntake",
+  "type": "object"
+}

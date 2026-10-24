@@ -13,9 +13,10 @@ from pathlib import Path
 
 from .domain import calculate
 from .ledger_models import ConfirmReceipt, ReviewDocument, ReviewReceipt, VoidReceipt
-from .models import LONG_MAX, Candidate, CreateDraft, ReviewDraft
+from .models import LONG_MAX, Candidate, CreateDraft, DeleteDraft, ReviewDraft
 
 SCHEMA_VERSION = 4
+INTAKE_DELETE_JOURNAL_SCHEMA = "pixelreceipt-delete-intake-journal-1"
 MAX_STORED_BYTES = 1024 * 1024 * 1024
 
 
@@ -425,48 +426,51 @@ class Store:
         }
 
     def create_draft(self, request: CreateDraft, key: str) -> tuple[dict, bool]:
+        with self.connection(write=True) as connection:
+            return self._create_draft(connection, request, key)
+
+    def _create_draft(self, connection, request: CreateDraft, key: str) -> tuple[dict, bool]:
         body = request.model_dump(mode="json", by_alias=True)
         digest = hashlib.sha256(canonical(body).encode()).hexdigest()
-        with self.connection(write=True) as connection:
-            row = connection.execute(
-                "SELECT * FROM drafts WHERE idempotency_key = ?", (key,)
+        row = connection.execute(
+            "SELECT * FROM drafts WHERE idempotency_key = ?", (key,)
+        ).fetchone()
+        if row:
+            if row["content_digest"] != digest:
+                raise StoreError(409, "idempotency_key_content_conflict")
+            # Return the current record, preserving all review edits and the original ID.
+            return self._draft(row), False
+        for reference in request.evidence:
+            evidence = connection.execute(
+                "SELECT * FROM evidence WHERE sha256 = ?", (reference.sha256,)
             ).fetchone()
-            if row:
-                if row["content_digest"] != digest:
-                    raise StoreError(409, "idempotency_key_content_conflict")
-                # Return the current record, preserving all review edits and the original ID.
-                return self._draft(row), False
-            for reference in request.evidence:
-                evidence = connection.execute(
-                    "SELECT * FROM evidence WHERE sha256 = ?", (reference.sha256,)
-                ).fetchone()
-                if evidence is None:
-                    raise StoreError(422, "unknown_evidence_reference")
-                if max(reference.pages) > json.loads(evidence["metadata"])["page_count"]:
-                    raise StoreError(422, "invalid_evidence_page")
-                self._read_blob(reference.sha256)
-            draft_id = str(uuid.uuid4())
-            now = timestamp()
-            candidate = canonical(body["candidate"])
-            connection.execute(
-                """INSERT INTO drafts (id, idempotency_key, content_digest, original, candidate,
-                    evidence, source, revision, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    draft_id,
-                    key,
-                    digest,
-                    candidate,
-                    candidate,
-                    canonical(body["evidence"]),
-                    canonical(body["source"]),
-                    1,
-                    now,
-                    now,
-                ),
-            )
-            row = connection.execute("SELECT * FROM drafts WHERE id = ?", (draft_id,)).fetchone()
-            return self._draft(row), True
+            if evidence is None:
+                raise StoreError(422, "unknown_evidence_reference")
+            if max(reference.pages) > json.loads(evidence["metadata"])["page_count"]:
+                raise StoreError(422, "invalid_evidence_page")
+            self._read_blob(reference.sha256)
+        draft_id = str(uuid.uuid4())
+        now = timestamp()
+        candidate = canonical(body["candidate"])
+        connection.execute(
+            """INSERT INTO drafts (id, idempotency_key, content_digest, original, candidate,
+                evidence, source, revision, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                draft_id,
+                key,
+                digest,
+                candidate,
+                candidate,
+                canonical(body["evidence"]),
+                canonical(body["source"]),
+                1,
+                now,
+                now,
+            ),
+        )
+        row = connection.execute("SELECT * FROM drafts WHERE id = ?", (draft_id,)).fetchone()
+        return self._draft(row), True
 
     def get_draft(self, draft_id: str) -> dict:
         with self.connection() as connection:
@@ -478,11 +482,68 @@ class Store:
     def list_drafts(self, limit: int, offset: int, status: str | None = None) -> list[dict]:
         with self.connection() as connection:
             rows = connection.execute(
-                """SELECT * FROM drafts WHERE (? IS NULL OR stage = ?)
+                """SELECT * FROM drafts WHERE stage != 'deleted' AND (? IS NULL OR stage = ?)
                    ORDER BY created_at, id LIMIT ? OFFSET ?""",
                 (status, status, limit, offset),
             ).fetchall()
             return [self._draft(row) for row in rows]
+
+    def _delete_draft(self, connection, draft_id, expected_revision, reason):
+        row = connection.execute("SELECT * FROM drafts WHERE id=?", (draft_id,)).fetchone()
+        if row is None:
+            raise StoreError(404, "draft_not_found")
+        if row["revision"] != expected_revision:
+            raise StoreError(409, "revision_conflict")
+        # Old workers could commit a derived draft before linking its intake.
+        # A public caller can also forge this key, so do not infer ownership or
+        # tombstone either row until exact-body completion reconciles the FK.
+        if connection.execute(
+            "SELECT 1 FROM intakes WHERE draft_id IS NULL AND 'intake:' || id = ?",
+            (row["idempotency_key"],),
+        ).fetchone():
+            raise StoreError(409, "intake_draft_reconciliation_required")
+        # Check actual ledger ownership too; stage/ledger_id alone cannot authorize removal.
+        posted = connection.execute("SELECT 1 FROM ledger WHERE draft_id=?", (draft_id,)).fetchone()
+        if row["stage"] != "needs_review" or row["ledger_id"] is not None or posted:
+            raise StoreError(409, "draft_not_deletable")
+        if row["revision"] >= LONG_MAX:
+            raise StoreError(409, "revision_exhausted")
+        now = timestamp()
+        connection.execute(
+            """UPDATE drafts SET stage='deleted', revision=revision+1, updated_at=?
+               WHERE id=? AND revision=?""",
+            (now, draft_id, expected_revision),
+        )
+        connection.execute(
+            """INSERT INTO reviews
+               (draft_id, revision, candidate, review_note, created_at, review_document, action)
+               VALUES (?, ?, ?, ?, ?, ?, 'deleted')""",
+            (draft_id, row["revision"] + 1, row["candidate"], reason, now, row["review_document"]),
+        )
+        connection.execute(
+            """UPDATE intakes SET status='deleted', polling_finished=1, error_code=NULL,
+               updated_at=? WHERE draft_id=?""",
+            (now, draft_id),
+        )
+        return self._draft(
+            connection.execute("SELECT * FROM drafts WHERE id=?", (draft_id,)).fetchone()
+        )
+
+    def delete_draft(self, draft_id: str, request: DeleteDraft, key: str) -> dict:
+        with self.connection(write=True) as connection:
+            replay, digest = self._replay(
+                connection, "delete_draft", draft_id, request.model_dump(), key
+            )
+            if replay:
+                return replay
+            value = self._delete_draft(
+                connection, draft_id, request.expected_revision, request.reason
+            )
+            connection.execute(
+                "INSERT INTO mutations VALUES (?, ?, ?, ?, ?)",
+                (key, "delete_draft", draft_id, digest, canonical(value)),
+            )
+            return value
 
     def review(self, draft_id: str, request: ReviewDraft) -> dict:
         with self.connection(write=True) as connection:
@@ -584,7 +645,18 @@ class Store:
             or row["content_digest"] != digest
         ):
             raise StoreError(409, "idempotency_key_content_conflict")
-        return (json.loads(row["response"]) if row else None), digest
+        response = json.loads(row["response"]) if row else None
+        if (
+            row
+            and operation == "delete_intake"
+            and isinstance(response, dict)
+            and set(response) == {"schema", "request", "response"}
+            and response["schema"] == INTAKE_DELETE_JOURNAL_SCHEMA
+        ):
+            # Intake-only deletions have no draft history row. Retain their full
+            # request/reason inside the existing journal without changing the DTO.
+            response = response["response"]
+        return response, digest
 
     def confirm(self, draft_id: str, request: ConfirmReceipt, key: str) -> tuple[dict, bool]:
         with self.connection(write=True) as connection:

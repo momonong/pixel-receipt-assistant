@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 
 from pydantic import AfterValidator, Field, StringConstraints, model_validator
 
-from .models import Sha256, StrictModel, nonblank
+from .models import LONG_MAX, Sha256, StrictModel, nonblank
 
 
 def device_uuid(value: str) -> str:
@@ -45,3 +45,11 @@ class CreateIntake(StrictModel):
         if self.purpose == "purchase" and not any(e.role == "receipt" for e in self.evidence):
             raise ValueError("purchase requires receipt")
         return self
+
+
+class DeleteIntake(StrictModel):
+    # Required null distinguishes no linked draft from a stale/missing revision.
+    expected_draft_revision: Annotated[int, Field(ge=1, lt=LONG_MAX)] | None
+    reason: Annotated[
+        str, StringConstraints(min_length=1, max_length=1000), AfterValidator(nonblank)
+    ]

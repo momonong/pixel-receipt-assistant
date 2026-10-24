@@ -17,11 +17,11 @@ from .analysis_store import AnalysisStore
 from .auth import Auth
 from .evidence import MAX_UPLOAD_BYTES, SUPPORTED_MEDIA, InvalidEvidence
 from .inspection import InspectionUnavailable, inspect_evidence_isolated
-from .intake_models import CreateIntake
+from .intake_models import CreateIntake, DeleteIntake
 from .intake_store import IntakeStore
 from .ledger_models import ConfirmReceipt, ReviewReceipt, VoidReceipt
 from .mobile_release import MobileRelease
-from .models import CreateDraft, ReviewDraft
+from .models import CreateDraft, DeleteDraft, ReviewDraft
 from .pricing_models import CreateProduct, ReviewPrices
 from .recognition import RecognitionWorker
 from .store import SCHEMA_VERSION, Store, StoreError
@@ -248,6 +248,13 @@ def create_app(
     def get_draft(draft_id: str):
         return store.get_draft(draft_id)
 
+    @api.post("/v1/drafts/{draft_id}/delete", dependencies=[Depends(auth.reviewer)])
+    async def delete_draft(draft_id: str, request: Request):
+        key = request.headers.get("idempotency-key", "")
+        if not KEY_PATTERN.fullmatch(key):
+            raise HTTPException(422, "valid_idempotency_key_required")
+        return store.delete_draft(draft_id, await parse_request(request, DeleteDraft), key)
+
     @api.get("/v1/drafts/{draft_id}/intake-context", dependencies=[Depends(auth.reviewer)])
     def draft_intake_context(draft_id: str):
         return intakes.draft_context(draft_id)
@@ -393,6 +400,13 @@ def create_app(
         offset: Annotated[int, Query(ge=0, le=100_000)] = 0,
     ):
         return {"intakes": intakes.list(limit, offset), "limit": limit, "offset": offset}
+
+    @api.post("/v1/intakes/{intake_id}/delete", dependencies=[Depends(auth.reviewer)])
+    async def delete_intake(intake_id: str, request: Request):
+        key = request.headers.get("idempotency-key", "")
+        if not KEY_PATTERN.fullmatch(key):
+            raise HTTPException(422, "valid_idempotency_key_required")
+        return intakes.delete(intake_id, await parse_request(request, DeleteIntake), key)
 
     @api.get("/v1/intakes/{intake_id}")
     def get_intake(intake_id: str):

@@ -127,3 +127,10 @@ class ReviewDraft(StrictModel):
     expected_revision: Annotated[int, Field(ge=1, lt=LONG_MAX)]
     candidate: Candidate
     review_note: Annotated[str, StringConstraints(max_length=1000)] | None = None
+
+
+class DeleteDraft(StrictModel):
+    expected_revision: Annotated[int, Field(ge=1, lt=LONG_MAX)]
+    reason: Annotated[
+        str, StringConstraints(min_length=1, max_length=1000), AfterValidator(nonblank)
+    ]

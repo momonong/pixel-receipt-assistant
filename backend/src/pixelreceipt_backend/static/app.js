@@ -271,6 +271,7 @@ function howStep(number, title, text) {
 function statusBadge(status) {
   if (status === "confirmed" || status === "active") return badge("已入帳");
   if (status === "voided") return badge("已作廢", "red");
+  if (status === "deleted") return badge("已刪除", "red");
   return badge("待核對", "amber");
 }
 function draftRow(draft, action, selected = false) {
@@ -416,6 +417,10 @@ function renderWorkspace(workspace) {
     el("div", {}, el("h2", {id: "review-merchant"}, candidate.merchant || "店家待確認"), el("p", { class: "caption", id: "review-date" }, `${dateLabel(candidate.receipt_date)} · 第 ${draft.revision} 版`)),
     badge(state.dirty ? "尚未儲存" : "已載入", state.dirty ? "amber" : "")));
   workspace.querySelector(".review-title .badge")?.setAttribute("id", "save-state");
+  if (draft.status === "deleted") {
+    workspace.append(notice("這張收據已刪除，不再列入待核對清單。原圖與歷史仍保留。", "info"));
+    return;
+  }
   if (state.conflict || state.saveUnknown) {
     workspace.append(notice(state.conflict ? "版本已更新，這次修改尚未寫入。請先下載目前內容，再重新載入最新版本並核對差異。" : "儲存結果尚未查明。請先保留目前內容，再重新載入確認版本；不會自動重送。", "error",
       [button("下載目前核對內容", exportReview, "secondary small"), button("重新載入最新版本", refreshCurrent, "secondary small")]));

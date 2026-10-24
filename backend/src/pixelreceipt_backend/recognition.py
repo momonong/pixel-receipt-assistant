@@ -578,7 +578,9 @@ class RecognitionWorker:
         )
 
     async def update(self, identifier, **fields):
-        await asyncio.to_thread(self.intakes.update, identifier, **fields)
+        if not await asyncio.to_thread(self.intakes.update, identifier, **fields):
+            # The atomic guarded write also claims dispatch before any queue POST.
+            raise RecognitionError("intake_deleted")
 
     @staticmethod
     def work_busy_state(row, snapshot):
@@ -792,7 +794,8 @@ class RecognitionWorker:
         # Persist raw content immediately before interpretation and before TTL can expire.
         if row["result"] and json.loads(row["result"])["raw_outcome"] != outcome:
             raise RecognitionError("stored_result_integrity_failure")
-        self.intakes.update(row["id"], result=canonical(result))
+        if not self.intakes.update(row["id"], result=canonical(result)):
+            return
         payload = json.loads(row["payload"])
         if (
             payload.get("request_key") != row["job_key"]
@@ -816,12 +819,16 @@ class RecognitionWorker:
                 raise RecognitionError("broker_source_unknown")
         normalized, removed = normalize_candidate_text(value.get("text"))
         result["candidate_parser"].update(json_fence_removed=removed, attempted=True)
-        self.intakes.update(row["id"], result=canonical(result))
+        if not self.intakes.update(row["id"], result=canonical(result)):
+            return
         candidate = _validate_candidate_document(normalized)
         self.intakes.complete(row["id"], candidate, result)
 
     async def step(self, row):
         identifier = row["id"]
+        row = await asyncio.to_thread(self.intakes.raw, identifier)
+        if row["status"] == "deleted":
+            return
         body = json.loads(row["input"])
         if row["result"]:
             await asyncio.to_thread(
@@ -958,7 +965,7 @@ class RecognitionWorker:
             await self.step(row)
             self.last_error = None
         except RecognitionError as error:
-            if error.code == "inspection_busy":
+            if error.code in {"inspection_busy", "intake_deleted"}:
                 return
             current = await asyncio.to_thread(self.intakes.get, row["id"])
             status = (

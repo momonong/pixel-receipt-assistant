@@ -8,7 +8,7 @@ import stat
 from pathlib import Path
 
 MAX_APK_BYTES = 128 * 1024 * 1024
-APPROVED_VERSIONS = ((4, "0.4.2"), (5, "0.4.3"), (6, "0.4.4"), (7, "0.5.0"))
+APPROVED_VERSIONS = ((4, "0.4.2"), (5, "0.4.3"), (6, "0.4.4"), (7, "0.5.0"), (8, "0.5.1"))
 
 
 class MobileRelease:

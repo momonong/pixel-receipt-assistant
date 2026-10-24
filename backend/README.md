@@ -13,7 +13,7 @@
 
 單 worker 查詢持久化退避，10／20／40／60 秒封頂，提交後最多監看 15 分鐘；unknown 到限保留原 key 與完整 journal、標 polling_finished 待人工核對，不重新提交。其他獨立 intake 可繼續走 Broker admission，Broker 自身序列與 quota gate 仍適用。大檔／DB 工作在 thread，解碼／PDF 封裝在既有資源限制子程序，網路為 30 秒整次 deadline 的 asyncio HTTP，查詢及關閉不等待長模型執行。worker 儲存錯誤可從 recognition diagnostics 觀察。
 
-`--mobile-release-dir /srv/pixelreceipt/mobile-current` 為可選 APK 交付；固定 release.json＋app.apk，啟動串流核對 hash／大小，所有檔案 root readonly，僅認證後 GET `/v1/mobile/release`、`/v1/mobile/apk`，APK 用 FileResponse 串流下載。metadata 的 signer hash 是部署核對結果，不由後端猜測 APK 簽章。未配置回 404。
+`--mobile-release-dir /srv/pixelreceipt/mobile-current` 為可選 APK 交付；固定 release.json＋app.apk，啟動串流核對 hash／大小，所有檔案 root readonly，僅認證後 GET `/v1/mobile/release`、`/v1/mobile/apk`，APK 用 FileResponse 串流下載。版本需是允許的精確 code／name 配對（含 8／0.5.1），不能任意交叉組合。metadata 的 signer hash 是部署核對結果，不由後端猜測 APK 簽章。未配置回 404。
 
 ## 本機使用
 
@@ -37,8 +37,8 @@ launcher 固定 `127.0.0.1`、預設 port `18991`、單 worker、HTTP concurrenc
 | 角色／來源 | 可做的事 |
 | --- | --- |
 | 匿名 | 取得登入頁與 allowlist 中的 Dashboard 靜態程式；無法讀取私人 API／原圖 |
-| ingest bearer：私有 `auth-token` 或程序環境 `PIXELRECEIPT_TOKEN` | health、原檔上傳、建立候選，以及讀取草稿／帳本／商品／分析；不能人工 review、confirm、void 或建立價格核對 |
-| v1 裝置 ingest bearer | `/v1/mobile/login` 以密碼換取30天裝置 token；可讀取與收件，不能 review／confirm／void；可撤銷 |
+| ingest bearer：私有 `auth-token` 或程序環境 `PIXELRECEIPT_TOKEN` | health、原檔上傳、建立候選，以及讀取草稿／帳本／商品／分析；不能人工 review、confirm、delete、void 或建立價格核對 |
+| v1 裝置 ingest bearer | `/v1/mobile/login` 以密碼換取30天裝置 token；可讀取與收件，不能 review／confirm／delete／void；可撤銷 |
 | v2 原生 reviewer session | `/v2/mobile/login` 回傳獨立 `prm_` Bearer、role=reviewer、device_id、expires_at；有效30天，支援 App 內核對／確認；`/v2/mobile/logout` 只撤銷當前 session |
 | 瀏覽器 reviewer session | `GET/POST /auth/login` 私有密碼登入；HttpOnly／SameSite=Strict cookie，預設 Secure、8 小時、server-side 可撤銷；變更需正確 Origin 與 `X-CSRF-Token` |
 | 可選 reviewer bearer：私有 `reviewer-token` 或 `PIXELRECEIPT_REVIEWER_TOKEN` | 相同 reviewer 權限；必須與 ingest token 不同，只供明確授權管理用途，不交給模型或 ingest CLI |
@@ -58,12 +58,14 @@ repo 根目錄的 [ingest CLI](../scripts/receipt_api.py) 只有 health／原檔
 | `POST /v2/mobile/login`、`/logout` | 原生 reviewer 登入／單 session 登出；既有密碼 verifier、HTTPS／Origin、rate limit |
 | `GET /v1/devices`、`DELETE /v1/devices/{device_id}` | reviewer 的手機裝置列表／整部裝置撤銷 |
 | `POST /v1/intakes`、`GET /v1/intakes`、`/{id}` | 不可變收件／查詢；recognition status 與正式 draft_status、ledger_id、ledger_status 分開 |
+| `POST /v1/intakes/{id}/delete` | reviewer、Idempotency-Key；必填 expected_draft_revision（整數或 null）及 reason；回完整 deleted intake；[schema](delete-intake.schema.json) |
 | `GET /v1/recognition` | 已配置辨識來源的可用狀態，不代表辨識品質 |
 | `GET /v1/mobile/release`、`/apk` | 認證 metadata／APK 下載，未配置時404 |
 | `POST /v1/evidence` | 原始 JPEG／PNG／WebP／PDF binary body；不是 multipart、URL 或伺服器任意路徑；回 SHA-256／大小／頁數／尺寸 |
 | `GET /v1/evidence/{sha256}`、`.../content` | metadata／hash 驗證後的原 bytes attachment |
 | `POST /v1/drafts` | [CreateDraft schema](create-draft.schema.json)，`Idempotency-Key` 必填；201 新建、200 重送，初始 `needs_review` |
 | `GET /v1/drafts`、`/{id}`、`/{id}/history` | 候選／原始候選／證據／來源／revision／歷史；列表可篩 needs_review／confirmed／voided |
+| `POST /v1/drafts/{id}/delete` | reviewer、Idempotency-Key、expected_revision／reason；回 deleted draft；[schema](delete-draft.schema.json) |
 | `PUT /v1/drafts/{id}/review` | reviewer 的舊候選替換契約；會清除完整核對／用途分配，不能用它直接入帳；[schema](review-draft.schema.json) |
 | `PUT /v2/drafts/{id}/review` | reviewer 完整核對、完整性與用途分配；revision CAS；[schema](review-receipt.schema.json) |
 | `POST /v2/drafts/{id}/confirm` | reviewer、CAS、Idempotency-Key；依確定性 gate 建 immutable ledger snapshot；[schema](confirm-receipt.schema.json) |
@@ -89,7 +91,13 @@ repo 根目錄的 [ingest CLI](../scripts/receipt_api.py) 只有 health／原檔
 
 原圖保持 bytes，以 SHA-256 去重；同檔可參照於不同交易，去重不會自行合併收據。頁面由呼叫者明確分組；PDF 多頁不自動等於同一交易。來源 provider／model／label 是 provenance 敘述，不證明有執行模型或人類確認。原始候選／證據／source 保留，不隨人工修訂覆寫。
 
-草稿 key 為 1–128 字元、首字元英數、其餘英數或 `._:-`；同 key 同內容回現行版本，換內容 409；review CAS 過期回 409，須重讀後由人處理，不自動覆蓋。confirm／void／product key 各有持久操作關聯；unknown outcome 保留原 key／目標／內容回查，不更換 key 或另建交易重送。
+草稿 key 為 1–128 字元、首字元英數、其餘英數或 `._:-`；同 key 同內容回現行版本，換內容 409；review CAS 過期回 409，須重讀後由人處理，不自動覆蓋。confirm／delete／void／product key 各有持久操作關聯；unknown outcome 保留原 key／目標／內容回查，不更換 key 或另建交易重送。
+
+刪除是持久 tombstone，不移除原圖、候選、歷史或資料列，也沒有公開復原按鈕。`POST /v1/intakes/{id}/delete` 的 `expected_draft_revision` **必填**：沒有 linked draft 才能用 null，有 draft 必須是該草稿目前 revision；`reason` 為 1–1000 字元非空白文字，App 未填時凍結送出 `未註明`。成功與同 key／同 body 重送皆回 200 完整 intake，`status=deleted`、`polling_finished=true`；linked draft 同交易標 `deleted`、revision +1，原因存入歷史。draft-only 可用 `/v1/drafts/{id}/delete`，必填整數 `expected_revision` 及相同 reason；若有正式 intake 關聯也一起 tombstone，不根據不可信 source.label 推斷關聯。
+
+已知 deleted ID 的 GET 保留完整 tombstone，重送原 create key 也回 tombstone；預設 intake／draft 列表在分頁前排除 deleted。不同 body／target／operation 重用 mutation key、過期 revision、已刪除改用新 key、已入帳或已作廢的草稿皆回 409；未知 ID 回 404。結果未知時先 GET 原 ID，重試只沿用原 key 與完全相同 body。無草稿 intake 的原因保存在既有 mutations TEXT 內部 request／response journal，不更動對外 DTO。review、confirm、delete 的檢查／更新／journal 由 `BEGIN IMMEDIATE` 序列化；schema 仍為 4，無 migration。舊 split-transaction worker 若留下精確 `intake:<id>` key 的草稿卻沒有 FK 連結，兩種 delete 都回 `409 intake_draft_reconciliation_required`；不依 label 猜所有權，也不留下「intake 已刪、孤立草稿仍可入帳」的成功狀態。合法舊結果可用既有 worker 沿相同 derived key／完整 body digest 重跑完成原子連結，再以目前 revision 刪除；內容衝突須先人工核對。
+
+辨識 worker 在 dispatch 前以 guarded write 保存 intent；deleted row 不再 claim、poll 或更新。已 dispatch 的工作可能仍在 provider 執行，刪除不承諾取消或退回配額；晚到的成功、錯誤及 raw result 都不能覆寫 tombstone。建立 purchase draft 與連結 intake 是同一交易，失敗會回滾草稿；沿用歷史精確的 `intake:<id>` derived key，避免當中斷重跑時新增孤立草稿。
 
 單檔上限 20 MiB；JPEG／PNG／WebP 需 MIME 相符、完整解碼、單幀、每邊不超過 20000、最多 50M 像素；PDF 最多 100 頁，拒絕加密、actions／JavaScript／附件／表單／annotations。上傳在讀 body **之前**取得單一 slot；忙碌 503 `inspection_busy`、body 超時 60 秒回 408 `upload_timeout`。Linux parser 子程序 CPU soft／hard 5／6 秒、AS 384 MiB、wall 10 秒、CORE 0、NOFILE 32，最小 env、不繼承憑證、取消／timeout kill+reap，不做 in-process fallback。這是資源隔離，非完整 sandbox；合法大檔也可能遭資源拒絕，整體記憶體仍需 systemd cap 與實機驗證。
 
@@ -106,10 +114,11 @@ uv sync --locked
 uv run --locked ruff check src tests
 uv run --locked ruff format --check src tests
 uv run --locked pytest -q
+node --test src/pixelreceipt_backend/static/tests/*.test.mjs
 ```
 
 repo 根目錄另跑 `python3 -m unittest discover -s scripts/tests -v`；真實 v3 Store 備份回歸需使用已安裝此 backend 的 Python（例如 `uv run --project backend --locked python -m unittest discover -s scripts/tests -p test_backup_store_v3.py -v`），標準庫環境沒有安裝 backend 時該項會明確 skip。打包工具只建立 allowlist review candidate，SHA 完整性不等於功能驗收；不夾帶 runtime／私人資料，也不自行部署。
 
-本版後端 **283 tests 通過**；Android **304 tests**、嚴格 lint 與 APK 建置通過。公開 scripts 測試 **32 passed／1 historical migration skipped**；該歷史案例需要隔離的舊 v3 runtime 與外部凍結 v4 source，不屬於一般 current-runtime 測試。私有主機部署工具測試不列為公開 release gate。
+本次後端 **313 tests 通過**，Ruff 靜態／格式檢查與 Dashboard **39 tests** 通過。Android 同版整合驗證由原生發行 gate 核對；既有 0.5.0 的 304 tests 證據不代表此版手機已更新。公開 scripts 測試 **32 passed／1 historical migration skipped**；該歷史案例需要隔離的舊 v3 runtime 與外部凍結 v4 source，不屬於一般 current-runtime 測試。私有主機部署工具測試不列為公開 release gate。
 
 測試使用合成 bytes／文字與隔離資料庫，不能代替真實辨識品質、正式資料還原演練或真人帳務接受。ASUS 後端與0.5.0認證 APK 下載已部署，手機更新與人工接受待驗；當前公開範圍見 [發行說明](../docs/RELEASE_v0.5.0.md)。
