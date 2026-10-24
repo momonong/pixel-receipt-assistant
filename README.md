@@ -17,6 +17,10 @@ PixelReceipt **0.5.0／code 7** 是原生 Android 收件與記帳 App：
 
 完整操作、缺照片、差額與版本衝突處理見 [手機使用說明](docs/MOBILE_APP.md)。現行 App ID 為 `com.momonong.pixelreceipt.mobile`；舊 `com.momonong.pixelreceipt` App 資料不會自動搬移。
 
+## 介面預覽
+
+[收據操作預覽與測試路徑](docs/previews/receipt-actions/README.md) 提供可離線開啟的刪除／作廢範例互動，使用虛構資料，尚未接入正式 App 或真實帳本。
+
 ## 架構與契約
 
 | 部分 | 責任 |
