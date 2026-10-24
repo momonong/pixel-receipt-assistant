@@ -1,0 +1,20 @@
+{
+  "scope": "fresh synthetic Store + actual authenticated HTTP responses",
+  "schema_version": 4,
+  "before_personal_yuan": 140,
+  "after_personal_yuan": 45,
+  "receipts": "synthetic only",
+  "files": [
+    "draft-deleted.json",
+    "draft-list-after.json",
+    "intake-deleted-linked-draft.json",
+    "intake-deleted-no-draft.json",
+    "intake-list-after.json",
+    "ledger-active-45.json",
+    "ledger-active.json",
+    "ledger-list-after.json",
+    "ledger-voided.json",
+    "overview-after.json",
+    "overview-before.json"
+  ]
+}

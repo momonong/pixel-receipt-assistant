@@ -1,8 +1,8 @@
-# PixelReceipt 手機使用說明（0.5.0）
+# PixelReceipt 手機使用說明（0.5.1）
 
-0.5.0／versionCode 7 將核對、用途分配、確認入帳與中央帳本留在 Android App。中央帳本是正式紀錄；本機保留原圖與待同步草稿。新版 application ID 沿用 `com.momonong.pixelreceipt.mobile`，不讀取或遷移舊 `com.momonong.pixelreceipt` App 資料。
+0.5.1／versionCode 8 將核對、用途分配、確認入帳與中央帳本留在 Android App。中央帳本是正式紀錄；本機保留原圖與待同步草稿。新版 application ID 沿用 `com.momonong.pixelreceipt.mobile`，不讀取或遷移舊 `com.momonong.pixelreceipt` App 資料。
 
-本版後端與認證 APK 下載已部署。從 [中央服務](https://momonong.me/receipts/) 登入後取得更新；手機安裝與人工接受待驗。版本、APK SHA-256 與驗證範圍見 [0.5.0 發行說明](RELEASE_v0.5.0.md)。
+0.5.1 新增原生刪除與作廢；Git 發布、正式部署、永久簽章 APK 與手機更新的完成狀態另行核對，不以本機工程驗證代替。版本與驗證範圍見 [0.5.1 發行說明](RELEASE_v0.5.1.md)；前版已部署紀錄保留於 [0.5.0 發行說明](RELEASE_v0.5.0.md)。
 
 ## 日常使用
 
@@ -15,6 +15,19 @@
 7. 中央正式確認後，詳情、收件匣與帳本都顯示「已完成」。點開帳目可看品項、用途與個人支出／代買金額；作廢紀錄明確標示「已作廢」，保留原入帳內容供查閱。
 
 首頁提供收件匣、帳本、使用說明；其他頁面右上方也能開啟說明，返回後保留原內容與捲動位置。核對與帳本不使用外部瀏覽器或 WebView。
+
+## 刪除收據與作廢帳目
+
+收件匣、收件詳情及帳本的「更多操作」會依目前狀態顯示對應動作。確認視窗列出店家與金額，取消不更動資料；完成後留在原分頁。
+
+- **尚未入帳**：選「刪除收據」再確認。從收件匣移除，不影響帳本支出。這是耐久的邏輯刪除，原圖、原始紀錄與備份保留，介面沒有復原按鈕。
+- **已完成**：選「作廢帳目」，原因預設「未註明」，可選重複入帳或資料有誤。作廢後不計入有效支出，原入帳內容及原因仍保留。收件匣會顯示已作廢；帳本勾選「查看已作廢」可查看歷史。
+- **結果未知**：原目標 ID、原因、revision、key 與 body 會先保存。旋轉、重啟、斷線或連點不建立另一個未知操作。點「查詢刪除結果」或「查詢作廢結果」，先讀原 ID；仍需重試時沿同一份請求送出。
+- **中央版本衝突**：不偷偷採用新 revision 刪除較新內容。已知被中央拒絕的操作保留紀錄；檢查最新狀態後，才能再次明確確認新的操作。未知操作則繼續保留原請求。
+
+照片匯入／核對、草稿保存或入帳結果尚未確認時，先完成核對或查詢原結果。已鎖定但中央 ID 尚不明的收件，需要先沿原收件更新進度；刪除流程不會為了取得 ID 而新送一筆辨識。刪除待確認時不能繼續編輯或入帳。
+
+帳本小卡顯示中央全部有效帳目的個人支出、實付及筆數，不加總手機已載入分頁。歷史列表的載入筆數包含已作廢紀錄，與有效筆數分開標示。操作後更新或失效收件投影、帳本列表、明細及中央統計；刷新失敗時明確顯示「尚未同步」與上次紀錄，請更新帳本。
 
 ## 用途與金額
 
@@ -50,7 +63,8 @@
 - 延用 `noBackupFilesDir/mobile-intake/`、AtomicFile、process／OS file lock、16 MiB 索引上限及 revision 保護；舊 App、歷史 APK 與原資料保留。
 - 原生登入／登出為 `/v2/mobile/login`、`/v2/mobile/logout`；GET draft／ledger 沿用 v1，review PUT／confirm POST 沿用 v2。僅固定 HTTPS origin 與窄化 method/path allowlist，不跟隨 redirect，不記錄 token 或回應本文。
 - 草稿 raw editor、partial-invalid 值、PUT 不確定狀態、最終固定 key/body、已 dispatch 階段均耐久保存。GET 不自動覆寫 dirty editor，autosave 不提交 `complete_by_user`。
-- 帳本分頁 cursor 與任意 detail cache 分開；新回應更新重疊帳目狀態，重新整理第一頁保留可用 detail。
+- 帳本分頁 cursor 與任意 detail cache 分開；刷新保留已載入的分頁範圍，更新重疊帳目狀態，非目前頁面的舊明細失效並於開啟時重新讀取。前景收件查詢沿用節流與輪替上限，不一次查詢全部歷史收件。
+- 刪除 POST 為 `/v1/intakes/{id}/delete` 或 `/v1/drafts/{id}/delete`，作廢為 `/v1/ledger/{id}/void`；三者都要求 reviewer 與固定 Idempotency-Key。中央統計讀取 `/v1/overview`；本機 tombstone 不能被舊投影復活。
 - 沿用現有依賴，沒有新增供應商、背景服務、推論工作或付費呼叫。
 
 離線驗證使用既有 JDK／Android SDK／Gradle cache，單 worker 執行：
@@ -59,4 +73,4 @@
 ./gradlew testDebugUnitTest lintDebug assembleDebug --offline --no-daemon --max-workers=1 --no-parallel
 ```
 
-本版 Android 304 tests、嚴格 lint 與 APK 建置通過。合成收據與真實 Compose/Robolectric native graphics 涵蓋 390dp 及 320dp／150% 字級；這是主機工程與版面證據，實機分享、鍵盤、OEM Keystore、手機更新及真人帳務接受另列。
+本版 Android 335 tests、嚴格 lint 與未簽 APK 建置通過，詳細驗證範圍見 0.5.1 發行說明。合成收據與真實 Compose/Robolectric native graphics 涵蓋 390dp 及 320dp／150% 字級；這是主機工程與版面證據，實機分享、鍵盤、OEM Keystore、手機更新及真人帳務接受另列。

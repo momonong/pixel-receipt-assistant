@@ -1,0 +1,44 @@
+{
+  "id": "aef1f70f-a065-4605-be00-fd53e3106b7a",
+  "schema": "pixelreceipt-mobile-ingest-1",
+  "input": {
+    "engine": "broker",
+    "evidence": [
+      {
+        "notes": "第一張",
+        "role": "receipt",
+        "sha256": "7210d39da6c11007d4a5659e3426d7c7d9bc4f7cf1d8045ceb006c2f370db9e6"
+      }
+    ],
+    "purpose": "purchase",
+    "schema": "pixelreceipt-mobile-ingest-1",
+    "user_notes": "<script>untrusted</script> 牙膏幫朋友買，不是來源標籤"
+  },
+  "evidence_snapshot": [
+    {
+      "created_at": "2026-10-24T18:57:43.594771+00:00",
+      "height": 8,
+      "media_type": "image/png",
+      "notes": "第一張",
+      "page_count": 1,
+      "role": "receipt",
+      "sha256": "7210d39da6c11007d4a5659e3426d7c7d9bc4f7cf1d8045ceb006c2f370db9e6",
+      "size_bytes": 78,
+      "width": 10
+    }
+  ],
+  "status": "deleted",
+  "error_code": null,
+  "job_key": "pixelreceipt-710ec14b73084f51b1ad539d77ee2409",
+  "draft_id": "29114d2c-79af-459b-8daf-43824d3b24fc",
+  "draft_status": "deleted",
+  "ledger_id": null,
+  "ledger_status": null,
+  "reference_candidate": null,
+  "result": {
+    "provider": "synthetic"
+  },
+  "created_at": "2026-10-24T18:57:43.630422+00:00",
+  "updated_at": "2026-10-24T18:57:43.653899+00:00",
+  "polling_finished": true
+}

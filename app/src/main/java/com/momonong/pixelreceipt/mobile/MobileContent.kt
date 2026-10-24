@@ -104,12 +104,15 @@ private fun MobilePrimaryBar(state: MobileUiState, password: String, login: (Str
     }
     val batch = state.batch
     val edit = batch?.let { state.edits[it.id] }
+    val pending = state.mutations.lastOrNull { it.batchId == batch?.id && it.phase == "pending" }?.takeIf { state.page == MobilePage.Detail }
     // Completing an import is a picker action, so submission validation must not trap the user.
     val hint = batch?.takeIf { state.page == MobilePage.Detail && it.editable && it.importComplete }?.let(::validationHint)
     val localUnavailable = batch?.engine == "local" && batch.intakeId == null && state.engines["local"]?.available != true
     val label = when {
         state.busy != null -> state.busy
         !state.writable -> "重試本機儲存"
+        state.page == MobilePage.Detail && batch?.deleted == true -> "返回收件匣"
+        pending != null -> "查詢${pending.resultLabel}結果"
         edit != null -> if (edit.error != null) "重試儲存目前編輯" else "正在保存編輯…"
         state.page == MobilePage.Settings -> if (state.signedIn && state.reviewer) "返回收件" else "登入此裝置"
         state.page == MobilePage.Inbox || batch == null -> "新增收件・選照片"
@@ -135,6 +138,8 @@ private fun MobilePrimaryBar(state: MobileUiState, password: String, login: (Str
                     hint != null -> hint
                     state.page == MobilePage.Settings -> if (state.signedIn && state.reviewer) "可在 App 內核對、入帳與查看帳本。" else "使用既有帳本密碼，送出後清空輸入。"
                     state.page == MobilePage.Inbox -> "一批照片，一筆收件；由你核對後入帳。"
+                    batch?.deleted == true -> "收據已刪除，原圖與歷史資料保留。"
+                    pending != null -> "${pending.resultLabel}結果尚未確認；將查詢原 ID，沿用原請求。"
                     batch?.importComplete == false -> "請重新選取完整批次，保留已匯入原圖。"
                     batch?.ledgerId != null -> if (batch.ledgerStatus == "voided") "中央已作廢，原入帳內容保留。" else "中央已確認入帳，可查看品項與用途。"
                     batch?.intakeId != null && batch.status == "succeeded" -> "在 App 內核對金額與用途，再確認入帳。"
@@ -145,6 +150,8 @@ private fun MobilePrimaryBar(state: MobileUiState, password: String, login: (Str
                 Button(onClick = {
                     when {
                         !state.writable || edit != null -> actions.retrySave(batch?.id)
+                        state.page == MobilePage.Detail && batch?.deleted == true -> actions.select(null)
+                        pending != null -> actions.retryReceiptMutation(pending)
                         state.page == MobilePage.Settings -> if (state.signedIn && state.reviewer) actions.back() else login(password)
                         state.page == MobilePage.Inbox || batch == null -> actions.pick(null)
                         !batch.importComplete -> actions.pick(batch.id)
@@ -172,12 +179,13 @@ private fun MobileInbox(state: MobileUiState, images: ImageStore, actions: Mobil
             Column(Modifier.padding(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("收件匣", style = MaterialTheme.typography.headlineMedium)
                 FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("中央收件匣 · ${state.batches.size} 筆收件", style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
+                    Text("中央收件匣 · ${state.batches.count { !it.deleted }} 筆收件", style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
                     Text(if (state.signedIn) "裝置已登入" else "尚未登入", style = MaterialTheme.typography.bodySmall, color = MobileMuted)
                 }
             }
         }
         state.message?.let { item { MobileNotice(it) } }
+        state.accountingError?.let { item { MobileNotice(it) } }
         if (!state.ready) item {
             Surface(color = Color.White, shape = RoundedCornerShape(20.dp)) {
                 Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -186,7 +194,7 @@ private fun MobileInbox(state: MobileUiState, images: ImageStore, actions: Mobil
                 }
             }
         }
-        if (state.ready && state.batches.isEmpty()) item {
+        if (state.ready && state.batches.none { !it.deleted }) item {
             Surface(color = Color.White, shape = RoundedCornerShape(20.dp)) {
                 Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     ReceiptMark(Modifier.size(44.dp).padding(bottom = 2.dp))
@@ -198,17 +206,18 @@ private fun MobileInbox(state: MobileUiState, images: ImageStore, actions: Mobil
                 }
             }
         }
-        items(state.batches, key = { it.id }) { batch ->
+        items(state.batches.filter { !it.deleted }, key = { it.id }) { batch ->
             Surface(shape = RoundedCornerShape(20.dp), color = Color.White, modifier = Modifier.fillMaxWidth()
                 .clickable { actions.select(batch.id) }.testTag("mobile-batch-${batch.id}")) {
                 Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     ReceiptThumb(batch.images.firstOrNull(), images, Modifier.width(76.dp).height(106.dp))
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        StatusTag(mobileStatus(batch), problem = batch.status in setOf("failed", "unknown", "unavailable") || !batch.importComplete)
+                        StatusTag(state.mutations.lastOrNull { it.batchId == batch.id && it.phase == "pending" }?.let { "${it.resultLabel}結果待確認" } ?: mobileStatus(batch), problem = batch.status in setOf("failed", "unknown", "unavailable") || !batch.importComplete)
                         Text(batchTitle(batch), style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text("${batch.images.size} 張照片 · ${SimpleDateFormat("M/d HH:mm", Locale.TAIWAN).format(Date(batch.createdAt))}", style = MaterialTheme.typography.bodySmall, color = MobileMuted)
                         Text(mobileNextStep(batch), style = MaterialTheme.typography.labelLarge, color = MobileTealInk)
                     }
+                    ReceiptActionMenu(batch, null, state, actions)
                 }
             }
         }

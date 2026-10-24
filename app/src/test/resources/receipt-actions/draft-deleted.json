@@ -1,0 +1,131 @@
+{
+  "id": "29114d2c-79af-459b-8daf-43824d3b24fc",
+  "revision": 2,
+  "status": "deleted",
+  "ledger_id": null,
+  "review_document": null,
+  "calculation": {
+    "ruleset": "pixelreceipt-central-ledger-1",
+    "basis_sha256": "83db3d3f4f4b1fa5fa09d0f8714271231a3ad28efd4c7fe5d5260cbebf4b0503",
+    "ready": false,
+    "blockers": [
+      {
+        "code": "receipt_completeness_unconfirmed"
+      },
+      {
+        "code": "item_quantity_unknown",
+        "item_position": 0
+      },
+      {
+        "code": "adjustment_amount_unknown",
+        "adjustment_position": 0
+      },
+      {
+        "code": "adjustment_scope_unknown",
+        "adjustment_position": 0
+      },
+      {
+        "code": "adjustment_effect_unknown",
+        "adjustment_position": 0
+      },
+      {
+        "code": "item_purpose_unconfirmed",
+        "item_position": 0
+      }
+    ],
+    "reconciliation_status": "indeterminate",
+    "tolerance_yuan": 1,
+    "computed_total_yuan": null,
+    "printed_total_yuan": 100,
+    "allocated_total_yuan": null,
+    "difference_yuan": null,
+    "reconciliation_difference_yuan": null,
+    "expenses_ready": false,
+    "self_yuan": null,
+    "gift_yuan": null,
+    "advance_yuan": null,
+    "personal_yuan": null,
+    "line_shares": [],
+    "adjustment_shares": []
+  },
+  "original_candidate": {
+    "adjustments": [
+      {
+        "amount_effect": null,
+        "amount_yuan": null,
+        "direction": "subtract",
+        "item_positions": [],
+        "raw_label": "未知適用範圍的折扣",
+        "scope": null
+      }
+    ],
+    "amount_unit": "TWD_YUAN",
+    "currency": "TWD",
+    "items": [
+      {
+        "brand": null,
+        "content_quantity": {
+          "unit": "ml",
+          "value_decimal": "500"
+        },
+        "printed_line_total_yuan": 100,
+        "printed_unit_price_yuan": null,
+        "quantity": null,
+        "raw_name": "合成茶飲",
+        "specification": "500ml"
+      }
+    ],
+    "merchant": "合成測試商店",
+    "printed_total_yuan": 100,
+    "receipt_date": "2026-10-01",
+    "schema": "pixelreceipt-central-candidate-1"
+  },
+  "candidate": {
+    "adjustments": [
+      {
+        "amount_effect": null,
+        "amount_yuan": null,
+        "direction": "subtract",
+        "item_positions": [],
+        "raw_label": "未知適用範圍的折扣",
+        "scope": null
+      }
+    ],
+    "amount_unit": "TWD_YUAN",
+    "currency": "TWD",
+    "items": [
+      {
+        "brand": null,
+        "content_quantity": {
+          "unit": "ml",
+          "value_decimal": "500"
+        },
+        "printed_line_total_yuan": 100,
+        "printed_unit_price_yuan": null,
+        "quantity": null,
+        "raw_name": "合成茶飲",
+        "specification": "500ml"
+      }
+    ],
+    "merchant": "合成測試商店",
+    "printed_total_yuan": 100,
+    "receipt_date": "2026-10-01",
+    "schema": "pixelreceipt-central-candidate-1"
+  },
+  "evidence": [
+    {
+      "pages": [
+        1
+      ],
+      "sha256": "7210d39da6c11007d4a5659e3426d7c7d9bc4f7cf1d8045ceb006c2f370db9e6"
+    }
+  ],
+  "source": {
+    "kind": "ai_candidate",
+    "label": "mobile-intake:aef1f70f-a065-4605-be00-fd53e3106b7a",
+    "model": null,
+    "provider": "synthetic"
+  },
+  "created_at": "2026-10-24T18:57:43.641316+00:00",
+  "updated_at": "2026-10-24T18:57:43.653695+00:00"
+}

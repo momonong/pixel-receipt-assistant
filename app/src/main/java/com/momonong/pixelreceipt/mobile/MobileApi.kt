@@ -29,6 +29,10 @@ interface MobileApi {
     suspend fun confirm(token: String, id: String, attempt: FrozenConfirmation): String = throw UnsupportedOperationException()
     suspend fun ledger(token: String, offset: Int = 0): String = throw UnsupportedOperationException()
     suspend fun ledgerDetail(token: String, id: String): String = throw UnsupportedOperationException()
+    suspend fun deleteIntake(token: String, id: String, attempt: ReceiptMutation): ServerIntake = throw UnsupportedOperationException()
+    suspend fun deleteDraft(token: String, id: String, attempt: ReceiptMutation): String = throw UnsupportedOperationException()
+    suspend fun voidLedger(token: String, id: String, attempt: ReceiptMutation): String = throw UnsupportedOperationException()
+    suspend fun overview(token: String): String = throw UnsupportedOperationException()
 }
 
 /** Deliberately not a data class: neither body nor Bearer may appear in debug strings. */
@@ -63,7 +67,7 @@ internal class HttpsMobileTransport(private val connectionFactory: (URL) -> Http
                     http.useCaches = false
                     http.requestMethod = request.method
                     http.setRequestProperty("Accept", "application/json")
-                    http.setRequestProperty("User-Agent", "PixelReceipt-Android/0.5.0")
+                    http.setRequestProperty("User-Agent", "PixelReceipt-Android/0.5.1")
                     request.token?.let { http.setRequestProperty("Authorization", "Bearer $it") }
                     request.idempotencyKey?.let { http.setRequestProperty("Idempotency-Key", it) }
                     if (request.method in setOf("POST", "PUT")) {
@@ -163,6 +167,19 @@ class HttpsMobileApi internal constructor(private val transport: MobileTransport
     override suspend fun ledgerDetail(token: String, id: String): String {
         require(validUuid(id)); return transport.call(MobileRequest("v1/ledger/$id", token = token)).also { check(ledgerObject(it).text("id") == id) }
     }
+    override suspend fun deleteIntake(token: String, id: String, attempt: ReceiptMutation): ServerIntake {
+        require(attempt.kind == "intake_delete" && attempt.targetId == id); validateMutation(attempt)
+        return parseIntake(transport.call(MobileRequest("v1/intakes/$id/delete", "POST", token, json = attempt.body, idempotencyKey = attempt.key))).also { check(it.id == id && it.status == "deleted") }
+    }
+    override suspend fun deleteDraft(token: String, id: String, attempt: ReceiptMutation): String {
+        require(attempt.kind == "draft_delete" && attempt.targetId == id); validateMutation(attempt)
+        return transport.call(MobileRequest("v1/drafts/$id/delete", "POST", token, json = attempt.body, idempotencyKey = attempt.key)).also { check(draftObject(it).text("id") == id && draftObject(it).text("status") == "deleted") }
+    }
+    override suspend fun voidLedger(token: String, id: String, attempt: ReceiptMutation): String {
+        require(attempt.kind == "ledger_void" && attempt.targetId == id); validateMutation(attempt)
+        return transport.call(MobileRequest("v1/ledger/$id/void", "POST", token, json = attempt.body, idempotencyKey = attempt.key)).also { check(ledgerObject(it).text("id") == id && ledgerObject(it).text("status") == "voided") }
+    }
+    override suspend fun overview(token: String): String = transport.call(MobileRequest("v1/overview", token = token)).also { overviewObject(it) }
     private fun objectJson(body: String): JsonObject = JsonParser.parseString(body).asJsonObject
     private fun parseIntake(body: String): ServerIntake {
         val json = objectJson(body)
@@ -176,7 +193,7 @@ class HttpsMobileApi internal constructor(private val transport: MobileTransport
                 json[name]?.takeUnless { it.isJsonNull }?.asString?.takeIf { it.length <= 256 }?.let { addProperty(name, it) }
             }
         }.toString()
-        val draftStatus = json["draft_status"]?.takeUnless { it.isJsonNull }?.asString?.also { check(it in setOf("needs_review", "confirmed", "voided")) }
+        val draftStatus = json["draft_status"]?.takeUnless { it.isJsonNull }?.asString?.also { check(it in setOf("needs_review", "confirmed", "voided", "deleted")) }
         val ledgerId = json["ledger_id"]?.takeUnless { it.isJsonNull }?.asString?.also { check(validUuid(it)) }
         val ledgerStatus = json["ledger_status"]?.takeUnless { it.isJsonNull }?.asString?.also { check(it in setOf("active", "voided")) }
         return ServerIntake(id, status, draft, summary, draftStatus, ledgerId, ledgerStatus)
@@ -187,10 +204,10 @@ class HttpsMobileApi internal constructor(private val transport: MobileTransport
 internal fun allowedMobileRequest(path: String, method: String): Boolean {
     val uuid = "[0-9a-fA-F-]{36}"
     return when (method) {
-        "GET" -> path == "v1/recognition" || path.matches(Regex("v1/(intakes|drafts|ledger)/$uuid")) ||
+        "GET" -> path in setOf("v1/recognition", "v1/overview") || path.matches(Regex("v1/(intakes|drafts|ledger)/$uuid")) ||
             path.matches(Regex("v1/ledger\\?limit=20&offset=(0|[1-9][0-9]{0,5})"))
         "POST" -> path in setOf("v1/mobile/logout", "v2/mobile/login", "v2/mobile/logout", "v1/evidence", "v1/intakes") ||
-            path.matches(Regex("v2/drafts/$uuid/confirm"))
+            path.matches(Regex("v2/drafts/$uuid/confirm")) || path.matches(Regex("v1/(intakes|drafts)/$uuid/delete")) || path.matches(Regex("v1/ledger/$uuid/void"))
         "PUT" -> path.matches(Regex("v2/drafts/$uuid/review"))
         else -> false
     }

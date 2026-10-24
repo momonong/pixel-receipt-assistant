@@ -45,7 +45,7 @@ internal fun strictLong(value: JsonElement?, minimum: Long = 0, maximum: Long = 
 internal fun draftObject(json: String): JsonObject = jsonObject(json).also {
     check(validUuid(it.text("id")))
     strictLong(it["revision"], 1, Long.MAX_VALUE - 2)
-    check(it.text("status") in setOf("needs_review", "confirmed", "voided"))
+    check(it.text("status") in setOf("needs_review", "confirmed", "voided", "deleted"))
     check(it.getAsJsonObject("candidate").text("schema") == "pixelreceipt-central-candidate-1")
     check(it.getAsJsonObject("calculation") != null)
     val candidate = it.getAsJsonObject("candidate")

@@ -33,9 +33,12 @@ internal fun MobileDetail(state: MobileUiState, images: ImageStore, actions: Mob
     val itemKey = "batch:${batch.id}"
     LazyColumn(modifier.testTag("mobile-detail"), state = list, contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item(key = "$itemKey:header") {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(if (batch.editable) "準備這筆收件" else progressTitle(batch), style = MaterialTheme.typography.headlineSmall)
                 Text(if (batch.editable) "${batch.images.size} 張原圖與補充說明，會一起送交辨識。" else resultExplanation(batch), color = MobileMuted, style = MaterialTheme.typography.bodyMedium)
+              }
+              ReceiptActionMenu(batch, null, state, actions)
             }
         }
         if (state.busy != null) item(key = "$itemKey:busy") {
@@ -47,7 +50,8 @@ internal fun MobileDetail(state: MobileUiState, images: ImageStore, actions: Mob
                 }
             }
         }
-        listOfNotNull(batch.message, state.message).distinct().forEach { message -> item(key = "$itemKey:notice:$message") { MobileNotice(message) } }
+        listOfNotNull(batch.message, state.message, state.accountingError).distinct().forEach { message -> item(key = "$itemKey:notice:$message") { MobileNotice(message) } }
+        state.mutations.lastOrNull { it.batchId == batch.id }?.error?.let { error -> item(key = "$itemKey:action-error") { MobileNotice(error) } }
         state.edits[batch.id]?.let { edit -> item(key = "$itemKey:saving") {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 MobileNotice(edit.error ?: "正在保存目前編輯，完成前不會送出。")
@@ -230,6 +234,7 @@ private fun MilestoneRow(title: String, detail: String, done: Boolean) {
 }
 
 private fun progressTitle(batch: MobileBatch): String = when {
+    batch.deleted -> "這筆收據已刪除"
     batch.ledgerStatus == "voided" || batch.draftStatus == "voided" -> "這筆帳目已作廢"
     batch.ledgerId != null || batch.draftStatus == "confirmed" -> "這筆消費已完成"
     else -> when (batch.status) {
@@ -242,6 +247,7 @@ private fun progressTitle(batch: MobileBatch): String = when {
 }
 
 private fun resultExplanation(batch: MobileBatch): String = when {
+    batch.deleted -> "原圖與歷史資料保留；這筆不會再次送出或入帳。"
     batch.ledgerStatus == "voided" || batch.draftStatus == "voided" -> "中央已作廢，原入帳內容保留供查閱。"
     batch.ledgerId != null || batch.draftStatus == "confirmed" -> "中央已確認入帳，可在 App 查看帳目明細。"
     else -> when (batch.status) {

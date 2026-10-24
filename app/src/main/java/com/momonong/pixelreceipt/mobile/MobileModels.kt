@@ -6,7 +6,7 @@ import java.security.MessageDigest
 import java.util.UUID
 
 internal val imageRoles = linkedMapOf("receipt" to "收據", "price_tag" to "價標", "promotion" to "促銷", "menu" to "菜單", "other" to "其他")
-internal val intakeStatuses = setOf("queued", "preparing", "submitting", "processing", "succeeded", "failed", "unavailable", "unknown")
+internal val intakeStatuses = setOf("queued", "preparing", "submitting", "processing", "succeeded", "failed", "unavailable", "unknown", "deleted")
 internal fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 internal fun validUuid(value: String): Boolean = runCatching { UUID.fromString(value).toString() == value.lowercase() }.getOrDefault(false)
 
@@ -41,16 +41,19 @@ data class MobileBatch(
     val ledgerId: String? = null,
     val ledgerStatus: String? = null,
     val review: MobileReview? = null,
+    val deletedAt: Long? = null,
 ) {
-    val editable: Boolean get() = frozen == null && intakeId == null
+    val deleted: Boolean get() = deletedAt != null || status == "deleted" || draftStatus == "deleted"
+    val editable: Boolean get() = !deleted && frozen == null && intakeId == null
 }
-data class MobileState(val deviceId: String, val batches: List<MobileBatch> = emptyList(), val ledgerJson: String? = null, val ledgerUpdatedAt: Long? = null, val ledgerDetailsJson: String? = null, val ledgerNextOffset: Int? = null)
+data class MobileState(val deviceId: String, val batches: List<MobileBatch> = emptyList(), val ledgerJson: String? = null, val ledgerUpdatedAt: Long? = null, val ledgerDetailsJson: String? = null, val ledgerNextOffset: Int? = null, val mutations: List<ReceiptMutation>? = null, val overviewJson: String? = null, val accountingStale: Boolean? = null, val accountingError: String? = null)
 data class EngineAvailability(val available: Boolean, val reason: String?)
 data class ServerIntake(val id: String, val status: String, val draftId: String?, val rawJson: String, val draftStatus: String? = null, val ledgerId: String? = null, val ledgerStatus: String? = null)
 class MobileFailure(val userMessage: String) : Exception(userMessage)
 
 internal fun freezeIntake(batch: MobileBatch): FrozenIntake {
     batch.frozen?.let { return it }
+    if (batch.deleted) throw MobileFailure("這筆收據已刪除，不會再次送出。")
     require(batch.importComplete && batch.importReview?.requiresConfirmation != true) { "照片尚未保存完成，請先補齊或重新分享。" }
     require(batch.images.size in 1..20) { "每筆收件需要 1 至 20 張圖片。" }
     require(batch.images.map { it.hash }.distinct().size == batch.images.size) { "同一筆收件不能包含重複圖片。" }
@@ -80,6 +83,7 @@ internal fun freezeIntake(batch: MobileBatch): FrozenIntake {
 }
 
 internal fun statusLabel(status: String?): String = when (status) {
+    "deleted" -> "已刪除"
     "queued" -> "中央已保存，等待處理"
     "preparing" -> "正在準備圖片"
     "submitting" -> "正在送交辨識來源"
@@ -97,3 +101,29 @@ internal fun requireAssociationReview(old: MobileBatch, next: MobileBatch): Mobi
         importComplete = false,
         importReview = (next.importReview ?: MobileImportReview()).copy(requiresConfirmation = true),
     )
+
+/** Immutable request intent is stored before dispatch. Completed and rejected records remain as history. */
+data class ReceiptMutation(
+    val kind: String, val targetId: String, val batchId: String?, val key: String, val body: String,
+    val bodySha256: String = sha256(body.toByteArray(Charsets.UTF_8)),
+    val phase: String = "pending", val error: String? = null,
+) {
+    override fun toString() = "ReceiptMutation(kind=$kind, phase=$phase; body and key redacted)"
+}
+internal fun MobileState.pendingMutation(batchId: String): ReceiptMutation? = mutations.orEmpty().lastOrNull { it.batchId == batchId && it.phase == "pending" }
+internal fun MobileState.pendingLedgerMutation(id: String): ReceiptMutation? = mutations.orEmpty().lastOrNull { it.targetId == id && it.kind == "ledger_void" && it.phase == "pending" }
+internal fun validateMutation(value: ReceiptMutation) {
+    check(value.kind in setOf("intake_delete", "draft_delete", "ledger_void") && validUuid(value.targetId) && validUuid(value.key))
+    check(value.batchId == null || validUuid(value.batchId))
+    check(value.phase in setOf("pending", "completed", "rejected"))
+    check(sha256(value.body.toByteArray(Charsets.UTF_8)) == value.bodySha256)
+    val body = jsonObject(value.body)
+    val revision = if (value.kind == "intake_delete") "expected_draft_revision" else "expected_revision"
+    check(body.keySet() == setOf(revision, "reason") && body.has(revision))
+    if (!body[revision].isJsonNull) strictLong(body[revision], 1) else check(value.kind == "intake_delete")
+    check(body["reason"].isJsonPrimitive && body["reason"].asJsonPrimitive.isString && body.text("reason").isNotBlank() && body.text("reason").length <= 1000)
+}
+internal fun overviewObject(json: String): JsonObject = jsonObject(json).also {
+    check(it.text("scope") == "active_confirmed_ledger")
+    listOf("receipt_count", "personal_yuan", "printed_total_yuan").forEach { key -> strictLong(it[key]) }
+}

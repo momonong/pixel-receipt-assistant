@@ -85,7 +85,7 @@ internal fun MobileReviewScreen(state: MobileUiState, images: ImageStore, action
     val editor = review.editor
     val candidate = editor.getAsJsonObject("candidate")
     val errors = reviewErrors(review)
-    val editable = state.busy == null && state.writable && !review.locked && batch.ledgerId == null && batch.draftStatus !in setOf("confirmed", "voided")
+    val editable = !batch.deleted && state.mutations.none { it.batchId == batch.id && it.phase == "pending" } && state.busy == null && state.writable && !review.locked && batch.ledgerId == null && batch.draftStatus !in setOf("confirmed", "voided")
     var headerOpen by rememberSaveable(batch.id) { mutableStateOf(false) }
     var expanded by rememberSaveable(batch.id) { mutableStateOf<String?>(null) }
     var preview by rememberSaveable(batch.id) { mutableStateOf<String?>(null) }
