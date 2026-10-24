@@ -1,0 +1,14 @@
+{
+  "scope": "active_confirmed_ledger",
+  "date_from": null,
+  "date_to": null,
+  "receipt_count": 1,
+  "printed_total_yuan": 45,
+  "allocated_total_yuan": 45,
+  "self_yuan": 45,
+  "gift_yuan": 0,
+  "advance_yuan": 0,
+  "personal_yuan": 45,
+  "difference_yuan": 0,
+  "explicit_discount_yuan": 0
+}

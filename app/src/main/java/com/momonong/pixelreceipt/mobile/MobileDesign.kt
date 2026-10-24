@@ -61,6 +61,7 @@ internal fun ReceiptMark(modifier: Modifier = Modifier, color: Color = MobileTea
 }
 
 internal fun mobileStatus(batch: MobileBatch): String = when {
+    batch.deleted -> "已刪除"
     !batch.importComplete -> "待補照片"
     batch.ledgerStatus == "voided" || batch.draftStatus == "voided" -> "已作廢"
     batch.ledgerStatus == "active" || batch.draftStatus == "confirmed" -> "已完成"
@@ -74,6 +75,7 @@ internal fun mobileStatus(batch: MobileBatch): String = when {
 }
 
 internal fun mobileNextStep(batch: MobileBatch): String = when {
+    batch.deleted -> "返回收件匣"
     !batch.importComplete -> "補齊照片"
     batch.ledgerStatus == "voided" || batch.draftStatus == "voided" -> "查看作廢紀錄"
     batch.ledgerStatus == "active" || batch.draftStatus == "confirmed" -> "查看已完成帳目"

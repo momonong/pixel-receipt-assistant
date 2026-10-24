@@ -111,7 +111,9 @@ class MobileRepository(
         operation.withLock {
             try {
                 // Disk commit precedes every network write. An uncertain response never changes this key/body.
-                val batch = store.freeze(id, expectedRevision)
+                if (store.batch(id).deleted) return@withLock store.batch(id)
+                val current = store.batch(id)
+                val batch = if (current.intakeId != null) current else store.freeze(id, expectedRevision)
                 val result = authenticated { token ->
                     if (batch.intakeId != null) api.status(token, batch.intakeId)
                     else {
@@ -125,10 +127,7 @@ class MobileRepository(
                         api.submit(token, batch.frozen!!)
                     }
                 }
-                store.update(id) { old ->
-                    check(old.frozen == batch.frozen)
-                    old.copy(intakeId = result.id, status = result.status, draftId = result.draftId, serverJson = result.rawJson, message = null, draftStatus = result.draftStatus, ledgerId = result.ledgerId, ledgerStatus = result.ledgerStatus)
-                }
+                applyIntake(id, result)
             } catch (cancelled: CancellationException) {
                 withContext(NonCancellable) { runCatching { store.update(id) { it.copy(message = "同步已停止；中央可能已收件。原圖及原請求已保存，下次沿原請求同步。") } } }
                 throw cancelled
@@ -148,6 +147,8 @@ class MobileRepository(
     }
     private suspend fun applyRemote(id: String, remote: String): MobileBatch {
         val draft = draftObject(remote)
+        if (store.batch(id).deleted) return store.batch(id)
+        if (draft.text("status") == "deleted") return tombstone(id)
         val ledgerId = draft.text("ledger_id").takeIf { validUuid(it) }
         val entry = ledgerId?.let { authenticated { token -> api.ledgerDetail(token, it) } }
         if (entry != null) {
@@ -164,14 +165,15 @@ class MobileRepository(
                 draft["revision"].asLong != previous.draft["revision"].asLong -> createReview(remote)
                 else -> previous.copy(serverJson = remote)
             }
-            old.copy(review = review, draftStatus = draft.text("status"), ledgerId = ledgerId,
-                ledgerStatus = entry?.let { ledgerObject(it).text("status") } ?: old.ledgerStatus, message = null)
+            val ledgerStatus = if (old.ledgerStatus == "voided") "voided" else entry?.let { ledgerObject(it).text("status") } ?: old.ledgerStatus
+            old.copy(review = review, draftStatus = if (ledgerStatus == "voided") "voided" else draft.text("status"), ledgerId = old.ledgerId ?: ledgerId,
+                ledgerStatus = ledgerStatus, message = null)
         }
     }
     suspend fun persistReview(id: String, edited: MobileReview, expectedEditRevision: Long): MobileBatch = withContext(Dispatchers.IO) {
         store.update(id) { old ->
             val current = old.review ?: throw MobileFailure("核對內容尚未載入。")
-            if (current.locked || old.ledgerId != null || old.draftStatus in setOf("confirmed", "voided")) throw MobileFailure("正在確認或已入帳，編輯內容已保留。")
+            if (old.deleted || store.state.value?.pendingMutation(id) != null || current.locked || old.ledgerId != null || old.draftStatus in setOf("confirmed", "voided", "deleted")) throw MobileFailure("正在確認或已入帳，編輯內容已保留。")
             if (current.editRevision != expectedEditRevision && !(current.editRevision == edited.editRevision && current.editorJson == edited.editorJson))
                 throw MobileFailure("本機核對內容已更新；目前編輯已保留。")
             old.copy(review = current.copy(editorJson = edited.editorJson, editRevision = edited.editRevision, error = null))
@@ -196,6 +198,7 @@ class MobileRepository(
     suspend fun saveReview(id: String): MobileBatch = withContext(Dispatchers.IO) {
         operation.withLock {
             val batch = store.batch(id)
+            ensureNoReceiptAction(id)
             var review = batch.review ?: throw MobileFailure("核對內容尚未載入。")
             if (review.locked || review.conflict || batch.ledgerId != null || batch.draftStatus in setOf("confirmed", "voided")) return@withLock store.batch(id)
             try {
@@ -216,6 +219,7 @@ class MobileRepository(
     }
     suspend fun confirmReview(id: String): MobileBatch = withContext(Dispatchers.IO) {
         operation.withLock {
+            ensureNoReceiptAction(id)
             var review = store.batch(id).review ?: throw MobileFailure("核對內容尚未載入。")
             if (review.conflict) throw MobileFailure("中央版本有變更，請先重新比對。")
             if (store.batch(id).ledgerId != null || review.draft.text("status") != "needs_review") return@withLock store.batch(id)
@@ -283,11 +287,158 @@ class MobileRepository(
             store.update(id) { old -> old.copy(review = next) }
         }
     }
-    suspend fun ledger(offset: Int = 0): Unit = withContext(Dispatchers.IO) {
-        operation.withLock { val response = authenticated { api.ledger(it, offset) }; store.cacheLedger(response, append = offset > 0) }
+    suspend fun ledger(offset: Int = 0, detailId: String? = null): Unit = withContext(Dispatchers.IO) {
+        operation.withLock {
+            if (offset == 0) refreshAccountingLocked(detailId)
+            else try { val response = authenticated { api.ledger(it, offset) }; store.cacheLedger(response, append = true) }
+            catch (error: Exception) { store.accountingRefresh(true, "帳本尚未同步；顯示上次紀錄。${mobileError(error)}"); throw error }
+        }
     }
     suspend fun ledgerDetail(id: String): String = withContext(Dispatchers.IO) {
-        operation.withLock { authenticated { api.ledgerDetail(it, id) }.also { store.cacheEntry(it) } }
+        operation.withLock {
+            try { authenticated { api.ledgerDetail(it, id) }.also { store.cacheEntry(it) } }
+            catch (error: Exception) { store.accountingRefresh(true, "帳目明細尚未同步；顯示上次紀錄。${mobileError(error)}"); throw error }
+        }
+    }
+    private fun ensureNoReceiptAction(id: String) {
+        if (store.batch(id).deleted) throw MobileFailure("這筆收據已刪除。")
+        if (store.load().pendingMutation(id) != null) throw MobileFailure("刪除結果尚待確認；請先查詢原刪除結果，不能編輯或入帳。")
+    }
+    private fun tombstone(id: String): MobileBatch = store.update(id) { old ->
+        if (old.deleted) old else old.copy(deletedAt = System.currentTimeMillis(), status = "deleted", draftStatus = old.draftId?.let { "deleted" }, message = "收據已刪除；原圖與歷史資料保留。")
+    }
+    private fun applyIntake(id: String, result: ServerIntake): MobileBatch = store.update(id) { old ->
+        if (old.deleted) old else old.copy(intakeId = result.id, status = result.status, draftId = result.draftId, serverJson = result.rawJson,
+            message = null, draftStatus = if (old.draftStatus == "voided" || old.ledgerStatus == "voided") "voided" else if (old.ledgerId != null && result.ledgerId == null) old.draftStatus else result.draftStatus,
+            ledgerId = old.ledgerId ?: result.ledgerId, ledgerStatus = if (old.ledgerStatus == "voided") "voided" else result.ledgerStatus ?: old.ledgerStatus,
+            deletedAt = if (result.status == "deleted" || result.draftStatus == "deleted") System.currentTimeMillis() else old.deletedAt)
+    }
+    /** Called only by an explicit, confirmed user action. A pending intent always wins over new text. */
+    suspend fun deleteBatch(id: String, reason: String = "未註明"): Unit = withContext(Dispatchers.IO) {
+        operation.withLock {
+            val batch = store.batch(id)
+            val pending = store.load().pendingMutation(id)
+            if (batch.deleted) {
+                if (pending != null) store.finishMutation(pending.key, "completed")
+                refreshAfterReceiptAction()
+                return@withLock
+            }
+            if (pending == null) {
+                if (!batch.importComplete || batch.importReview?.requiresConfirmation == true) throw MobileFailure("照片匯入或核對尚未完成；請先完成照片核對，再刪除收據。")
+                if (batch.review?.saveAttempt != null || batch.review?.confirmation != null) throw MobileFailure("保存或入帳結果尚待確認；請先查詢原結果，再刪除收據。")
+                if (batch.ledgerId != null || batch.draftStatus in setOf("confirmed", "voided")) throw MobileFailure("已入帳收據請使用作廢帳目，保留帳本歷史。")
+                if (batch.intakeId == null && batch.draftId == null) {
+                    if (batch.frozen != null) throw MobileFailure("原收件結果尚未確認；請先沿原收件同步取得中央 ID，再刪除。")
+                    tombstone(id)
+                    return@withLock
+                }
+            }
+            val attempt = pending ?: run {
+                val intake = batch.intakeId?.let { authenticated { token -> api.status(token, it) } }
+                if (intake != null) applyIntake(id, intake)
+                if (intake?.status == "deleted") { refreshAfterReceiptAction(); return@withLock }
+                if (intake?.ledgerId != null) throw MobileFailure("這筆已在中央入帳；請更新後使用作廢帳目。")
+                val draftId = intake?.draftId ?: batch.draftId
+                val remote = draftId?.let { authenticated { token -> api.draft(token, it) } }
+                val draft = remote?.let(::draftObject)
+                if (draft?.text("status") == "deleted") { tombstone(id); refreshAfterReceiptAction(); return@withLock }
+                if (draft != null && draft.text("status") != "needs_review") { applyRemote(id, remote); throw MobileFailure("這筆已在中央完成；請更新後使用作廢帳目。") }
+                val knownRevision = batch.review?.draft?.get("revision")?.asLong
+                if (draft != null && knownRevision != null && draft["revision"].asLong != knownRevision) {
+                    applyRemote(id, remote)
+                    throw MobileFailure("中央版本已變更；請先檢查最新內容，再確認刪除。")
+                }
+                val body = com.google.gson.JsonObject().apply {
+                    val field = if (batch.intakeId != null) "expected_draft_revision" else "expected_revision"
+                    add(field, draft?.get("revision") ?: com.google.gson.JsonNull.INSTANCE)
+                    addProperty("reason", reason.trim().ifBlank { "未註明" })
+                }.toString()
+                store.recordMutation(ReceiptMutation(if (batch.intakeId != null) "intake_delete" else "draft_delete", batch.intakeId ?: draftId!!, id, java.util.UUID.randomUUID().toString(), body))
+            }
+            executeReceiptAction(attempt)
+        }
+    }
+    suspend fun voidEntry(id: String, reason: String = "未註明"): Unit = withContext(Dispatchers.IO) {
+        operation.withLock {
+            val state = store.load()
+            val pending = state.pendingLedgerMutation(id)
+            val linked = state.batches.firstOrNull { it.ledgerId == id }
+            if (linked != null && state.pendingMutation(linked.id)?.kind in setOf("intake_delete", "draft_delete")) throw MobileFailure("原刪除結果尚待確認；請先查詢原刪除結果，再作廢帳目。")
+            val attempt = pending ?: run {
+                val remote = authenticated { api.ledgerDetail(it, id) }; store.cacheEntry(remote)
+                val entry = ledgerObject(remote)
+                if (entry.text("status") == "voided") { refreshAfterReceiptAction(id); return@withLock }
+                val known = state.ledgerDetailsJson?.let(::jsonObject)?.get(id)?.asJsonObject
+                    ?: state.ledgerJson?.let(::jsonObject)?.array("entries")?.firstOrNull { it.asJsonObject.text("id") == id }?.asJsonObject
+                if (known != null && known["revision"].asLong != entry["revision"].asLong) throw MobileFailure("中央帳目版本已變更；請檢查最新內容，再確認作廢。")
+                val body = com.google.gson.JsonObject().apply { add("expected_revision", entry["revision"]); addProperty("reason", reason.trim().ifBlank { "未註明" }) }.toString()
+                store.recordMutation(ReceiptMutation("ledger_void", id, state.batches.firstOrNull { it.ledgerId == id || it.draftId == entry.text("draft_id") }?.id,
+                    java.util.UUID.randomUUID().toString(), body))
+            }
+            executeReceiptAction(attempt)
+        }
+    }
+    private suspend fun executeReceiptAction(attempt: ReceiptMutation) {
+        try {
+            // Query only the original target before a retry; never discover it by new ingestion.
+            when (attempt.kind) {
+                "intake_delete" -> {
+                    val current = authenticated { api.status(it, attempt.targetId) }
+                    val result = if (current.status == "deleted") current else authenticated { api.deleteIntake(it, attempt.targetId, attempt) }
+                    check(result.status == "deleted"); applyIntake(attempt.batchId!!, result); tombstone(attempt.batchId)
+                }
+                "draft_delete" -> {
+                    val current = authenticated { api.draft(it, attempt.targetId) }
+                    val result = if (draftObject(current).text("status") == "deleted") current else authenticated { api.deleteDraft(it, attempt.targetId, attempt) }
+                    check(draftObject(result).text("status") == "deleted"); tombstone(attempt.batchId!!)
+                }
+                "ledger_void" -> {
+                    val current = authenticated { api.ledgerDetail(it, attempt.targetId) }
+                    val result = if (ledgerObject(current).text("status") == "voided") current else authenticated { api.voidLedger(it, attempt.targetId, attempt) }
+                    check(ledgerObject(result).text("status") == "voided"); store.cacheEntry(result)
+                }
+            }
+            store.finishMutation(attempt.key, "completed")
+            refreshAfterReceiptAction(attempt.targetId.takeIf { attempt.kind == "ledger_void" })
+        } catch (error: MobileApiFailure) {
+            if (error.statusCode in setOf(403, 409, 422)) {
+                store.finishMutation(attempt.key, "rejected", if (error.statusCode == 409) "中央版本或狀態已改變，本次未完成；已保留原紀錄，請檢查最新狀態。" else mobileError(error))
+                refreshAfterReceiptAction(attempt.targetId.takeIf { attempt.kind == "ledger_void" })
+            }
+            throw error
+        }
+    }
+    private suspend fun refreshAfterReceiptAction(detailId: String? = null) {
+        try { refreshAccountingLocked(detailId) }
+        catch (error: Exception) {
+            if (error is CancellationException) throw error
+            store.accountingRefresh(true, "操作已確認，帳本或統計尚未同步；顯示上次紀錄，請更新帳本。")
+        }
+    }
+    /** Rebuild loaded pages, refresh off-page detail and use the authoritative overview. */
+    private suspend fun refreshAccountingLocked(detailId: String? = null) {
+        store.accountingRefresh(true)
+        try {
+            val initial = store.load()
+            val targetCount = initial.ledgerNextOffset ?: 20
+            var offset = 0
+            do {
+                val response = authenticated { api.ledger(it, offset) }
+                val page = jsonObject(response)
+                store.cacheLedger(response, append = offset > 0)
+                val count = page.array("entries").size()
+                offset += count
+                if (count == 0 || offset >= page["total_count"].asInt) break
+            } while (offset < targetCount)
+            val loadedIds = jsonObject(store.load().ledgerJson!!).array("entries").map { it.asJsonObject.text("id") }.toSet()
+            if (detailId != null && detailId !in loadedIds) store.cacheEntry(authenticated { api.ledgerDetail(it, detailId) })
+            store.retainLedgerDetails(loadedIds + listOfNotNull(detailId))
+            store.cacheOverview(authenticated { api.overview(it) })
+            store.accountingRefresh(false)
+        } catch (error: Exception) {
+            withContext(NonCancellable) { runCatching { store.accountingRefresh(true, "帳本與統計尚未同步；顯示上次紀錄，請稍後更新。") } }
+            throw error
+        }
     }
     private fun verifyOriginal(file: File, image: MobileImage) {
         if (!file.isFile || file.length() != image.bytes) throw MobileFailure("原圖無法讀取；請保留 App 資料並聯絡維護者。")
@@ -301,7 +452,7 @@ internal fun mobileError(error: Exception): String = when (error) {
     is MobileApiFailure -> when (error.statusCode) {
         401 -> "登入已失效，請重新登入；照片、說明與原請求均已保留。"
         403 -> "此裝置需要重新登入，才能在 App 內核對與入帳。"
-        409 -> "中央請求狀態衝突；資料已保留，請勿建立重複交易，請聯絡維護者。"
+        409 -> "中央版本或狀態已改變；資料已保留，請更新並檢查目前內容後再操作。"
         413 -> "圖片或說明超過中央限制；資料仍在本機。"
         415 -> "中央不接受此圖片格式。"
         422 -> "中央無法接受這批資料；原請求已保留，請聯絡維護者核對。"

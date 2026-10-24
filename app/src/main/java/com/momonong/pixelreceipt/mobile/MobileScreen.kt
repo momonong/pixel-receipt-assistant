@@ -32,6 +32,10 @@ internal data class MobileUiState(
     val savingReview: Boolean = false,
     val pendingReviewEdits: Set<String> = emptySet(),
     val ledgerDetailsJson: String? = null,
+    val mutations: List<ReceiptMutation> = emptyList(),
+    val overviewJson: String? = null,
+    val accountingStale: Boolean = false,
+    val accountingError: String? = null,
 ) {
     val batch: MobileBatch? get() = batches.firstOrNull { it.id == selectedId }
 }
@@ -59,6 +63,8 @@ internal class MobileActions(
     val confirmReview: (String) -> Unit = {},
     val compareReview: (String) -> Unit = {},
     val resolveReview: (String, Boolean) -> Unit = { _, _ -> },
+    val deleteBatch: (String, String) -> Unit = { _, _ -> },
+    val voidEntry: (String, String) -> Unit = { _, _ -> },
 )
 
 @Composable
@@ -88,7 +94,7 @@ fun MobileScreen(viewModel: MobileViewModel) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(20), viewModel::picked)
     val state = MobileUiState(persisted != null, persisted?.batches.orEmpty(), selected,
         if (settings) MobilePage.Settings else MobilePage.valueOf(destination),
-        signedIn, busy, message, engines, writable, edits, reviewer, persisted?.ledgerJson, persisted?.ledgerUpdatedAt, selectedLedger, savingReview, reviewEdits.keys, persisted?.ledgerDetailsJson)
+        signedIn, busy, message, engines, writable, edits, reviewer, persisted?.ledgerJson, persisted?.ledgerUpdatedAt, selectedLedger, savingReview, reviewEdits.keys, persisted?.ledgerDetailsJson, persisted?.mutations.orEmpty(), persisted?.overviewJson, persisted?.accountingStale == true, persisted?.accountingError)
     val actions = MobileActions(
         select = viewModel::select, settings = { viewModel.openSettings(true) }, back = viewModel::back,
         pick = { id -> viewModel.pickerTarget(id); picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
@@ -97,7 +103,7 @@ fun MobileScreen(viewModel: MobileViewModel) {
         dashboard = viewModel::openAccounting, help = viewModel::help, ledger = viewModel::ledger,
         ledgerDetail = viewModel::openLedger, refreshLedger = viewModel::refreshLedger,
         editReview = viewModel::editReview, saveReview = viewModel::saveReview, confirmReview = viewModel::confirmReview,
-        compareReview = viewModel::compareReview, resolveReview = viewModel::resolveReview,
+        compareReview = viewModel::compareReview, resolveReview = viewModel::resolveReview, deleteBatch = viewModel::deleteBatch, voidEntry = viewModel::voidEntry,
     )
     MobileContent(state, viewModel.images, actions)
 }
@@ -122,6 +128,7 @@ internal fun MobileSystemBars() {
 internal fun batchTitle(batch: MobileBatch): String = batch.userNotes.lineSequence().firstOrNull { it.isNotBlank() }?.take(50)
     ?: if (batch.purpose == "reference") "${batch.images.size} 張參考照片" else "${batch.images.size} 張消費照片"
 internal fun batchStatus(batch: MobileBatch): String = when {
+    batch.deleted -> "已刪除"
     !batch.importComplete -> "照片未完整匯入"
     batch.ledgerStatus == "voided" || batch.draftStatus == "voided" -> "已作廢"
     batch.ledgerStatus == "active" || batch.draftStatus == "confirmed" -> "已完成"

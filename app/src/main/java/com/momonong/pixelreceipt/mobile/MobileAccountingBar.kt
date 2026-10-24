@@ -21,6 +21,7 @@ internal fun MobileNavigation(state: MobileUiState, actions: MobileActions) {
 @Composable
 internal fun NativePrimaryBar(state: MobileUiState, actions: MobileActions, compact: Boolean) {
     val batch = state.batch; val review = batch?.review
+    val pending = state.mutations.lastOrNull { it.batchId == batch?.id && it.phase == "pending" }
     val blockers = review?.let(::reviewBlockers).orEmpty().filter { it.text("code") != "receipt_completeness_unconfirmed" }
     val invalid = review?.let(::prepareReview)?.errors?.isNotEmpty() == true
     val formal = batch?.ledgerId != null || batch?.draftStatus in setOf("confirmed", "voided")
@@ -31,9 +32,11 @@ internal fun NativePrimaryBar(state: MobileUiState, actions: MobileActions, comp
     val action: () -> Unit
     when (state.page) {
         MobilePage.Review -> {
-            caption = if (formal) "中央已確認此帳目，可查看正式內容。" else if (review?.confirmation != null) "結果尚待中央確認；沿用同一筆確認查詢。" else "確認目前品項、金額、用途及收據完整後入帳。"
+            caption = if (pending != null) "${pending.resultLabel}結果尚未確認；查詢原 ID，沿用原請求。" else if (formal) "中央已確認此帳目，可查看正式內容。" else if (review?.confirmation != null) "結果尚待中央確認；沿用同一筆確認查詢。" else "確認目前品項、金額、用途及收據完整後入帳。"
             label = when {
                 state.busy != null -> state.busy
+                batch?.deleted == true -> "返回收件匣"
+                pending != null -> "查詢${pending.resultLabel}結果"
                 batch?.ledgerId != null -> if (batch.ledgerStatus == "voided") "查看作廢紀錄" else "查看已完成帳目"
                 formal -> "讀取正式帳目"
                 !state.reviewer || !state.signedIn -> "登入後核對與入帳"
@@ -47,9 +50,11 @@ internal fun NativePrimaryBar(state: MobileUiState, actions: MobileActions, comp
                 blockers.isNotEmpty() -> "請先核對標示的欄位"
                 else -> "確認入帳 ${moneyText(review.draft.getAsJsonObject("calculation")["printed_total_yuan"])}"
             }
-            enabled = state.busy == null && state.writable && (formal || !state.reviewer || !state.signedIn || review == null || review.conflict || review.confirmation != null || (!invalid && (review.error != null || review.saveAttempt != null || (!waiting && blockers.isEmpty() && review.editor.text("assembly_status") != "incomplete"))))
+            enabled = state.busy == null && state.writable && (batch?.deleted == true || (batch != null && state.mutations.any { it.batchId == batch.id && it.phase == "pending" }) || formal || !state.reviewer || !state.signedIn || review == null || review.conflict || review.confirmation != null || (!invalid && (review.error != null || review.saveAttempt != null || (!waiting && blockers.isEmpty() && review.editor.text("assembly_status") != "incomplete"))))
             action = {
                 when {
+                    batch?.deleted == true -> actions.select(null)
+                    pending != null -> actions.retryReceiptMutation(pending)
                     batch?.ledgerId != null -> actions.ledgerDetail(batch.ledgerId)
                     formal -> actions.dashboard(batch?.draftId)
                     !state.reviewer || !state.signedIn -> actions.settings()

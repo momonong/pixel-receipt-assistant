@@ -26,7 +26,7 @@ class MobileHttpTest {
         catch (error: MobileApiFailure) { assertEquals(302, error.statusCode) }
         assertEquals(1, count)
         assertFalse(connection.instanceFollowRedirects)
-        assertEquals("PixelReceipt-Android/0.5.0", connection.getRequestProperty("User-Agent"))
+        assertEquals("PixelReceipt-Android/0.5.1", connection.getRequestProperty("User-Agent"))
         assertTrue(connection.disconnected)
     }
     @Test fun cancellationDisconnectsAnInflightRequest() = runBlocking {

@@ -112,20 +112,20 @@ class MobileViewModel @JvmOverloads constructor(
         if (!signedIn.value || busy.value != null || now - refreshedAt < 30_000) return
         refreshedAt = now
         online("正在更新已保存狀態…") {
-            val batches = repository.store.state.value?.batches.orEmpty().filter { it.intakeId != null }
+            val batches = repository.store.state.value?.batches.orEmpty().filter { it.intakeId != null && !it.deleted }
             val chosen = if (batches.isEmpty()) emptyList() else List(minOf(8, batches.size)) { batches[(refreshCursor + it) % batches.size] }
             refreshCursor += chosen.size
             (listOfNotNull(batches.firstOrNull { it.id == selected.value }) + chosen).distinctBy { it.id }.forEach {
                 val result = repository.sync(it.id)
                 if (destination.value == MobilePage.Review.name && selected.value == it.id && result.ledgerId != null) { showFormalLedger(result); repository.ledgerDetail(result.ledgerId) }
             }
-            if (destination.value in setOf(MobilePage.Ledger.name, MobilePage.LedgerDetail.name)) repository.ledger()
+            if (destination.value in setOf(MobilePage.Ledger.name, MobilePage.LedgerDetail.name)) repository.ledger(detailId = selectedLedger.value.takeIf { destination.value == MobilePage.LedgerDetail.name })
         }
     }
     fun editReview(id: String, change: (com.google.gson.JsonObject) -> Unit) {
         if (!writable.value || busy.value != null) return
         val persisted = repository.store.state.value?.batches?.firstOrNull { it.id == id } ?: return
-        if (persisted.ledgerId != null || persisted.draftStatus in setOf("confirmed", "voided")) return
+        if (persisted.deleted || repository.store.state.value?.pendingMutation(id) != null || persisted.ledgerId != null || persisted.draftStatus in setOf("confirmed", "voided")) return
         reviewEdits.edit(persisted, change)
         commands.launch { persistReviewEdits(id) }
         scheduleReviewSave(id)
@@ -264,6 +264,25 @@ class MobileViewModel @JvmOverloads constructor(
         if (edits.pending(id)) throw MobileFailure("目前編輯尚未保存，請先重試儲存；這次未上傳。")
         val current = repository.store.state.value?.batches?.firstOrNull { it.id == id } ?: throw MobileFailure("找不到這筆本機收件。")
         repository.sync(id, current.revision)
+    }
+    fun deleteBatch(id: String, reason: String) {
+        reviewSave?.cancel()
+        online("正在確認刪除結果…") {
+            if (edits.pending(id) || reviewEdits.pending(id)) throw MobileFailure("目前編輯尚未保存，請先重試儲存，再刪除。")
+            repository.deleteBatch(id, reason)
+            val deleted = repository.store.batch(id).deleted
+            messageMutable.value = if (deleted) "收據已刪除；原圖與歷史資料保留。" else "請檢查這筆收據的最新中央狀態。"
+            if (deleted && selected.value == id && destination.value in setOf(MobilePage.Detail.name, MobilePage.Review.name)) {
+                saved["mobileSelected"] = null; saved["mobileDestination"] = MobilePage.Inbox.name
+            }
+        }
+    }
+    fun voidEntry(id: String, reason: String) {
+        reviewSave?.cancel()
+        online("正在確認作廢結果…") {
+            repository.voidEntry(id, reason)
+            messageMutable.value = "帳目已作廢，不再計入有效支出；原帳目與原因保留。"
+        }
     }
     fun stopNetwork() { network?.cancel() }
     fun background() { network?.cancel() }

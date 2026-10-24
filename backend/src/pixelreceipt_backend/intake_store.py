@@ -5,9 +5,9 @@ import json
 import time
 import uuid
 
-from .intake_models import CreateIntake
+from .intake_models import CreateIntake, DeleteIntake
 from .models import CreateDraft
-from .store import StoreError, canonical, timestamp
+from .store import INTAKE_DELETE_JOURNAL_SCHEMA, StoreError, canonical, timestamp
 
 ACTIVE = ("queued", "preparing", "submitting", "processing", "unknown")
 
@@ -160,10 +160,60 @@ class IntakeStore:
                 for row in connection.execute(
                     f"""SELECT i.id,i.input,i.status,i.error_code,i.job_key,i.draft_id,
                         i.created_at,i.updated_at,i.polling_finished,{ACCOUNTING_COLUMNS}
-                        {ACCOUNTING_FROM} ORDER BY i.created_at DESC,i.id LIMIT ? OFFSET ?""",
+                        {ACCOUNTING_FROM} WHERE i.status != 'deleted'
+                        ORDER BY i.created_at DESC,i.id LIMIT ? OFFSET ?""",
                     (limit, offset),
                 )
             ]
+
+    def delete(self, identifier: str, request: DeleteIntake, key: str) -> dict:
+        with self.store.connection(write=True) as connection:
+            replay, digest = self.store._replay(
+                connection, "delete_intake", identifier, request.model_dump(), key
+            )
+            if replay:
+                return replay
+            row = connection.execute("SELECT * FROM intakes WHERE id=?", (identifier,)).fetchone()
+            if row is None:
+                raise StoreError(404, "intake_not_found")
+            if row["status"] == "deleted":
+                raise StoreError(409, "intake_already_deleted")
+            if row["draft_id"] is not None:
+                self.store._delete_draft(
+                    connection, row["draft_id"], request.expected_draft_revision, request.reason
+                )
+            else:
+                if connection.execute(
+                    "SELECT 1 FROM drafts WHERE idempotency_key=?", ("intake:" + identifier,)
+                ).fetchone():
+                    raise StoreError(409, "intake_draft_reconciliation_required")
+                if request.expected_draft_revision is not None:
+                    raise StoreError(409, "revision_conflict")
+            connection.execute(
+                """UPDATE intakes SET status='deleted', polling_finished=1, error_code=NULL,
+                   updated_at=? WHERE id=?""",
+                (timestamp(), identifier),
+            )
+            value = self.value(
+                connection.execute(ACCOUNTING_DETAIL + " WHERE i.id=?", (identifier,)).fetchone()
+            )
+            connection.execute(
+                "INSERT INTO mutations VALUES (?, ?, ?, ?, ?)",
+                (
+                    key,
+                    "delete_intake",
+                    identifier,
+                    digest,
+                    canonical(
+                        {
+                            "schema": INTAKE_DELETE_JOURNAL_SCHEMA,
+                            "request": request.model_dump(),
+                            "response": value,
+                        }
+                    ),
+                ),
+            )
+            return value
 
     def raw(self, identifier):
         with self.store.connection() as connection:
@@ -207,37 +257,52 @@ class IntakeStore:
             raise ValueError("unsupported intake update")
         fields["updated_at"] = timestamp()
         with self.store.connection(write=True) as connection:
-            connection.execute(
-                f"UPDATE intakes SET {','.join(k + '=?' for k in fields)} WHERE id=?",
+            changed = connection.execute(
+                f"UPDATE intakes SET {','.join(k + '=?' for k in fields)} "
+                "WHERE id=? AND status != 'deleted'",
                 (*fields.values(), identifier),
-            )
+            ).rowcount
+            return changed == 1
 
     def complete(self, identifier, candidate, result):
-        # Draft creation is itself durable/idempotent. Crash between this and the link
-        # reuses the exact same derived key and content, never creates a second draft.
-        intake = self.get(identifier)
-        draft_id = None
-        body = intake["input"]
-        if body["purpose"] == "purchase":
-            draft, _ = self.store.create_draft(
-                CreateDraft.model_validate(
-                    {
-                        "candidate": candidate,
-                        "evidence": [
-                            {"sha256": e["sha256"], "pages": [1]} for e in body["evidence"]
-                        ],
-                        "source": {
-                            "kind": "ai_candidate",
-                            "label": "mobile-intake:" + identifier,
-                            "provider": result.get("provider"),
-                            "model": result.get("model"),
-                        },
-                    }
-                ),
-                "intake:" + identifier,
-            )
-            draft_id = draft["id"]
+        # The deletion check, derived-key draft creation and FK link share one write
+        # transaction. A failed link rolls the draft back; a tombstone creates nothing.
         with self.store.connection(write=True) as connection:
+            row = connection.execute("SELECT * FROM intakes WHERE id=?", (identifier,)).fetchone()
+            if row is None:
+                raise StoreError(404, "intake_not_found")
+            if row["status"] == "deleted":
+                return
+            body = json.loads(row["input"])
+            draft_id = None
+            if body["purpose"] == "purchase":
+                draft, _ = self.store._create_draft(
+                    connection,
+                    CreateDraft.model_validate(
+                        {
+                            "candidate": candidate,
+                            "evidence": [
+                                {"sha256": e["sha256"], "pages": [1]} for e in body["evidence"]
+                            ],
+                            "source": {
+                                "kind": "ai_candidate",
+                                "label": "mobile-intake:" + identifier,
+                                "provider": result.get("provider"),
+                                "model": result.get("model"),
+                            },
+                        }
+                    ),
+                    "intake:" + identifier,
+                )
+                if draft["status"] == "deleted":
+                    # A historical unlinked derived draft can already be tombstoned.
+                    connection.execute(
+                        """UPDATE intakes SET status='deleted', polling_finished=1,
+                           draft_id=?, updated_at=? WHERE id=?""",
+                        (draft["id"], timestamp(), identifier),
+                    )
+                    return
+                draft_id = draft["id"]
             connection.execute(
                 """UPDATE intakes SET status='succeeded', error_code=NULL, result=?,
                    draft_id=?, reference_candidate=?, updated_at=? WHERE id=?""",

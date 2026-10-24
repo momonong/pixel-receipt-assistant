@@ -25,7 +25,7 @@ class NativeAccountingHttpTest {
         assertEquals("PUT", connection.requestMethod)
         assertTrue(connection.doOutput)
         assertEquals(body, output.toString("UTF-8"))
-        for ((path, method) in listOf("https://other.example/v1/ledger" to "GET", "../v1/ledger" to "GET", "v1/ledger/$id/void" to "POST", "v2/drafts/$id/review" to "GET", "v1/ledger?limit=20&offset=0&token=secret" to "GET")) assertFalse(allowedMobileRequest(path, method))
+        for ((path, method) in listOf("https://other.example/v1/ledger" to "GET", "../v1/ledger" to "GET", "v1/ledger/$id/restore" to "POST", "v2/drafts/$id/review" to "GET", "v1/ledger?limit=20&offset=0&token=secret" to "GET")) assertFalse(allowedMobileRequest(path, method))
     }
     @Test fun anUntrustedErrorBodyNeverAppearsInAnExceptionOrUserMessage() = runBlocking {
         val secret = "fake-private-body-credential"

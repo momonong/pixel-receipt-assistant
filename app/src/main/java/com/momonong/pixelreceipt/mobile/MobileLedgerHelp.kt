@@ -18,13 +18,34 @@ import com.momonong.pixelreceipt.data.ingestion.ImageStore
 @Composable
 internal fun MobileLedger(state: MobileUiState, actions: MobileActions, modifier: Modifier, list: LazyListState) {
     val response = state.ledgerJson?.let(::jsonObject)
-    val entries = response?.array("entries")?.map { it.asJsonObject }.orEmpty()
+    val allEntries = response?.array("entries")?.map { it.asJsonObject }.orEmpty()
+    var showVoided by rememberSaveable { mutableStateOf(false) }
+    val entries = allEntries.filter { showVoided || it.text("status") != "voided" }
+    val overview = state.overviewJson?.let(::overviewObject)
     LazyColumn(modifier.testTag("native-ledger"), state = list, contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("帳本", style = MaterialTheme.typography.headlineMedium)
-                Text(if (response == null) "已確認的消費會顯示在這裡。" else "已載入 ${entries.size} / ${response["total_count"].asInt} 筆", style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
+                Text(if (response == null) "已確認的消費會顯示在這裡。" else "歷史紀錄已載入 ${allEntries.size} / ${response["total_count"].asInt} 筆（含作廢）", style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
                 state.ledgerUpdatedAt?.let { Text("上次已確認的中央紀錄；可更新查看最新狀態。", style = MaterialTheme.typography.bodySmall, color = MobileMuted) }
+            }
+        }
+        item {
+            LedgerCard {
+                Text("有效帳目 · 中央統計", style = MaterialTheme.typography.titleSmall)
+                if (overview == null) Text("尚未取得中央統計，請更新帳本。", color = MobileMuted)
+                else {
+                    Text("個人支出 ${moneyText(overview["personal_yuan"])}", style = MaterialTheme.typography.headlineSmall, color = MobileTealInk)
+                    Text("${overview["receipt_count"].asLong} 筆有效帳目 · 實付 ${moneyText(overview["printed_total_yuan"])}", style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
+                }
+                if (state.accountingStale) Text(state.accountingError ?: "帳本與統計尚未同步；顯示上次紀錄。", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                else if (overview != null) Text("已作廢帳目不計入有效支出。", style = MaterialTheme.typography.bodySmall, color = MobileMuted)
+            }
+        }
+        item {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Checkbox(checked = showVoided, onCheckedChange = { showVoided = it }, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).testTag("ledger-show-voided"))
+                Text("查看已作廢", style = MaterialTheme.typography.bodyLarge)
             }
         }
         state.message?.let { item { MobileNotice(it) } }
@@ -34,14 +55,17 @@ internal fun MobileLedger(state: MobileUiState, actions: MobileActions, modifier
             val snapshot = entry.getAsJsonObject("snapshot"); val candidate = snapshot.getAsJsonObject("candidate")
             Surface(color = Color.White, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().clickable { actions.ledgerDetail(entry.text("id")) }.testTag("ledger-${entry.text("id")}")) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatusTag(if (entry.text("status") == "voided") "已作廢" else "已完成", problem = entry.text("status") == "voided")
-                    Text(candidate.text("merchant"), style = MaterialTheme.typography.titleMedium)
+                    StatusTag(state.mutations.lastOrNull { it.targetId == entry.text("id") && it.phase == "pending" }?.let { "${it.resultLabel}結果待確認" } ?: if (entry.text("status") == "voided") "已作廢" else "已完成", problem = entry.text("status") == "voided")
+                    Row(Modifier.fillMaxWidth()) {
+                        Text(candidate.text("merchant"), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                        ReceiptActionMenu(null, entry, state, actions)
+                    }
                     Text("${candidate.text("receipt_date")} · ${moneyText(snapshot.getAsJsonObject("calculation")["printed_total_yuan"])}", style = MaterialTheme.typography.bodyLarge)
                     Text("查看品項與用途 ›", style = MaterialTheme.typography.labelLarge, color = MobileTealInk)
                 }
             }
         }
-        if (response != null && entries.size < response["total_count"].asInt) item {
+        if (response != null && allEntries.size < response["total_count"].asInt) item {
             OutlinedButton(onClick = { actions.refreshLedger(true) }, enabled = state.busy == null && state.signedIn, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("載入更多帳目") }
         }
     }
@@ -66,7 +90,10 @@ internal fun MobileLedgerDetail(state: MobileUiState, images: ImageStore, action
     LazyColumn(modifier.testTag("native-ledger-detail"), state = list, contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             LedgerCard {
-                StatusTag(if (entry.text("status") == "voided") "已作廢" else "已完成", problem = entry.text("status") == "voided")
+                Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) { StatusTag(state.mutations.lastOrNull { it.targetId == entry.text("id") && it.phase == "pending" }?.let { "${it.resultLabel}結果待確認" } ?: if (entry.text("status") == "voided") "已作廢" else "已完成", problem = entry.text("status") == "voided") }
+                    ReceiptActionMenu(null, entry, state, actions)
+                }
                 Text(candidate.text("merchant"), style = MaterialTheme.typography.headlineSmall)
                 Text(candidate.text("receipt_date"), style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
                 Text(moneyText(calculation["printed_total_yuan"]), style = MaterialTheme.typography.headlineMedium, color = MobileTealInk)
@@ -76,6 +103,11 @@ internal fun MobileLedgerDetail(state: MobileUiState, images: ImageStore, action
             }
         }
         state.message?.let { item { MobileNotice(it) } }
+        if (state.accountingStale) item { MobileNotice(state.accountingError ?: "帳本或統計尚未同步；顯示上次紀錄。") }
+        state.mutations.lastOrNull { it.targetId == entry.text("id") }?.let { mutation ->
+            if (mutation.phase == "pending") item { MobileNotice("作廢結果尚未確認；請由更多操作查詢原作廢結果。原內容與請求已保存。") }
+            else mutation.error?.let { message -> item { MobileNotice(message) } }
+        }
         items(candidate.array("items").mapIndexed { index, value -> index to value.asJsonObject }, key = { it.first }) { (index, item) ->
             val decision = document?.array("line_decisions")?.firstOrNull { it.asJsonObject["item_position"].asInt == index }?.asJsonObject
             LedgerCard {
@@ -133,6 +165,9 @@ internal fun MobileHelp(modifier: Modifier, list: LazyListState) {
         "缺照片或缺品項" to "品項缺漏可直接新增品項。缺照片時先保留草稿，再將完整照片另分享一批；舊草稿保留，勿將新舊兩批重複確認入帳。已送出的原批次不能追加原圖。",
         "斷線與版本衝突" to "編輯、原圖與確認請求均會保存。入帳逾時後按「查詢入帳結果」，沿同一筆確認查核，勿另建重複交易。其他裝置有變更時先比較版本，再選擇採用內容。",
         "查看已完成帳目" to "中央確認後，詳情、收件匣與帳本會顯示已完成。已作廢另有標記。離線只顯示上次已確認紀錄；更新才能取得最新狀態。歷史或其他裝置帳目可能沒有本機原圖，此版本會明確標示。",
+        "刪除未入帳收據" to "從收件匣或詳情的更多操作選刪除收據，再確認店家與金額。這是邏輯刪除：從收件匣移除、不影響帳本支出，原圖與備份保留，沒有復原按鈕。匯入、保存或入帳未確認時，先處理原結果；中央 ID 未明的鎖定收件須先更新原進度。",
+        "作廢已入帳帳目" to "已完成帳目使用作廢帳目，原因預設未註明。作廢後不再計入有效支出；原帳目與原因保留，帳本勾選查看已作廢即可讀取歷史。操作後留在原分頁。",
+        "刪除／作廢斷線" to "未知結果會保留原目標、原因與請求。重啟後選查詢結果，先讀原 ID；需要重試時沿用相同請求。中央版本衝突會保留資料並更新狀態，重新檢查後才能另行確認。統計尚未同步時會明確標示，請更新帳本。",
         "登入與原圖保留" to "舊裝置登入可能只有收件權限，在設定重新登入一次即可開啟原生核對。密碼不會保存。登出保留草稿與原圖；請勿清除 App 資料。中央帳本是正式紀錄；本機保留原圖與待同步草稿。",
     )
     LazyColumn(modifier.testTag("native-help"), state = list, contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

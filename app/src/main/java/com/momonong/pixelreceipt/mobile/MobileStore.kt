@@ -44,6 +44,8 @@ class MobileStore(private val root: File, private val beforeWrite: () -> Unit = 
                 batch.frozen?.let { check(sha256(it.body.toByteArray(Charsets.UTF_8)) == it.bodySha256) }
                 batch.review?.let(::validateReview)
             }
+            state.mutations.orEmpty().forEach(::validateMutation)
+            state.overviewJson?.let(::overviewObject)
             return state
         } catch (_: Exception) { throw MobileFailure("本機收件資料無法讀取；原檔已保留，請勿清除 App 資料。") }
     }
@@ -102,28 +104,41 @@ class MobileStore(private val root: File, private val beforeWrite: () -> Unit = 
                 next.review.comparisonJson?.let { draftObject(it).text("status") == "needs_review" && draftObject(it).text("ledger_id").isBlank() } == true
             check(next.review?.confirmation == attempt || releasedBeforeConfirm)
         }
+        if (state.pendingMutation(id) != null) check(next.images == old.images && next.userNotes == old.userNotes && next.review?.editorJson == old.review?.editorJson) { "Pending receipt action cannot edit original content" }
+        if (old.deleted) check(next.deleted && next.deletedAt == old.deletedAt && next.status == old.status && next.draftStatus == old.draftStatus)
         next.review?.let(::validateReview)
-        write(state.copy(batches = state.batches.map { if (it.id == id) next else it }))
+        val mutations = if (next.deleted) state.mutations?.map { attempt ->
+            val matches = attempt.batchId == id && ((attempt.kind == "intake_delete" && attempt.targetId == next.intakeId) || (attempt.kind == "draft_delete" && attempt.targetId == next.draftId))
+            if (matches && attempt.phase == "pending") attempt.copy(phase = "completed", error = null) else attempt
+        } else state.mutations
+        val ledgerChanged = next.ledgerStatus != old.ledgerStatus
+        write(state.copy(batches = state.batches.map { if (it.id == id) next else it }, mutations = mutations,
+            accountingStale = if (ledgerChanged) true else state.accountingStale,
+            accountingError = if (ledgerChanged) "中央帳目狀態已更新，帳本與統計尚未同步。" else state.accountingError))
         next
     }
     fun cacheLedger(json: String, append: Boolean = false): MobileState = locked {
         val state = read(); val response = jsonObject(json)
-        val page = response.array("entries").toList()
         val offset = response["offset"]?.let { strictLong(it, 0, 100_000).toInt() } ?: if (append) state.ledgerNextOffset ?: 0 else 0
         val details = state.ledgerDetailsJson?.let(::jsonObject) ?: com.google.gson.JsonObject()
-        page.forEach { entry -> val value = ledgerObject(entry.toString()); details.add(value.text("id"), value) }
+        val page = response.array("entries").map { incoming ->
+            val entry = ledgerObject(incoming.toString()); val value = latestLedger(details, entry)
+            details.add(value.text("id"), value); value
+        }
+        response.add("entries", com.google.gson.JsonArray().apply { page.forEach(::add) })
         if (append && state.ledgerJson != null) {
             val entries = linkedMapOf<String, com.google.gson.JsonElement>()
             jsonObject(state.ledgerJson).array("entries").forEach { entries[it.asJsonObject.text("id")] = it }
             page.forEach { entries[it.asJsonObject.text("id")] = it } // New status wins for overlapping IDs.
             response.add("entries", com.google.gson.JsonArray().apply { entries.values.forEach(::add) })
         }
-        state.copy(ledgerJson = response.toString(), ledgerUpdatedAt = System.currentTimeMillis(), ledgerDetailsJson = details.toString(), ledgerNextOffset = offset + page.size).also(::write)
+        state.copy(ledgerJson = response.toString(), ledgerUpdatedAt = System.currentTimeMillis(), ledgerDetailsJson = details.toString(), ledgerNextOffset = offset + page.size, batches = projectLedger(state.batches, page.map { it.asJsonObject }), mutations = completeLedgerMutations(state.mutations, page.map { it.asJsonObject })).also(::write)
     }
     /** Detail lookup has no effect on the server paging cursor or page membership. */
     fun cacheEntry(json: String, confirmed: Boolean = false): MobileState = locked {
-        val state = read(); val entry = ledgerObject(json)
+        val state = read()
         val details = state.ledgerDetailsJson?.let(::jsonObject) ?: com.google.gson.JsonObject()
+        val entry = latestLedger(details, ledgerObject(json))
         details.add(entry.text("id"), entry)
         val response = state.ledgerJson?.let(::jsonObject) ?: com.google.gson.JsonObject().apply { add("entries", com.google.gson.JsonArray()); addProperty("total_count", 0) }
         val previous = response.array("entries").toList()
@@ -132,7 +147,44 @@ class MobileStore(private val root: File, private val beforeWrite: () -> Unit = 
             previous.forEach { value -> if (value.asJsonObject.text("id") != entry.text("id")) add(value) else if (!confirmed) add(entry) }
         })
         response.addProperty("total_count", maxOf(response["total_count"].asInt, response.array("entries").size()))
-        state.copy(ledgerJson = response.toString(), ledgerUpdatedAt = System.currentTimeMillis(), ledgerDetailsJson = details.toString()).also(::write)
+        state.copy(ledgerJson = response.toString(), ledgerUpdatedAt = System.currentTimeMillis(), ledgerDetailsJson = details.toString(), batches = projectLedger(state.batches, listOf(entry)), mutations = completeLedgerMutations(state.mutations, listOf(entry)), accountingStale = if (confirmed || state.ledgerDetailsJson?.let(::jsonObject)?.get(entry.text("id"))?.asJsonObject?.text("status") != entry.text("status")) true else state.accountingStale).also(::write)
+    }
+    /** Off-page entries are invalidated; opening one fetches its current formal state. */
+    fun retainLedgerDetails(ids: Set<String>) = locked {
+        val state = read(); val details = state.ledgerDetailsJson?.let(::jsonObject) ?: com.google.gson.JsonObject()
+        details.keySet().toList().filter { it !in ids }.forEach { details.remove(it) }
+        write(state.copy(ledgerDetailsJson = details.toString()))
+    }
+    fun recordMutation(attempt: ReceiptMutation): ReceiptMutation = locked {
+        validateMutation(attempt)
+        val state = read()
+        val existing = state.mutations.orEmpty().firstOrNull { it.key == attempt.key }
+        if (existing != null) { check(existing.kind == attempt.kind && existing.targetId == attempt.targetId && existing.body == attempt.body); return@locked existing }
+        check(state.mutations.orEmpty().none { it.kind == attempt.kind && it.targetId == attempt.targetId && it.phase == "pending" })
+        write(state.copy(mutations = state.mutations.orEmpty() + attempt, accountingStale = true, accountingError = null))
+        attempt
+    }
+    fun finishMutation(key: String, phase: String, error: String? = null) = locked {
+        val state = read(); check(phase in setOf("completed", "rejected"))
+        check(state.mutations.orEmpty().any { it.key == key })
+        write(state.copy(mutations = state.mutations.orEmpty().map { if (it.key == key) it.copy(phase = phase, error = error) else it }))
+    }
+    fun accountingRefresh(stale: Boolean, error: String? = null) = locked {
+        val state = read(); write(state.copy(accountingStale = stale, accountingError = error))
+    }
+    fun cacheOverview(json: String) = locked {
+        overviewObject(json); val state = read(); write(state.copy(overviewJson = json))
+    }
+    private fun latestLedger(details: com.google.gson.JsonObject, incoming: com.google.gson.JsonObject): com.google.gson.JsonObject {
+        val previous = details[incoming.text("id")]?.takeIf { it.isJsonObject }?.asJsonObject ?: return incoming
+        return if (previous.text("status") == "voided" || previous["revision"].asLong > incoming["revision"].asLong) previous else incoming
+    }
+    private fun completeLedgerMutations(attempts: List<ReceiptMutation>?, entries: List<com.google.gson.JsonObject>): List<ReceiptMutation>? = attempts?.map { attempt ->
+        if (attempt.kind == "ledger_void" && attempt.phase == "pending" && entries.any { it.text("id") == attempt.targetId && it.text("status") == "voided" }) attempt.copy(phase = "completed", error = null) else attempt
+    }
+    private fun projectLedger(batches: List<MobileBatch>, entries: List<com.google.gson.JsonObject>): List<MobileBatch> = batches.map { batch ->
+        val entry = entries.firstOrNull { it.text("id") == batch.ledgerId || it.text("draft_id") == batch.draftId }
+        if (entry == null || batch.deleted || (batch.ledgerStatus == "voided" && entry.text("status") != "voided")) batch else batch.copy(ledgerId = entry.text("id"), ledgerStatus = entry.text("status"), draftStatus = if (entry.text("status") == "voided") "voided" else "confirmed")
     }
     fun freeze(id: String, expectedRevision: Long? = null): MobileBatch = update(id, expectedRevision) { old -> old.copy(frozen = freezeIntake(old), message = null) }
     companion object { private const val MAX_STATE_BYTES = 16 * 1024 * 1024; private val locks = ConcurrentHashMap<String, Any>() }
