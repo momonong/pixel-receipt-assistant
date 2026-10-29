@@ -36,6 +36,7 @@ internal data class MobileUiState(
     val overviewJson: String? = null,
     val accountingStale: Boolean = false,
     val accountingError: String? = null,
+    val duplicateShare: DuplicateShareReminder? = null,
 ) {
     val batch: MobileBatch? get() = batches.firstOrNull { it.id == selectedId }
 }
@@ -65,6 +66,9 @@ internal class MobileActions(
     val resolveReview: (String, Boolean) -> Unit = { _, _ -> },
     val deleteBatch: (String, String) -> Unit = { _, _ -> },
     val voidEntry: (String, String) -> Unit = { _, _ -> },
+    val cancelDuplicate: (DuplicateShareReminder) -> Unit = {},
+    val openDuplicate: (DuplicateShareReminder, String) -> Unit = { _, _ -> },
+    val sendSeparateDuplicate: (DuplicateShareReminder) -> Unit = {},
 )
 
 @Composable
@@ -75,6 +79,7 @@ fun MobileScreen(viewModel: MobileViewModel) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val signedIn by viewModel.signedIn.collectAsStateWithLifecycle()
     val busy by viewModel.busy.collectAsStateWithLifecycle()
+    val duplicate by viewModel.duplicateShare.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val engines by viewModel.engines.collectAsStateWithLifecycle()
     val writable by viewModel.writable.collectAsStateWithLifecycle()
@@ -94,7 +99,7 @@ fun MobileScreen(viewModel: MobileViewModel) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(20), viewModel::picked)
     val state = MobileUiState(persisted != null, persisted?.batches.orEmpty(), selected,
         if (settings) MobilePage.Settings else MobilePage.valueOf(destination),
-        signedIn, busy, message, engines, writable, edits, reviewer, persisted?.ledgerJson, persisted?.ledgerUpdatedAt, selectedLedger, savingReview, reviewEdits.keys, persisted?.ledgerDetailsJson, persisted?.mutations.orEmpty(), persisted?.overviewJson, persisted?.accountingStale == true, persisted?.accountingError)
+        signedIn, busy, message, engines, writable, edits, reviewer, persisted?.ledgerJson, persisted?.ledgerUpdatedAt, selectedLedger, savingReview, reviewEdits.keys, persisted?.ledgerDetailsJson, persisted?.mutations.orEmpty(), persisted?.overviewJson, persisted?.accountingStale == true, persisted?.accountingError, duplicate)
     val actions = MobileActions(
         select = viewModel::select, settings = { viewModel.openSettings(true) }, back = viewModel::back,
         pick = { id -> viewModel.pickerTarget(id); picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
@@ -104,6 +109,7 @@ fun MobileScreen(viewModel: MobileViewModel) {
         ledgerDetail = viewModel::openLedger, refreshLedger = viewModel::refreshLedger,
         editReview = viewModel::editReview, saveReview = viewModel::saveReview, confirmReview = viewModel::confirmReview,
         compareReview = viewModel::compareReview, resolveReview = viewModel::resolveReview, deleteBatch = viewModel::deleteBatch, voidEntry = viewModel::voidEntry,
+        cancelDuplicate = viewModel::cancelDuplicateShare, openDuplicate = viewModel::openDuplicateShare, sendSeparateDuplicate = viewModel::sendSeparateDuplicate,
     )
     MobileContent(state, viewModel.images, actions)
 }

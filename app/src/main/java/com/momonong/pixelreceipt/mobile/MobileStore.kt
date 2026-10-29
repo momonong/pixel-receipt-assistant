@@ -85,11 +85,13 @@ class MobileStore(private val root: File, private val beforeWrite: () -> Unit = 
     }
     /** A stale editor cannot overwrite a frozen submission or a newer server response. */
     fun update(id: String, expectedRevision: Long? = null, acceptIdentical: Boolean = false, transform: (MobileBatch) -> MobileBatch): MobileBatch = locked {
-        val state = read()
+        updateLocked(read(), id, expectedRevision, acceptIdentical, transform)
+    }
+    private fun updateLocked(state: MobileState, id: String, expectedRevision: Long?, acceptIdentical: Boolean = false, transform: (MobileBatch) -> MobileBatch): MobileBatch {
         val old = state.batches.firstOrNull { it.id == id } ?: throw MobileFailure("找不到這筆本機收件。")
         if (expectedRevision != null && old.revision != expectedRevision && acceptIdentical && transform(old).copy(revision = old.revision) == old) {
             mutable.value = state
-            return@locked old // Process death after disk commit but before SavedState acknowledgement.
+            return old // Process death after disk commit but before SavedState acknowledgement.
         }
         if (expectedRevision != null && old.revision != expectedRevision) throw MobileFailure("資料已更新，請重新開啟這筆收件。")
         val next = transform(old).copy(revision = old.revision + 1)
@@ -115,7 +117,23 @@ class MobileStore(private val root: File, private val beforeWrite: () -> Unit = 
         write(state.copy(batches = state.batches.map { if (it.id == id) next else it }, mutations = mutations,
             accountingStale = if (ledgerChanged) true else state.accountingStale,
             accountingError = if (ledgerChanged) "中央帳目狀態已更新，帳本與統計尚未同步。" else state.accountingError))
-        next
+        return next
+    }
+    /** Match, validate the displayed decision and freeze atomically with all local batch changes. */
+    internal fun freezeForSubmission(id: String, expectedRevision: Long?, approval: DuplicateShareApproval?): MobileBatch = locked {
+        val state = read()
+        val current = state.batches.firstOrNull { it.id == id } ?: throw MobileFailure("找不到這筆本機收件。")
+        if (approval != null && (current != approval.incoming || (expectedRevision != null && current.revision != expectedRevision))) throw DuplicateShareDecisionExpired()
+        updateLocked(state, id, expectedRevision) { old ->
+            if (old.deleted) throw MobileFailure("這筆收據已刪除。")
+            if (old.frozen == null && old.intakeId == null) {
+                validateNewIntake(old)
+                val reminder = duplicateShareReminder(old, state.batches)
+                if (reminder != null && reminder.approval != approval) throw DuplicateShareRequired(reminder)
+                if (approval != null && reminder == null) throw DuplicateShareDecisionExpired()
+            }
+            old.copy(frozen = if (old.intakeId == null) freezeIntake(old) else old.frozen, message = null)
+        }
     }
     fun cacheLedger(json: String, append: Boolean = false): MobileState = locked {
         val state = read(); val response = jsonObject(json)

@@ -47,8 +47,9 @@ internal fun MobileContent(state: MobileUiState, images: ImageStore, actions: Mo
     var password by remember { mutableStateOf("") }
     DisposableEffect(state.page) { onDispose { password = "" } }
     LaunchedEffect(state.signedIn) { password = "" }
-    BackHandler(state.page != MobilePage.Inbox) { actions.back() }
+    BackHandler(state.duplicateShare == null && state.page != MobilePage.Inbox) { actions.back() }
     MaterialTheme(colorScheme = colors, typography = MobileTypography) {
+        state.duplicateShare?.let { DuplicateShareDialog(it, state, actions) }
         // Reserve the keyboard once for the whole viewport, rather than measuring it as part of the action bar.
         BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(imeInsets)) {
             val compactInput = imeInsets.getBottom(LocalDensity.current) > 0 && maxHeight < 360.dp

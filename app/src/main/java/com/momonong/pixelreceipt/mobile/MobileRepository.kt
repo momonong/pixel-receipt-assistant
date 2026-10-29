@@ -107,13 +107,14 @@ class MobileRepository(
         }
     }
     suspend fun retryStorage() = withContext(Dispatchers.IO) { store.retryStorage() }
-    suspend fun sync(id: String, expectedRevision: Long? = null): MobileBatch = withContext(Dispatchers.IO) {
+    suspend fun sync(id: String, expectedRevision: Long? = null): MobileBatch = syncWithDuplicateApproval(id, expectedRevision, null)
+    internal suspend fun syncWithDuplicateApproval(id: String, expectedRevision: Long?, approval: DuplicateShareApproval?): MobileBatch = withContext(Dispatchers.IO) {
         operation.withLock {
             try {
                 // Disk commit precedes every network write. An uncertain response never changes this key/body.
-                if (store.batch(id).deleted) return@withLock store.batch(id)
                 val current = store.batch(id)
-                val batch = if (current.intakeId != null) current else store.freeze(id, expectedRevision)
+                if (current.deleted && approval == null) return@withLock current
+                val batch = if (current.intakeId != null && approval == null) current else store.freezeForSubmission(id, expectedRevision, approval)
                 val result = authenticated { token ->
                     if (batch.intakeId != null) api.status(token, batch.intakeId)
                     else {
@@ -128,6 +129,10 @@ class MobileRepository(
                     }
                 }
                 applyIntake(id, result)
+            } catch (required: DuplicateShareRequired) {
+                throw required // Expected local decision: no message write or revision change.
+            } catch (expired: DuplicateShareDecisionExpired) {
+                throw expired // A stale choice must not change the newer draft or its editor CAS.
             } catch (cancelled: CancellationException) {
                 withContext(NonCancellable) { runCatching { store.update(id) { it.copy(message = "同步已停止；中央可能已收件。原圖及原請求已保存，下次沿原請求同步。") } } }
                 throw cancelled

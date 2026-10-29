@@ -53,6 +53,13 @@ class MobileFailure(val userMessage: String) : Exception(userMessage)
 
 internal fun freezeIntake(batch: MobileBatch): FrozenIntake {
     batch.frozen?.let { return it }
+    validateNewIntake(batch)
+    val body = intakeBody(batch)
+    return FrozenIntake(UUID.randomUUID().toString(), body, sha256(body.toByteArray(Charsets.UTF_8)))
+}
+
+/** Validation before a duplicate decision must not create a key or mutate the saved batch. */
+internal fun validateNewIntake(batch: MobileBatch) {
     if (batch.deleted) throw MobileFailure("這筆收據已刪除，不會再次送出。")
     require(batch.importComplete && batch.importReview?.requiresConfirmation != true) { "照片尚未保存完成，請先補齊或重新分享。" }
     require(batch.images.size in 1..20) { "每筆收件需要 1 至 20 張圖片。" }
@@ -61,16 +68,20 @@ internal fun freezeIntake(batch: MobileBatch): FrozenIntake {
     require(batch.purpose in setOf("purchase", "reference"))
     require(batch.engine in setOf("broker", "local"))
     require(batch.purpose != "purchase" || batch.images.any { it.role == "receipt" }) { "消費至少需要一張收據；菜單或促銷請改選參考資料。" }
-    val body = JsonObject().apply {
+    batch.images.forEach { image ->
+        require(image.hash.matches(Regex("[0-9a-f]{64}")))
+        require(image.role in imageRoles) { "圖片角色無效。" }
+        require(image.notes.length <= 1000) { "每張圖片說明最多 1,000 字。" }
+    }
+}
+
+private fun intakeBody(batch: MobileBatch): String = JsonObject().apply {
         addProperty("schema", "pixelreceipt-mobile-ingest-1")
         addProperty("purpose", batch.purpose)
         addProperty("engine", batch.engine)
         add("user_notes", batch.userNotes.takeIf { it.isNotBlank() }?.let { com.google.gson.JsonPrimitive(it) } ?: JsonNull.INSTANCE)
         add("evidence", com.google.gson.JsonArray().apply {
             batch.images.forEach { image ->
-                require(image.hash.matches(Regex("[0-9a-f]{64}")))
-                require(image.role in imageRoles) { "圖片角色無效。" }
-                require(image.notes.length <= 1000) { "每張圖片說明最多 1,000 字。" }
                 add(JsonObject().apply {
                     addProperty("sha256", image.hash)
                     addProperty("role", image.role)
@@ -79,8 +90,6 @@ internal fun freezeIntake(batch: MobileBatch): FrozenIntake {
             }
         })
     }.toString()
-    return FrozenIntake(UUID.randomUUID().toString(), body, sha256(body.toByteArray(Charsets.UTF_8)))
-}
 
 internal fun statusLabel(status: String?): String = when (status) {
     "deleted" -> "已刪除"
