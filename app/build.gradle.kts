@@ -13,8 +13,8 @@ android {
         // ML Kit GenAI Prompt API requires API 26. Pixel 10 Pro Fold is the primary device.
         minSdk = 26
         targetSdk = 37
-        versionCode = 8
-        versionName = "0.5.1"
+        versionCode = 9
+        versionName = "0.5.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

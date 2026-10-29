@@ -50,6 +50,8 @@ class MobileViewModel @JvmOverloads constructor(
     val signedIn = signedInMutable.asStateFlow()
     private val busyMutable = MutableStateFlow<String?>(null)
     val busy = busyMutable.asStateFlow()
+    private val duplicateMutable = MutableStateFlow<DuplicateShareReminder?>(null)
+    internal val duplicateShare = duplicateMutable.asStateFlow()
     private val messageMutable = MutableStateFlow<String?>(null)
     val message = messageMutable.asStateFlow()
     private val enginesMutable = MutableStateFlow<Map<String, EngineAvailability>>(emptyMap())
@@ -65,12 +67,13 @@ class MobileViewModel @JvmOverloads constructor(
             catch (error: Exception) { if (error is CancellationException) throw error; messageMutable.value = mobileError(error) }
         }
     }
-    fun openLegacy(open: Boolean) { legacyMutable.value = open }
-    fun select(id: String?) { saved["mobileSelected"] = id; saved["mobileSettings"] = false; saved["mobileDestination"] = if (id == null) MobilePage.Inbox.name else MobilePage.Detail.name
+    fun openLegacy(open: Boolean) { duplicateMutable.value = null; legacyMutable.value = open }
+    fun select(id: String?) { duplicateMutable.value = null; saved["mobileSelected"] = id; saved["mobileSettings"] = false; saved["mobileDestination"] = if (id == null) MobilePage.Inbox.name else MobilePage.Detail.name
         id?.let { current -> if (signedIn.value && repository.store.state.value?.batches?.firstOrNull { it.id == current }?.intakeId != null) refreshBatch(current) }
     }
-    fun openSettings(open: Boolean) { saved["mobileSettings"] = open }
+    fun openSettings(open: Boolean) { duplicateMutable.value = null; saved["mobileSettings"] = open }
     fun back() {
+        if (duplicateMutable.value != null) { duplicateMutable.value = null; return }
         if (settings.value) saved["mobileSettings"] = false
         else when (destination.value) {
             MobilePage.Help.name -> saved["mobileDestination"] = saved.get<String>("mobileHelpReturn") ?: MobilePage.Inbox.name
@@ -79,9 +82,9 @@ class MobileViewModel @JvmOverloads constructor(
             else -> select(null)
         }
     }
-    fun help() { saved["mobileHelpReturn"] = destination.value; saved["mobileDestination"] = MobilePage.Help.name }
-    fun ledger() { saved["mobileSettings"] = false; saved["mobileDestination"] = MobilePage.Ledger.name; refreshLedger() }
-    fun openLedger(id: String) { saved["mobileLedgerReturn"] = destination.value; saved["mobileLedger"] = id; saved["mobileDestination"] = MobilePage.LedgerDetail.name
+    fun help() { duplicateMutable.value = null; saved["mobileHelpReturn"] = destination.value; saved["mobileDestination"] = MobilePage.Help.name }
+    fun ledger() { duplicateMutable.value = null; saved["mobileSettings"] = false; saved["mobileDestination"] = MobilePage.Ledger.name; refreshLedger() }
+    fun openLedger(id: String) { duplicateMutable.value = null; saved["mobileLedgerReturn"] = destination.value; saved["mobileLedger"] = id; saved["mobileDestination"] = MobilePage.LedgerDetail.name
         online("正在更新帳目…") { repository.ledgerDetail(id) }
     }
     fun openAccounting(draftId: String?) {
@@ -260,10 +263,38 @@ class MobileViewModel @JvmOverloads constructor(
         }
     }
     fun refreshEngines() = online("正在查詢辨識來源…") { enginesMutable.value = repository.availability() }
-    fun sync(id: String) = online("正在同步這筆收件…") {
+    fun sync(id: String) = syncWithDuplicateDecision(id, null)
+    private fun syncWithDuplicateDecision(id: String, approval: DuplicateShareApproval?) = online("正在同步這筆收件…") {
         if (edits.pending(id)) throw MobileFailure("目前編輯尚未保存，請先重試儲存；這次未上傳。")
         val current = repository.store.state.value?.batches?.firstOrNull { it.id == id } ?: throw MobileFailure("找不到這筆本機收件。")
-        repository.sync(id, current.revision)
+        try { repository.syncWithDuplicateApproval(id, current.revision, approval) }
+        catch (required: DuplicateShareRequired) {
+            if (selected.value == id && destination.value == MobilePage.Detail.name && !settings.value && !legacy.value) duplicateMutable.value = required.reminder
+        }
+        catch (_: DuplicateShareDecisionExpired) {
+            if (selected.value == id && destination.value == MobilePage.Detail.name) messageMutable.value = "照片或舊收件已變更；請重新按送出確認。"
+        }
+    }
+    internal fun cancelDuplicateShare(reminder: DuplicateShareReminder) {
+        if (duplicateMutable.value === reminder) duplicateMutable.value = null
+    }
+    internal fun sendSeparateDuplicate(reminder: DuplicateShareReminder) {
+        val approval = reminder.approval
+        if (busy.value != null || !writable.value || duplicateMutable.value !== reminder || selected.value != approval.incoming.id || destination.value != MobilePage.Detail.name) return
+        duplicateMutable.value = null // Consume this exact displayed choice before another tap/callback.
+        syncWithDuplicateDecision(approval.incoming.id, approval)
+    }
+    internal fun openDuplicateShare(reminder: DuplicateShareReminder, id: String) {
+        if (duplicateMutable.value !== reminder) return
+        if (busy.value != null || reminder.candidates.none { it.id == id }) return
+        val current = repository.store.state.value?.batches?.firstOrNull { it.id == id } ?: return
+        duplicateMutable.value = null
+        if (current.ledgerId != null && !current.deleted) openLedger(current.ledgerId)
+        else {
+            // Deliberately bypass select(): opening an unknown original must never submit it.
+            saved["mobileSelected"] = id; saved["mobileSettings"] = false; saved["mobileDestination"] = MobilePage.Detail.name
+        }
+        messageMutable.value = "新照片與說明仍保留在收件匣。"
     }
     fun deleteBatch(id: String, reason: String) {
         reviewSave?.cancel()
