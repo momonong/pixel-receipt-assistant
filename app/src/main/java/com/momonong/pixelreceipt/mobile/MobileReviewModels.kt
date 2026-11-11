@@ -74,9 +74,39 @@ internal fun ledgerObject(json: String): JsonObject = jsonObject(json).also {
 }
 internal val purposeLabels = linkedMapOf("self" to "自己用", "gift" to "送人", "advance" to "代買")
 
+internal data class AdvanceSuggestion(val positions: Set<Int>, val personalYuan: Long?, val advanceYuan: Long?)
+
+private fun initialAdvanceSuggestion(draft: JsonObject): AdvanceSuggestion? {
+    if (draft.text("status") != "needs_review" || draft.text("revision") != "1" ||
+        draft["review_document"]?.isJsonObject == true) return null
+    val suggestion = draft["advance_suggestion"]?.takeIf { it.isJsonObject }?.asJsonObject ?: return null
+    val items = draft.getAsJsonObject("candidate").array("items")
+    return runCatching {
+        val positions = suggestion.array("item_positions").map { strictLong(it, 0, items.size().toLong() - 1).toInt() }
+        if (positions.isEmpty() || positions.distinct().size != positions.size ||
+            positions.any { items[it].asJsonObject.text("quantity") != "1" }) return null
+        fun amount(key: String) = suggestion[key]?.takeUnless { it.isJsonNull }?.let { strictLong(it) }
+        AdvanceSuggestion(positions.toSet(), amount("personal_yuan"), amount("advance_yuan"))
+    }.getOrNull()
+}
+
+internal fun MobileReview.advancePreview(draft: JsonObject, editor: JsonObject): AdvanceSuggestion? {
+    if (editRevision != 0L || conflict || confirmation != null || editor["candidate"] != draft["candidate"]) return null
+    val suggestion = initialAdvanceSuggestion(draft) ?: return null
+    val decisions = editor.array("line_decisions")
+    // A restored local editor from an older App may still contain its original defaults.
+    return suggestion.takeIf {
+        decisions.size() == draft.getAsJsonObject("candidate").array("items").size() &&
+            decisions.withIndex().all { (index, value) ->
+                value == wholeDecision(index, if (index in suggestion.positions) "advance" else "self")
+            }
+    }
+}
+
 internal fun createReview(serverJson: String): MobileReview {
     val draft = draftObject(serverJson)
     val document = draft["review_document"]?.takeIf { it.isJsonObject }?.asJsonObject
+    val suggestedAdvances = initialAdvanceSuggestion(draft)?.positions.orEmpty()
     val candidate = draft.getAsJsonObject("candidate").deepCopy()
     val lines = document?.array("line_decisions")?.map { it.asJsonObject }?.associateBy { it["item_position"].asInt }.orEmpty()
     val adjustments = document?.array("adjustment_decisions")?.map { it.asJsonObject }?.associateBy { it["adjustment_position"].asInt }.orEmpty()
@@ -90,7 +120,7 @@ internal fun createReview(serverJson: String): MobileReview {
                 // Only untouched whole-line decisions receive the default. Preserve every split/exception.
                 add(if (existing == null || (existing.text("method") == "whole_line" && existing.text("whole_purpose").isBlank() &&
                     existing["quantities"].let { it == null || it.isJsonNull } && existing["amounts_yuan"].let { it == null || it.isJsonNull }))
-                    wholeDecision(index, "self") else existing)
+                    wholeDecision(index, if (index in suggestedAdvances) "advance" else "self") else existing)
             }
         })
         add("adjustment_decisions", JsonArray().apply {

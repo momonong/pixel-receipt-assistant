@@ -342,12 +342,25 @@ function renderReview(container) {
 function blankLineDecision(position) {
   return { item_position: position, method: "whole_line", whole_purpose: null, quantities: null, amounts_yuan: null };
 }
+function initialAdvanceSuggestion(draft) {
+  const suggestion = draft.advance_suggestion;
+  const positions = suggestion?.item_positions;
+  if (draft.status !== "needs_review" || draft.revision !== 1 || draft.review_document ||
+      !Array.isArray(positions) || !positions.length || new Set(positions).size !== positions.length ||
+      !positions.every((index) => Number.isInteger(index) && index >= 0 && draft.candidate.items[index]?.quantity === 1)) return null;
+  return suggestion;
+}
 function makeEdit(draft) {
   const document = draft.review_document || {};
+  const suggestion = initialAdvanceSuggestion(draft);
   return {
     candidate: clone(draft.candidate), assembly_status: document.assembly_status || "unknown",
-    line_decisions: draft.candidate.items.map((_, position) => clone(document.line_decisions?.find((decision) => decision.item_position === position) || blankLineDecision(position))),
-    adjustment_decisions: draft.candidate.adjustments.map((_, position) => clone(document.adjustment_decisions?.find((decision) => decision.adjustment_position === position) || { adjustment_position: position, method: "", amounts_yuan: null })),
+    line_decisions: draft.candidate.items.map((_, position) => clone(document.line_decisions?.find((decision) => decision.item_position === position) || {
+      ...blankLineDecision(position), whole_purpose: suggestion ? (suggestion.item_positions.includes(position) ? "advance" : "self") : null,
+    })),
+    adjustment_decisions: draft.candidate.adjustments.map((adjustment, position) => clone(document.adjustment_decisions?.find((decision) => decision.adjustment_position === position) || {
+      adjustment_position: position, method: suggestion && adjustment.amount_effect === "separate_from_line_totals" ? "proportional_amount" : "", amounts_yuan: null,
+    })),
     review_note: "", tolerance_acknowledgement: document.tolerance_acknowledgement || "none",
   };
 }
@@ -439,7 +452,7 @@ function renderWorkspace(workspace) {
     el("div", {}, el("p", {class: "caption"}, "票面總額"), el("strong", {class: "receipt-total", id: "review-printed-total"}, money(candidate.printed_total_yuan)),
       el("p", {class: "caption"}, "來源：收據印刷欄位，仍需對照原圖")),
     button("查看原圖", () => focusReviewSection("review-original"), "secondary small", {id: "review-original-open"}));
-  fields.append(overview, receiptFields);
+  fields.append(overview, el("p", {class: "section-note", id: "review-advance-preview", hidden: true}), receiptFields);
   const itemSection = el("section", { class: "review-section", id: "review-items" },
     el("div", {class: "review-section-heading"}, el("h3", {}, "品項"), el("span", {class: "caption"}, `${candidate.items.length} 項 · 金額依票面`)));
   candidate.items.forEach((item, index) => itemSection.append(el("details", {class: "review-item", id: `review-item-${index}`},
@@ -523,6 +536,15 @@ function refreshReviewSummaries() {
   setText("review-merchant", candidate.merchant || "店家待確認");
   setText("review-date", `${dateLabel(candidate.receipt_date)} · 第 ${state.selected.revision} 版`);
   setText("review-printed-total", observedMoney(candidate.printed_total_yuan));
+  const advancePreview = document.getElementById("review-advance-preview");
+  if (advancePreview) {
+    const suggestion = !state.dirty && !state.conflict && !state.saveUnknown ? initialAdvanceSuggestion(state.selected) : null;
+    advancePreview.hidden = !suggestion;
+    const explanation = "依送出備註預填代墊，請核對品項用途。";
+    advancePreview.textContent = !suggestion ? "" : suggestion.personal_yuan == null || suggestion.advance_yuan == null
+      ? explanation + "核對票面與品項金額後會顯示個人支出。"
+      : explanation + ` 個人支出預估 ${money(suggestion.personal_yuan)} · 代墊 ${money(suggestion.advance_yuan)}`;
+  }
   const missingFacts = [candidate.merchant, candidate.receipt_date, candidate.printed_total_yuan].filter((value) => value === null || value === undefined || String(value).trim() === "").length;
   setText("receipt-facts-status", missingFacts ? `${missingFacts} 欄待確認` : "店家、日期、票面金額");
   const labels = {self: "自己用", gift: "贈送", advance: "代墊"};
@@ -590,7 +612,7 @@ function intakeContextPanel() {
     el("p", {class: "intake-context-notes"}, entry.notes || "未填逐圖備註"),
     button("對照這張原圖", () => loadEvidence({sha256: entry.sha256, pages: [1]}), "ghost small")));
   const details = el("details", {}, el("summary", {}, `照片用途與逐圖備註（${input.evidence.length} 張）`), photos);
-  return panel("送出時的說明", [notes, details, el("p", {class: "caption mt-10"}, "這是原始輸入，仍需人工核對；不會自動分配用途或修改金額。")], null, {class: "panel intake-context"});
+  return panel("送出時的說明", [notes, details, el("p", {class: "caption mt-10"}, "能明確對應單件品項的代買備註可預填用途建議，仍需人工核對。")], null, {class: "panel intake-context"});
 }
 
 function itemEditor(item, index) {

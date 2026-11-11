@@ -544,7 +544,15 @@ def test_v3_to_v4_preserves_rows_and_future_version_refuses(store, body):
 
 @pytest.mark.parametrize(
     ("version_code", "version_name"),
-    [(4, "0.4.2"), (5, "0.4.3"), (6, "0.4.4"), (7, "0.5.0"), (8, "0.5.1"), (9, "0.5.2")],
+    [
+        (4, "0.4.2"),
+        (5, "0.4.3"),
+        (6, "0.4.4"),
+        (7, "0.5.0"),
+        (8, "0.5.1"),
+        (9, "0.5.2"),
+        (10, "0.5.3"),
+    ],
 )
 def test_mobile_release_authenticated_fixed_metadata_streaming_integrity(
     store, tmp_path, version_code, version_name
@@ -605,6 +613,7 @@ def test_mobile_release_authenticated_fixed_metadata_streaming_integrity(
         (9, "0.5.1", "com.momonong.pixelreceipt.mobile"),
         (8, "0.5.2", "com.momonong.pixelreceipt.mobile"),
         (10, "0.5.2", "com.momonong.pixelreceipt.mobile"),
+        (9, "0.5.3", "com.momonong.pixelreceipt.mobile"),
         (8, "0.5.0", "com.momonong.pixelreceipt.mobile"),
         (True, "0.4.2", "com.momonong.pixelreceipt.mobile"),
         ("4", "0.4.2", "com.momonong.pixelreceipt.mobile"),

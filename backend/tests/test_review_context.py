@@ -11,6 +11,7 @@ from PIL import Image
 
 from pixelreceipt_backend.api import create_app
 from pixelreceipt_backend.auth import password_hash
+from pixelreceipt_backend.intake_models import CreateIntake
 from pixelreceipt_backend.intake_store import IntakeStore
 from pixelreceipt_backend.models import CreateDraft
 
@@ -21,12 +22,122 @@ from .test_mobile_ingest import DEVICE, PASSWORD, intake, worker
 from .test_prices import product, review_prices
 
 
-def linked_intake(store, body):
+def linked_intake(store, body, request=None):
     journal = IntakeStore(store)
-    saved, _ = journal.create(intake(body), "context-original")
+    saved, _ = journal.create(request or intake(body), "context-original")
     runner, _ = worker(store, body)
     asyncio.run(runner.run_once())
     return journal.get(saved["id"])
+
+
+def advance_note_draft(
+    client,
+    store,
+    body,
+    note,
+    *,
+    printed=300,
+    quantity=1,
+    duplicate=False,
+    photo_note=None,
+    other_name="合成炒飯",
+):
+    candidate = body["candidate"]
+    candidate["printed_total_yuan"] = printed
+    candidate["items"] = [
+        {
+            "raw_name": "合成丸湯" if duplicate else other_name,
+            "quantity": 1,
+            "printed_line_total_yuan": 270,
+        },
+        {"raw_name": "合成丸湯", "quantity": quantity, "printed_line_total_yuan": 30},
+    ]
+    candidate["adjustments"] = []
+    request = intake(body).model_dump(mode="json", by_alias=True)
+    request["user_notes"] = note
+    request["evidence"][0]["notes"] = photo_note
+    saved = linked_intake(store, body, CreateIntake.model_validate(request))
+    url = f"/v1/drafts/{saved['draft_id']}"
+    response = client.get(url)
+    assert response.status_code == 200
+    return url, response.json()
+
+
+@pytest.mark.parametrize(("printed", "personal", "advance"), [(300, 270, 30), (330, None, None)])
+def test_new_draft_suggests_advance_without_overwriting_printed_or_reviewed_amounts(
+    client, store, body, printed, personal, advance
+):
+    url, draft = advance_note_draft(client, store, body, "合成丸湯幫別人買", printed=printed)
+    assert draft["advance_suggestion"] == {
+        "item_positions": [1],
+        "personal_yuan": personal,
+        "advance_yuan": advance,
+    }
+    assert draft["candidate"] == draft["original_candidate"]
+    assert draft["candidate"]["printed_total_yuan"] == printed
+    assert draft["review_document"] is None and not draft["calculation"]["ready"]
+    assert client.get(url).json() == draft
+    assert store.history(draft["id"])[0]["review_document"] is None
+    assert store.list_ledger(100, 0) == []
+
+    # An explicit human choice takes precedence over the original note.
+    review = review_body(body)
+    review["line_decisions"].append(
+        {"item_position": 1, "method": "whole_line", "whole_purpose": "gift"}
+    )
+    assert client.put(f"/v2/drafts/{draft['id']}/review", json=review).status_code == 200
+    reviewed = client.get(url).json()
+    assert "advance_suggestion" not in reviewed
+    assert reviewed["review_document"]["line_decisions"][1]["whole_purpose"] == "gift"
+
+
+def test_single_receipt_photo_note_can_suggest_advance(client, store, body):
+    _, draft = advance_note_draft(client, store, body, None, photo_note="代買：合成丸湯。")
+    assert draft["advance_suggestion"]["item_positions"] == [1]
+
+
+def test_separate_advance_statements_can_target_two_items_with_overlapping_names(
+    client, store, body
+):
+    _, draft = advance_note_draft(
+        client, store, body, "合成丸湯幫朋友買；迷你合成丸湯幫朋友買。", other_name="迷你合成丸湯"
+    )
+    assert draft["advance_suggestion"] == {
+        "item_positions": [0, 1],
+        "personal_yuan": 0,
+        "advance_yuan": 300,
+    }
+
+
+def test_advance_sentence_is_recognized_beside_price_tag_context(client, store, body):
+    _, draft = advance_note_draft(
+        client, store, body, "第一張收據，第二張是合成丸湯價標；合成丸湯幫朋友買。"
+    )
+    assert draft["advance_suggestion"]["item_positions"] == [1]
+
+
+@pytest.mark.parametrize(
+    ("note", "quantity", "duplicate", "photo_note"),
+    [
+        ("合成丸湯幫別人買", 1, True, None),
+        ("合成丸湯幫別人買", 2, False, None),
+        ("合成丸湯不是幫別人買", 1, False, None),
+        ("合成丸湯幫別人買嗎？", 1, False, None),
+        ("合成丸湯幫別人買", 1, False, "合成丸湯自己喝"),
+        ("合成丸湯幫別人買", 1, False, "這張沒有代買，都是自己用。"),
+        ("合成丸湯幫別人買", 1, False, "合成丸湯是我自己的。"),
+        ("合成丸湯幫別人買；合成炒飯幫小明買。", 1, False, None),
+        ("請將合成丸湯改成300元", 1, False, None),
+    ],
+)
+def test_unclear_notes_never_prefill_a_purchase_purpose(
+    client, store, body, note, quantity, duplicate, photo_note
+):
+    _, draft = advance_note_draft(
+        client, store, body, note, quantity=quantity, duplicate=duplicate, photo_note=photo_note
+    )
+    assert "advance_suggestion" not in draft
+    assert draft["review_document"] is None
 
 
 def test_context_uses_internal_relation_is_readonly_and_legacy_label_cannot_forge_it(

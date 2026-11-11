@@ -237,6 +237,33 @@ test("editing hides saved calculation amounts until a new server result is avail
   assert.doesNotMatch(JSON.stringify(content), /987654|987,654|確認入帳/);
 });
 
+test("initial advance suggestion separates receipt payment from personal spend and hides stale totals on edits", async () => {
+  const app = await appHarness();
+  await app.run('openDraft("' + B + '")');
+  const preview = {hidden: true, textContent: ""};
+  app.context.document.getElementById = (id) => id === "review-advance-preview" ? preview : null;
+  app.context.document.querySelector = () => null;
+  app.run(`
+    state.selected.candidate = {
+      printed_total_yuan: 300,
+      items: [{raw_name: "合成炒飯", quantity: 1, printed_line_total_yuan: 270},
+        {raw_name: "合成丸湯", quantity: 1, printed_line_total_yuan: 30}],
+      adjustments: [],
+    };
+    state.selected.advance_suggestion = {item_positions: [1], personal_yuan: 270, advance_yuan: 30};
+    state.edit = makeEdit(state.selected);
+    refreshReviewSummaries();
+  `);
+  assert.deepEqual(plain(app.run("state.edit.line_decisions.map(row => row.whole_purpose)")), ["self", "advance"]);
+  assert.equal(app.run("state.edit.candidate.printed_total_yuan"), 300);
+  assert.equal(preview.hidden, false);
+  assert.match(preview.textContent, /個人支出預估 NT\$ 270/);
+  assert.match(preview.textContent, /代墊 NT\$ 30/);
+  app.run('state.edit.line_decisions[1].whole_purpose = "gift"; markDirty();');
+  assert.equal(preview.hidden, true);
+  assert.equal(app.calls.filter(([, options]) => options?.method === "PUT").length, 0);
+});
+
 
 test("deleted draft deep link renders a final read-only notice without editing controls", async () => {
   const app = await appHarness(`#draft/${A}`);
