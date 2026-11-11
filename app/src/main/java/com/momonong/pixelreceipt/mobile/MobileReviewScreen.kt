@@ -6,8 +6,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -84,6 +86,8 @@ internal fun MobileReviewScreen(state: MobileUiState, images: ImageStore, action
     }
     val editor = review.editor
     val candidate = editor.getAsJsonObject("candidate")
+    val draft = review.draft
+    val advancePreview = review.advancePreview(draft, editor)
     val errors = reviewErrors(review)
     val editable = !batch.deleted && state.mutations.none { it.batchId == batch.id && it.phase == "pending" } && state.busy == null && state.writable && !review.locked && batch.ledgerId == null && batch.draftStatus !in setOf("confirmed", "voided")
     var headerOpen by rememberSaveable(batch.id) { mutableStateOf(false) }
@@ -112,7 +116,20 @@ internal fun MobileReviewScreen(state: MobileUiState, images: ImageStore, action
                     ReviewField("實付總額（元）", candidate.text("printed_total_yuan"), errors["printed_total_yuan"], "review-total", editable, true) { value -> change { it.getAsJsonObject("candidate").addProperty("printed_total_yuan", value) } }
                 } else listOf("merchant", "receipt_date", "printed_total_yuan").forEach { key -> errors[key]?.let { ReviewError(it) } }
                 errors["total"]?.let { ReviewError(it) }
-                val calc = review.draft.getAsJsonObject("calculation")
+                val calc = draft.getAsJsonObject("calculation")
+                if (advancePreview != null) {
+                    Text("依送出備註預填代買，請核對品項用途。", style = MaterialTheme.typography.bodySmall, color = MobileMuted)
+                    if (advancePreview.personalYuan != null && advancePreview.advanceYuan != null) {
+                        Text("個人支出預估 NT$ ${advancePreview.personalYuan}", style = MaterialTheme.typography.titleMedium, color = MobileTealInk)
+                        Text("代買 NT$ ${advancePreview.advanceYuan}", style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
+                    } else {
+                        Text("核對票面與品項金額後會顯示個人支出。", style = MaterialTheme.typography.bodySmall, color = MobileMuted)
+                    }
+                } else if (!review.dirty && !review.conflict && calc.text("reconciliation_status") == "balanced" &&
+                    (calc.text("advance_yuan").toLongOrNull() ?: 0) > 0) {
+                    Text("個人支出 ${moneyText(calc["personal_yuan"])}", style = MaterialTheme.typography.titleMedium, color = MobileTealInk)
+                    Text("代買 ${moneyText(calc["advance_yuan"])}", style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
+                }
                 if (!review.dirty && calc["computed_total_yuan"]?.isJsonNull == false) {
                     Text("明細核算 ${moneyText(calc["computed_total_yuan"])}" + calc["reconciliation_difference_yuan"]?.takeUnless { it.isJsonNull }?.let { " · 差額 ${it.asString} 元" }.orEmpty(), style = MaterialTheme.typography.bodySmall, color = MobileMuted)
                 }
@@ -127,7 +144,7 @@ internal fun MobileReviewScreen(state: MobileUiState, images: ImageStore, action
                         TextButton(onClick = { preview = image.hash }, modifier = Modifier.heightIn(min = 48.dp).testTag("review-photo-$index")) { Text("原圖 ${index + 1}・放大") }
                     }
                 }
-                if (batch.userNotes.isNotBlank()) Text(batch.userNotes, style = MaterialTheme.typography.bodySmall, color = MobileMuted)
+                if (batch.userNotes.isNotBlank()) Text("送出備註 · ${batch.userNotes}", style = MaterialTheme.typography.bodySmall, color = MobileMuted)
             }
         }
         if (review.error != null) item(key = "error") { MobileNotice(review.error) }
@@ -170,7 +187,18 @@ internal fun MobileReviewScreen(state: MobileUiState, images: ImageStore, action
                 errors.filterKeys { it.startsWith("item.$index.") }.values.distinct().forEach { ReviewError(it) }
                 if (open) {
                     listOf("raw_name" to "品名", "quantity" to "購買數量", "printed_line_total_yuan" to "此品項行金額（元）", "printed_unit_price_yuan" to "票面單價（元，未知可留空）").forEach { (key, label) ->
-                        ReviewField(label, item.text(key), errors["item.$index.$key"], "review-item-$index-$key", editable, key != "raw_name") { value -> change { it.getAsJsonObject("candidate").array("items")[index].asJsonObject.addProperty(key, value) } }
+                        ReviewField(label, item.text(key), errors["item.$index.$key"], "review-item-$index-$key", editable, key != "raw_name") { value ->
+                            change { edit ->
+                                val editedItem = edit.getAsJsonObject("candidate").array("items")[index].asJsonObject
+                                val decisions = edit.array("line_decisions")
+                                if ((key == "raw_name" || key == "quantity") && editedItem.text(key).trim() != value.trim() &&
+                                    decisions[index].asJsonObject.text("whole_purpose") == "advance") {
+                                    // The old purpose covered the previous item and quantity only.
+                                    decisions.set(index, wholeDecision(index, ""))
+                                }
+                                editedItem.addProperty(key, value)
+                            }
+                        }
                     }
                     val choice = if (decision.text("method") == "whole_line") decision.text("whole_purpose") else "split"
                     ReviewSelect("用途", choice, purposeLabels + ("split" to "分攤"), editable) { purpose -> change { edit ->
@@ -237,7 +265,9 @@ internal fun MobileReviewScreen(state: MobileUiState, images: ImageStore, action
             }
         }
     }
-    preview?.let { hash -> NativeOriginalDialog(hash, images) { preview = null } }
+    preview?.let { hash ->
+        NativeOriginalDialog(hash, images, batch.images.firstOrNull { it.hash == hash }?.notes.orEmpty()) { preview = null }
+    }
 }
 
 @Composable private fun ReviewCard(content: @Composable ColumnScope.() -> Unit) {
@@ -295,11 +325,16 @@ internal fun removeReviewAdjustment(editor: JsonObject, index: Int) {
     editor.getAsJsonObject("candidate").array("adjustments").remove(index)
     editor.add("adjustment_decisions", JsonArray().apply { editor.array("adjustment_decisions").filter { it.asJsonObject["adjustment_position"].asInt != index }.forEach { value -> val decision = value.asJsonObject; if (decision["adjustment_position"].asInt > index) decision.addProperty("adjustment_position", decision["adjustment_position"].asInt - 1); add(decision) } })
 }
-@Composable internal fun NativeOriginalDialog(hash: String, images: ImageStore, close: () -> Unit) {
+@Composable internal fun NativeOriginalDialog(hash: String, images: ImageStore, note: String = "", close: () -> Unit) {
     Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(color = MobileGround, modifier = Modifier.fillMaxSize()) {
             Column(Modifier.safeDrawingPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("對照原圖", style = MaterialTheme.typography.titleLarge)
+                if (note.isNotBlank()) {
+                    Column(Modifier.fillMaxWidth().heightIn(max = 120.dp).verticalScroll(rememberScrollState())) {
+                        Text("照片備註 · $note", style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
+                    }
+                }
                 if (images.file(hash).isFile) EvidencePhoto(hash, images, Modifier.weight(1f).fillMaxWidth(), zoomable = true)
                 else Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Text("此裝置未保存原圖。帳目與核對內容仍可在 App 查看。", color = MobileMuted) }
                 OutlinedButton(onClick = close, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), shape = RoundedCornerShape(10.dp)) { Text("返回核對") }

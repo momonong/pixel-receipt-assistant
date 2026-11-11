@@ -26,6 +26,8 @@
 
 原生 reviewer Bearer 可接既有 `GET /v1/drafts/{id}`、`PUT /v2/drafts/{id}/review`、`POST /v2/drafts/{id}/confirm`、`GET /v1/ledger` 與 `GET /v1/ledger/{id}`。金額與入帳仍由確定性後端核對；草稿保存不等於確認。confirm 維持 revision CAS 與原 Idempotency-Key；斷線或未知結果不能換 key 重複入帳。帳本 list 的 `entries` 與 detail 都是 ledger entry，候選、用途與 calculation 位於 `snapshot`；現行作廢狀態讀外層 `status`，確認快照不改寫。
 
+對尚未保存核對的第 1 版手機收件草稿，reviewer 的單筆 GET 可回傳 `advance_suggestion`，含 `item_positions`（從 0 開始）、`personal_yuan` 與 `advance_yuan`。整批或收據圖備註要明確點名唯一的單件品項，例如「牙膏幫朋友買」。預估使用既有帳務計算，其他品項預設自己用，另列折扣或加收按既有比例分配。金額有缺漏或不符時兩個預估皆為 null。這是供編輯器預填的建議，讀取時不會寫入核對或帳本。
+
 `POST /v2/mobile/logout` 使用 native Bearer 時只撤銷當前 session，不影響同裝置其他 native session、舊 ingest token 或瀏覽器登入。使用舊 device ingest token 時沿用原本裝置 token 登出行為。v1 logout 入口保留，亦能處理 native 當前 session。
 
 reviewer 的 `GET /v1/devices` 聚合 legacy 裝置與有效 native sessions，同 UUID 列一筆；native-only 名稱為「手機 App」。`DELETE /v1/devices/{device_id}` 在同一 transaction 撤銷該裝置 legacy token 與全部 native sessions，其他裝置及瀏覽器 session 不受影響。裝置重新輸入密碼可另行登入，不能以本機刪 token 代替中央撤銷。

@@ -13,15 +13,16 @@ from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, R
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
 
+from .advance_suggestion import suggest_advance
 from .analysis_store import AnalysisStore
-from .auth import Auth
+from .auth import Auth, Principal
 from .evidence import MAX_UPLOAD_BYTES, SUPPORTED_MEDIA, InvalidEvidence
 from .inspection import InspectionUnavailable, inspect_evidence_isolated
 from .intake_models import CreateIntake, DeleteIntake
 from .intake_store import IntakeStore
 from .ledger_models import ConfirmReceipt, ReviewReceipt, VoidReceipt
 from .mobile_release import MobileRelease
-from .models import CreateDraft, DeleteDraft, ReviewDraft
+from .models import Candidate, CreateDraft, DeleteDraft, ReviewDraft
 from .pricing_models import CreateProduct, ReviewPrices
 from .recognition import RecognitionWorker
 from .store import SCHEMA_VERSION, Store, StoreError
@@ -245,8 +246,32 @@ def create_app(
         }
 
     @api.get("/v1/drafts/{draft_id}")
-    def get_draft(draft_id: str):
-        return store.get_draft(draft_id)
+    def get_draft(draft_id: str, principal: Annotated[Principal, Depends(auth.authenticate)]):
+        draft = store.get_draft(draft_id)
+        if (
+            principal.role != "reviewer"
+            or draft["status"] != "needs_review"
+            or draft["revision"] != 1
+            or draft["review_document"] is not None
+        ):
+            return draft
+        try:
+            context = intakes.draft_context(draft_id)["intake"]
+        except StoreError as error:
+            if error.code != "intake_context_invalid":
+                raise
+            # An invalid optional context cannot supply a default. The context
+            # endpoint still reports the error, and the draft remains readable.
+            return draft
+        if context:
+            notes = [
+                context["user_notes"],
+                *(entry["notes"] for entry in context["evidence"] if entry["role"] == "receipt"),
+            ]
+            suggestion = suggest_advance(Candidate.model_validate(draft["candidate"]), notes)
+            if suggestion is not None:
+                draft["advance_suggestion"] = suggestion
+        return draft
 
     @api.post("/v1/drafts/{draft_id}/delete", dependencies=[Depends(auth.reviewer)])
     async def delete_draft(draft_id: str, request: Request):

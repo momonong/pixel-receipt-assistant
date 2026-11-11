@@ -85,10 +85,73 @@ class NativeAccountingRenderingTest {
         ui.onNodeWithTag("review-item-0-quantity").performScrollTo().assertIsDisplayed()
         capture("native-item-editor-390")
     }
+    @Test fun initialAdvanceSuggestionShowsPersonalEstimateSeparatelyAndDropsItAfterEdits() {
+        val remote = batch.review!!.draft.apply {
+            getAsJsonObject("candidate").apply {
+                addProperty("printed_total_yuan", 300)
+                add("items", jsonObject("""{"items":[
+                    {"raw_name":"合成炒飯","quantity":1,"printed_line_total_yuan":270},
+                    {"raw_name":"合成丸湯","quantity":1,"printed_line_total_yuan":30}
+                ]}""").array("items"))
+                add("adjustments", JsonArray())
+            }
+            add("calculation", jsonObject("""{"ready":false,"blockers":[],"printed_total_yuan":300,
+                "computed_total_yuan":300,"reconciliation_status":"balanced","personal_yuan":null,"advance_yuan":null}"""))
+            add("advance_suggestion", jsonObject("""{"item_positions":[1],"personal_yuan":270,"advance_yuan":30}"""))
+        }
+        val review = createReview(remote.toString())
+        val suggested = batch.copy(review = review, userNotes = "合成丸湯幫別人買")
+        val current = mutableStateOf(state().copy(batches = listOf(suggested)))
+        mount({ current.value }, MobileActions(editReview = { _, change ->
+            val next = current.value.batch!!.review!!
+            val editor = next.editor.also(change)
+            current.value = current.value.copy(batches = listOf(
+                suggested.copy(review = next.copy(editorJson = editor.toString(), editRevision = next.editRevision + 1))
+            ))
+        }))
+        ui.onNodeWithText("NT\$ 300").assertIsDisplayed()
+        ui.onNodeWithText("個人支出預估 NT\$ 270").assertIsDisplayed()
+        ui.onNodeWithText("代買 NT\$ 30").assertIsDisplayed()
+        capture("native-advance-preview-390")
+        ui.onNodeWithTag("native-review").performScrollToNode(hasText("1 件 · 代買"))
+        ui.onNodeWithText("1 件 · 代買").assertIsDisplayed()
+        val body = jsonObject(prepareReview(review).body!!)
+        assertEquals("advance", body.array("line_decisions")[1].asJsonObject.text("whole_purpose"))
+        assertEquals(300, body.getAsJsonObject("candidate")["printed_total_yuan"].asInt)
+        val savedDraft = remote.deepCopy().apply {
+            addProperty("revision", 2)
+            remove("advance_suggestion")
+            add("review_document", body.deepCopy().apply {
+                remove("expected_revision")
+                remove("candidate")
+                remove("review_note")
+            })
+            getAsJsonObject("calculation").apply {
+                addProperty("personal_yuan", 270)
+                addProperty("advance_yuan", 30)
+            }
+        }
+        ui.runOnIdle {
+            current.value = current.value.copy(batches = listOf(
+                suggested.copy(review = review.copy(serverJson = savedDraft.toString(), savedEditRevision = 0))
+            ))
+        }
+        ui.onNodeWithText("確認入帳").assertIsDisplayed().assertIsEnabled()
+        ui.onNodeWithTag("review-item-1").performClick()
+        ui.onNodeWithTag("review-item-1-quantity").performScrollTo().performTextReplacement("2")
+        val changed = current.value.batch!!.review!!
+        assertTrue("item.1.purpose" in prepareReview(changed).errors)
+        ui.onNodeWithTag("mobile-primary").assertIsNotEnabled()
+        ui.onNodeWithTag("native-review").performScrollToIndex(0)
+        ui.onNodeWithText("個人支出預估 NT\$ 270").assertDoesNotExist()
+    }
     @Test fun originalPhotoOpensAndReturnsInsideTheSameNativeReview() {
-        mount({ state() })
+        val noted = batch.copy(images = batch.images.map { it.copy(notes = "合成照片的說明") })
+        mount({ state().copy(batches = listOf(noted)) })
         ui.onNodeWithTag("review-photo-0").performClick()
-        ui.onNodeWithText("對照原圖").assertIsDisplayed(); ui.onNodeWithText("返回核對").performClick()
+        ui.onNodeWithText("對照原圖").assertIsDisplayed()
+        ui.onNodeWithText("照片備註 · 合成照片的說明").assertIsDisplayed()
+        ui.onNodeWithText("返回核對").performClick()
         ui.onNodeWithTag("native-review").assertExists()
         capture("native-review-after-photo-390")
     }

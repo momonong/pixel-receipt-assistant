@@ -99,7 +99,7 @@ internal fun MobileDetail(state: MobileUiState, images: ImageStore, actions: Mob
                                     shape = RoundedCornerShape(10.dp), modifier = Modifier.heightIn(min = 48.dp))
                             }
                         }
-                        MobileNotes("batch:${batch.id}", batch.userNotes, "整批說明", "例如：牙膏幫朋友買，第二張是價標。", 4000, state.busy == null && state.writable,
+                        MobileNotes("batch:${batch.id}", batch.userNotes, "整批說明", "例如：第二張是價標。牙膏幫朋友買。", 4000, state.busy == null && state.writable,
                             Modifier.testTag("mobile-batch-notes")) { text -> actions.edit(batch.id) { it.copy(userNotes = text) } }
                     } else {
                         Text("送出的說明", style = MaterialTheme.typography.titleMedium)

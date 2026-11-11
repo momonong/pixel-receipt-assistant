@@ -48,6 +48,7 @@ internal fun NativePrimaryBar(state: MobileUiState, actions: MobileActions, comp
                 waiting -> "正在更新金額…"
                 review.editor.text("assembly_status") == "incomplete" -> "補齊後即可入帳"
                 blockers.isNotEmpty() -> "請先核對標示的欄位"
+                (review.draft.getAsJsonObject("calculation").text("advance_yuan").toLongOrNull() ?: 0) > 0 -> "確認入帳"
                 else -> "確認入帳 ${moneyText(review.draft.getAsJsonObject("calculation")["printed_total_yuan"])}"
             }
             enabled = state.busy == null && state.writable && (batch?.deleted == true || (batch != null && state.mutations.any { it.batchId == batch.id && it.phase == "pending" }) || formal || !state.reviewer || !state.signedIn || review == null || review.conflict || review.confirmation != null || (!invalid && (review.error != null || review.saveAttempt != null || (!waiting && blockers.isEmpty() && review.editor.text("assembly_status") != "incomplete"))))
