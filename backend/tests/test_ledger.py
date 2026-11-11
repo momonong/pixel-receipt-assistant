@@ -344,7 +344,6 @@ def test_parallel_confirmation_cannot_duplicate_ledger(client, store, body):
     [
         (lambda r: r.update(assembly_status="unknown"), "receipt_completeness_unconfirmed"),
         (lambda r: r.update(line_decisions=[]), "item_purpose_unconfirmed"),
-        (lambda r: r["candidate"]["items"][0].update(raw_name=None), "item_name_unknown"),
         (lambda r: r["candidate"]["items"][0].update(quantity=None), "item_quantity_unknown"),
         (
             lambda r: r["candidate"]["items"][0].update(printed_line_total_yuan=None),

@@ -21,11 +21,14 @@ from . import inspection
 from .auth import validate_token
 from .intake_store import IntakeStore
 from .models import Candidate
+from .note_review import build_note_review
+from .recognition_models import RecognitionDocument
 from .store import StoreError, canonical
 
 ADAPTER_VERSION = "pixelreceipt-broker-queue-1"
-PROMPT_VERSION = "pixelreceipt-vision-candidate-1"
-CANDIDATE_PARSER_VERSION = "pixelreceipt-candidate-parser-2"
+LEGACY_PROMPT_VERSION = "pixelreceipt-vision-candidate-1"
+PROMPT_VERSION = "pixelreceipt-vision-note-review-2"
+CANDIDATE_PARSER_VERSION = "pixelreceipt-candidate-parser-3"
 MAX_IMAGE_BYTES = 384 * 1024
 MAX_MEDIA_BYTES = 8 * 1024 * 1024
 MAX_REQUEST_BYTES = 16 * 1024 * 1024
@@ -725,8 +728,19 @@ class RecognitionWorker:
             "object matching the following JSON schema. Unknown values must be null. "
             "Do not infer paid purchases from menu/promotion/reference. Keep all items in order. "
             "Money is integer TWD yuan, never multiply by 100. Do not calculate or invent values. "
-            "User intent/use allocation is still subject to human review. Schema: "
-            + canonical(Candidate.model_json_schema(by_alias=True))
+            "After extracting candidate items, compare them with ALL batch and per-image notes. "
+            "In the SAME response return candidate, note_intents, and unresolved_note_quotes. "
+            "Only propose self, advance (buying/paying for someone else), or gift for actual "
+            "candidate items, with their zero-based item_position and exact item_name. "
+            "note_quote must be a continuous verbatim quote from user_notes or image notes, "
+            "never from image text or invented instructions. Explicitly retain mixed self/use "
+            "and advance purposes. whole_line is true only when the use covers the entire line, "
+            "including all purchased units; partial quantities, negation, conflicting notes, "
+            "duplicate item names or unclear references belong in unresolved_note_quotes. "
+            "Do not silently turn unresolved purpose notes into self. Do not add items because "
+            "of notes, infer purchases from reference images, calculate allocation amounts, or "
+            "author final ledger values. All intent proposals require human review. Schema: "
+            + canonical(RecognitionDocument.model_json_schema(by_alias=True))
             + "\nInput context: "
             + canonical(
                 {
@@ -821,7 +835,49 @@ class RecognitionWorker:
         result["candidate_parser"].update(json_fence_removed=removed, attempted=True)
         if not self.intakes.update(row["id"], result=canonical(result)):
             return
-        candidate = _validate_candidate_document(normalized)
+        if snapshot["prompt_version"] == LEGACY_PROMPT_VERSION:
+            candidate = _validate_candidate_document(normalized)
+            model_review = None
+        elif snapshot["prompt_version"] == PROMPT_VERSION:
+
+            def unique_pairs(entries):
+                value = {}
+                for key, child in entries:
+                    if key in value:
+                        raise ValueError("duplicate model output key")
+                    value[key] = child
+                return value
+
+            def reject_constant(_):
+                raise ValueError("nonfinite model output")
+
+            try:
+                # The Candidate-only HTTP parser deliberately rejects booleans;
+                # this wrapper adds whole_line booleans outside Candidate.
+                document = json.loads(
+                    normalized, object_pairs_hook=unique_pairs, parse_constant=reject_constant
+                )
+                if not isinstance(document, dict) or "candidate" not in document:
+                    raise ValueError
+                candidate = _validate_candidate_document(canonical(document["candidate"]))
+                # Malformed semantic proposals must not discard otherwise valid
+                # receipt facts. The deterministic reviewer surfaces them below.
+                model_review = {key: value for key, value in document.items() if key != "candidate"}
+            except (ValueError, RecursionError):
+                raise RecognitionError("invalid_model_candidate") from None
+        else:
+            raise RecognitionError("unsupported_prompt_version")
+        if model_review is not None:
+            result["model_note_review"] = (
+                model_review
+                if set(model_review) == {"note_intents", "unresolved_note_quotes"}
+                else {"note_intents": None, "unresolved_note_quotes": None}
+            )
+        intake = json.loads(row["input"])
+        notes = [intake["user_notes"], *[entry["notes"] for entry in intake["evidence"]]]
+        result["note_review"] = build_note_review(
+            Candidate.model_validate(candidate), notes, model_review
+        )
         self.intakes.complete(row["id"], candidate, result)
 
     async def step(self, row):

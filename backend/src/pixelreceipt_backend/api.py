@@ -20,7 +20,7 @@ from .evidence import MAX_UPLOAD_BYTES, SUPPORTED_MEDIA, InvalidEvidence
 from .inspection import InspectionUnavailable, inspect_evidence_isolated
 from .intake_models import CreateIntake, DeleteIntake
 from .intake_store import IntakeStore
-from .ledger_models import ConfirmReceipt, ReviewReceipt, VoidReceipt
+from .ledger_models import ConfirmReceipt, ReviewReceipt, UpdateItemNames, VoidReceipt
 from .mobile_release import MobileRelease
 from .models import Candidate, CreateDraft, DeleteDraft, ReviewDraft
 from .pricing_models import CreateProduct, ReviewPrices
@@ -248,6 +248,10 @@ def create_app(
     @api.get("/v1/drafts/{draft_id}")
     def get_draft(draft_id: str, principal: Annotated[Principal, Depends(auth.authenticate)]):
         draft = store.get_draft(draft_id)
+        if principal.role == "reviewer" and draft["status"] == "needs_review":
+            notes = store.note_review(draft_id)
+            if notes is not None:
+                draft["note_review"] = notes
         if (
             principal.role != "reviewer"
             or draft["status"] != "needs_review"
@@ -286,7 +290,11 @@ def create_app(
 
     @api.put("/v1/drafts/{draft_id}/review", dependencies=[Depends(auth.reviewer)])
     async def review(draft_id: str, request: Request):
-        return store.review(draft_id, await parse_request(request, ReviewDraft))
+        value = store.review(draft_id, await parse_request(request, ReviewDraft))
+        notes = store.note_review(draft_id)
+        if notes is not None:
+            value["note_review"] = notes
+        return value
 
     @api.get("/v1/drafts/{draft_id}/history")
     def history(draft_id: str):
@@ -294,7 +302,11 @@ def create_app(
 
     @api.put("/v2/drafts/{draft_id}/review", dependencies=[Depends(auth.reviewer)])
     async def review_receipt(draft_id: str, request: Request):
-        return store.review_receipt(draft_id, await parse_request(request, ReviewReceipt))
+        value = store.review_receipt(draft_id, await parse_request(request, ReviewReceipt))
+        notes = store.note_review(draft_id)
+        if notes is not None:
+            value["note_review"] = notes
+        return value
 
     @api.post("/v2/drafts/{draft_id}/confirm", dependencies=[Depends(auth.reviewer)])
     async def confirm(draft_id: str, request: Request):
@@ -340,6 +352,16 @@ def create_app(
         if not KEY_PATTERN.fullmatch(key):
             raise HTTPException(422, "valid_idempotency_key_required")
         value, _created = store.void(ledger_id, await parse_request(request, VoidReceipt), key)
+        return value
+
+    @api.post("/v1/ledger/{ledger_id}/item-names", dependencies=[Depends(auth.reviewer)])
+    async def update_item_names(ledger_id: str, request: Request):
+        key = request.headers.get("idempotency-key", "")
+        if not KEY_PATTERN.fullmatch(key):
+            raise HTTPException(422, "valid_idempotency_key_required")
+        value, _created = store.update_item_names(
+            ledger_id, await parse_request(request, UpdateItemNames), key
+        )
         return value
 
     @api.get("/v1/products")

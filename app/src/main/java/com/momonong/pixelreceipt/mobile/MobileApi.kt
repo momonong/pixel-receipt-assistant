@@ -31,6 +31,7 @@ interface MobileApi {
     suspend fun ledgerDetail(token: String, id: String): String = throw UnsupportedOperationException()
     suspend fun deleteIntake(token: String, id: String, attempt: ReceiptMutation): ServerIntake = throw UnsupportedOperationException()
     suspend fun deleteDraft(token: String, id: String, attempt: ReceiptMutation): String = throw UnsupportedOperationException()
+    suspend fun updateItemNames(token: String, id: String, attempt: ReceiptMutation): String = throw UnsupportedOperationException()
     suspend fun voidLedger(token: String, id: String, attempt: ReceiptMutation): String = throw UnsupportedOperationException()
     suspend fun overview(token: String): String = throw UnsupportedOperationException()
 }
@@ -155,17 +156,17 @@ class HttpsMobileApi internal constructor(private val transport: MobileTransport
         require(validUuid(id)); return transport.call(MobileRequest("v2/drafts/$id/review", "PUT", token, json = body)).also { check(draftObject(it).text("id") == id) }
     }
     override suspend fun confirm(token: String, id: String, attempt: FrozenConfirmation): String {
-        require(validUuid(id)); return transport.call(MobileRequest("v2/drafts/$id/confirm", "POST", token, json = attempt.body, idempotencyKey = attempt.key)).also { check(ledgerObject(it).text("draft_id") == id) }
+        require(validUuid(id)); return transport.call(MobileRequest("v2/drafts/$id/confirm", "POST", token, json = attempt.body, idempotencyKey = attempt.key)).also { check(ledgerNamesObject(it).text("draft_id") == id) }
     }
     override suspend fun ledger(token: String, offset: Int): String {
         require(offset in 0..100_000)
         return transport.call(MobileRequest("v1/ledger?limit=20&offset=$offset", token = token)).also { value ->
             val json = objectJson(value); check(json["entries"].isJsonArray); strictLong(json["total_count"], 0, Int.MAX_VALUE.toLong())
-            json.getAsJsonArray("entries").forEach { ledgerObject(it.toString()) }
+            json.getAsJsonArray("entries").forEach { ledgerNamesObject(it.toString()) }
         }
     }
     override suspend fun ledgerDetail(token: String, id: String): String {
-        require(validUuid(id)); return transport.call(MobileRequest("v1/ledger/$id", token = token)).also { check(ledgerObject(it).text("id") == id) }
+        require(validUuid(id)); return transport.call(MobileRequest("v1/ledger/$id", token = token)).also { check(ledgerNamesObject(it).text("id") == id) }
     }
     override suspend fun deleteIntake(token: String, id: String, attempt: ReceiptMutation): ServerIntake {
         require(attempt.kind == "intake_delete" && attempt.targetId == id); validateMutation(attempt)
@@ -177,7 +178,11 @@ class HttpsMobileApi internal constructor(private val transport: MobileTransport
     }
     override suspend fun voidLedger(token: String, id: String, attempt: ReceiptMutation): String {
         require(attempt.kind == "ledger_void" && attempt.targetId == id); validateMutation(attempt)
-        return transport.call(MobileRequest("v1/ledger/$id/void", "POST", token, json = attempt.body, idempotencyKey = attempt.key)).also { check(ledgerObject(it).text("id") == id && ledgerObject(it).text("status") == "voided") }
+        return transport.call(MobileRequest("v1/ledger/$id/void", "POST", token, json = attempt.body, idempotencyKey = attempt.key)).also { check(ledgerNamesObject(it).text("id") == id && ledgerNamesObject(it).text("status") == "voided") }
+    }
+    override suspend fun updateItemNames(token: String, id: String, attempt: ReceiptMutation): String {
+        require(attempt.kind == "ledger_names" && attempt.targetId == id); validateMutation(attempt)
+        return transport.call(MobileRequest("v1/ledger/$id/item-names", "POST", token, json = attempt.body, idempotencyKey = attempt.key)).also { check(ledgerNamesObject(it).text("id") == id) }
     }
     override suspend fun overview(token: String): String = transport.call(MobileRequest("v1/overview", token = token)).also { overviewObject(it) }
     private fun objectJson(body: String): JsonObject = JsonParser.parseString(body).asJsonObject
@@ -207,7 +212,7 @@ internal fun allowedMobileRequest(path: String, method: String): Boolean {
         "GET" -> path in setOf("v1/recognition", "v1/overview") || path.matches(Regex("v1/(intakes|drafts|ledger)/$uuid")) ||
             path.matches(Regex("v1/ledger\\?limit=20&offset=(0|[1-9][0-9]{0,5})"))
         "POST" -> path in setOf("v1/mobile/logout", "v2/mobile/login", "v2/mobile/logout", "v1/evidence", "v1/intakes") ||
-            path.matches(Regex("v2/drafts/$uuid/confirm")) || path.matches(Regex("v1/(intakes|drafts)/$uuid/delete")) || path.matches(Regex("v1/ledger/$uuid/void"))
+            path.matches(Regex("v2/drafts/$uuid/confirm")) || path.matches(Regex("v1/(intakes|drafts)/$uuid/delete")) || path.matches(Regex("v1/ledger/$uuid/(void|item-names)"))
         "PUT" -> path.matches(Regex("v2/drafts/$uuid/review"))
         else -> false
     }

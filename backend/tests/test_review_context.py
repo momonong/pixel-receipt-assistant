@@ -22,10 +22,10 @@ from .test_mobile_ingest import DEVICE, PASSWORD, intake, worker
 from .test_prices import product, review_prices
 
 
-def linked_intake(store, body, request=None):
+def linked_intake(store, body, request=None, model_review=None):
     journal = IntakeStore(store)
     saved, _ = journal.create(request or intake(body), "context-original")
-    runner, _ = worker(store, body)
+    runner, _ = worker(store, body, model_review=model_review)
     asyncio.run(runner.run_once())
     return journal.get(saved["id"])
 
@@ -41,6 +41,7 @@ def advance_note_draft(
     duplicate=False,
     photo_note=None,
     other_name="合成炒飯",
+    model_review=None,
 ):
     candidate = body["candidate"]
     candidate["printed_total_yuan"] = printed
@@ -56,7 +57,9 @@ def advance_note_draft(
     request = intake(body).model_dump(mode="json", by_alias=True)
     request["user_notes"] = note
     request["evidence"][0]["notes"] = photo_note
-    saved = linked_intake(store, body, CreateIntake.model_validate(request))
+    saved = linked_intake(
+        store, body, CreateIntake.model_validate(request), model_review=model_review
+    )
     url = f"/v1/drafts/{saved['draft_id']}"
     response = client.get(url)
     assert response.status_code == 200
@@ -265,7 +268,7 @@ def test_device_intake_context_review_confirm_and_price_flow_is_single_durable_t
         assert reviewed.json()["calculation"]["advance_yuan"] == 100
         confirmed = client.post(
             confirm_url,
-            json={"expected_revision": 2},
+            json={"expected_revision": 2, "notes_acknowledgement": "checked"},
             headers={"Idempotency-Key": "cross-flow-confirm"},
         )
         assert confirmed.status_code == 201

@@ -138,7 +138,11 @@ def test_expected_null_only_without_linked_draft(client, store, body):
 def test_posted_and_voided_cannot_be_deleted(client, store, body, kind, voided):
     journal, record = create_intake(store, body, linked=True)
     store.review_receipt(record["draft_id"], ReviewReceipt.model_validate(review_body(body)))
-    ledger, _ = store.confirm(record["draft_id"], ConfirmReceipt(expected_revision=2), "confirm")
+    ledger, _ = store.confirm(
+        record["draft_id"],
+        ConfirmReceipt(expected_revision=2, notes_acknowledgement="checked"),
+        "confirm",
+    )
     if voided:
         assert (
             client.post(
@@ -203,7 +207,11 @@ def test_delete_vs_confirm_has_one_winner(client, store, body):
     def confirm():
         barrier.wait()
         try:
-            store.confirm(record["draft_id"], ConfirmReceipt(expected_revision=2), "confirm-race")
+            store.confirm(
+                record["draft_id"],
+                ConfirmReceipt(expected_revision=2, notes_acknowledgement="checked"),
+                "confirm-race",
+            )
             return 201
         except StoreError as error:
             return error.status

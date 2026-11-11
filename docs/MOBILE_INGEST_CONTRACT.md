@@ -90,3 +90,9 @@ reviewer 的 `GET /v1/devices` 聚合 legacy 裝置與有效 native sessions，�
 兩個固定配置 mode：vision（1文字＋最多20圖片parts）與 document_pdf（1文字＋1真PDF文件part）。目前部署使用 document_pdf；provider/model 由部署配置明確指定。逐張原圖經資源限制子程序產生最長邊1600／最大384KiB JPEG，PDF再逐頁引用JPEG，不同時解碼20張大圖；保留原圖hash、衍生JPEGhash、頁序與PDFhash。這是傳輸封裝，不是APK接收PDF分享。總media8MiB／HTTPbody16MiB／result4MiB取較小實例限制；完整payload先 routes/explain，再用原key queue；不要求所有提供者structured_output。
 
 認證後 `GET /v1/mobile/release` 回 version_code、version_name、package_name、sha256、size_bytes、signer_sha256、download_url=/receipts/v1/mobile/apk。本版已部署 version_code=7、version_name=0.5.0、package_name=com.momonong.pixelreceipt.mobile，沿用永久 signer；後端只接受已確認的固定 code/name 配對。下載時以認證 metadata／APK hash 核對實際版本。`GET /v1/mobile/apk` 為 APK binary attachment，無path參數，未配置404；token不得放URL。檔案只由受控部署提供，後端啟動串流核對SHA／大小、下載串流讀取，不把APK塞進sourcebundle。Dashboard提供登入後下載連結。後續版本需先核對後端 metadata 相容策略與發布通道，見 [部署契約](ASUS_DEPLOYMENT.md)；本版下載資訊見 [發行說明](RELEASE_v0.5.0.md)。
+
+## 0.5.4 敘述核對與補品名
+
+新辨識 prompt `pixelreceipt-vision-note-review-2` 於同一既有請求回覆 candidate、note_intents、unresolved_note_quotes；舊凍結 prompt／payload／job key 不更動。模型僅提出用途與原文引用，不算最終帳本金額。GET draft 與 review PUT 保留 `note_review`，包括 status、decisions、unresolved_notes；原收件關聯、位置與名稱重新驗證。已保存的人工用途不被提案覆寫，未解析或用途衝突須顯式核對後以 confirm 的 `notes_acknowledgement: "checked"` 表達。省略欄位的既有成功請求保持 idempotency fingerprint；HTTP明確拒絕與未知結果分別處理。原生內部 acknowledgement marker 不傳入 ReviewReceipt。
+
+缺日期僅於新的本機編輯器預填當日，原Candidate保留null；日期以本機日曆選擇、內部仍用ISO字串。品名raw_name可null；合法金額與用途仍可入帳，缺名由ledger及overview欄位提示。補名POST `/v1/ledger/{id}/item-names` 要求 reviewer、固定 Idempotency-Key、expected_revision 和 item_names[{item_position,name}]。只追加 item_names_updated event，不改snapshot；回傳 display_item_names 和 missing_item_name_count，overview另提供receipts_missing_item_names。原生ledger_names outbox在派送前保存原body/key，未知結果核對指定revision事件內容，和作廢互斥；過期回覆不復活已作廢帳目。

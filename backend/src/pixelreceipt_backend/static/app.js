@@ -14,7 +14,7 @@ const state = {
   view: "overview", drafts: [], ledger: [], draftOffset: 0, ledgerOffset: 0,
   selected: null, edit: null, intakeContext: null, routeDialog: null, dirty: false, loading: false, busy: false,
   error: null, message: null, conflict: false, saveUnknown: false,
-  confirmAttempt: null, voidAttempts: new Map(), query: "", dateFrom: "", dateTo: "", session: null,
+  confirmAttempt: null, notesAcknowledged: false, voidAttempts: new Map(), query: "", dateFrom: "", dateTo: "", session: null,
   evidenceUrl: null, evidenceController: null, draftController: null,
   overview: null, overviewFrom: "", overviewTo: "", ledgerStatus: "active", ledgerTotal: null,
   products: [], productQuery: "", productOffset: 0, productTotal: 0,
@@ -77,6 +77,7 @@ function refreshStatus() {
   if (state.message) region.append(notice(state.message.text, state.message.type));
 }
 function markDirty(preserveTolerance = false) {
+  state.notesAcknowledged = false;
   if (state.edit && !preserveTolerance) {
     state.edit.tolerance_acknowledgement = "none";
     const acknowledgement = document.querySelector("#tolerance-check");
@@ -89,6 +90,8 @@ function markDirty(preserveTolerance = false) {
   const evaluation = document.querySelector("#evaluation");
   if (evaluation) evaluation.replaceChildren(notice("內容已修改，請先儲存並檢查。", "info"));
   refreshReviewSummaries();
+  const notes = document.getElementById("review-notes");
+  if (notes) notes.replaceWith(noteReviewPanel(state.busy || !!state.confirmAttempt || state.conflict || state.saveUnknown || state.selected.status !== "needs_review"));
 }
 function mayLeave() {
   if (state.busy) { setStatus("正在處理這次操作，請稍候再切換畫面。", "info"); return false; }
@@ -181,7 +184,7 @@ function switchView(view, {replace = false} = {}) {
   if (!prepareNavigation()) return false;
   state.draftController?.abort();
   state.view = view; state.error = null; state.message = null;
-  state.dirty = false; state.edit = null; state.selected = null; state.intakeContext = null;
+  state.dirty = false; state.edit = null; state.selected = null; state.intakeContext = null; state.notesAcknowledged = false;
   writeRoute({view}, {replace});
   renderShell();
   if (!demo && view === "overview") loadOverview();
@@ -236,6 +239,7 @@ function renderOverview(container) {
         calcRow("用途分配合計", summary.allocated_total_yuan), calcRow("獨立未分配差額", summary.difference_yuan),
         calcRow("收據明列折扣", summary.explicit_discount_yuan)),
       el("p", { class: "caption mb-16" }, "明列折扣只統計收據上有根據的扣除項各一次，含已含行金額的折扣；不是與市場最低價相比省下的錢。草稿、報價與促銷資料不計入。"));
+    if (summary.missing_item_name_count > 0) container.append(notice(`待補品名 ${summary.missing_item_name_count} 項 · ${summary.receipts_missing_item_names} 張收據，可在 App 稍後補齊；已確認金額與用途保留。`, "info"));
   } else container.append(panel("期間摘要", empty(state.loading ? "正在讀取期間摘要…" : "摘要尚未載入", "摘要由帳本統計完整範圍，前端不以部分頁面自行加總。", "◇")));
   const pending = state.drafts.filter((draft) => draft.status === "needs_review");
   const recent = el("section", { class: "panel" }, el("div", { class: "panel-header" }, el("h2", {}, "接著完成這幾張"), button("查看待核對 →", () => switchView("review"), "ghost small")));
@@ -350,13 +354,78 @@ function initialAdvanceSuggestion(draft) {
       !positions.every((index) => Number.isInteger(index) && index >= 0 && draft.candidate.items[index]?.quantity === 1)) return null;
   return suggestion;
 }
+function readNoteReview(draft) {
+  if (!draft.note_review) return null;
+  const note = draft.note_review;
+  const valid = ["none", "matched", "needs_review"].includes(note.status) && Array.isArray(note.decisions) && Array.isArray(note.unresolved_notes) &&
+    note.decisions.length <= 100 && note.unresolved_notes.length <= 100 && note.decisions.every((decision) =>
+      decision && typeof decision === "object" && Number.isInteger(decision.item_position) && decision.item_position >= 0 && decision.item_position < draft.candidate.items.length &&
+      ["self", "advance", "gift"].includes(decision.purpose) && typeof decision.note_quote === "string" && decision.note_quote.trim() && decision.note_quote.length <= 4000) &&
+    new Set(note.decisions.map((decision) => decision.item_position)).size === note.decisions.length &&
+    note.unresolved_notes.every((quote) => typeof quote === "string" && quote.trim() && quote.length <= 4000) &&
+    (note.status !== "matched" || note.decisions.length > 0 && note.unresolved_notes.length === 0) &&
+    (note.status !== "none" || !note.decisions.length && !note.unresolved_notes.length);
+  return valid ? note : {status: "needs_review", decisions: [], unresolved_notes: []};
+}
+function noteItemsUnchanged() {
+  const original = state.selected.candidate.items; const current = state.edit.candidate.items;
+  return original.length === current.length && original.every((item, index) => ["raw_name", "quantity"].every((key) => String(item[key] ?? "").trim() === String(current[index][key] ?? "").trim()));
+}
+function notePurposesDiffer() {
+  const note = readNoteReview(state.selected);
+  if (!note || note.status === "none") return false;
+  return !noteItemsUnchanged() || note.decisions.some((proposal) => {
+    const decision = state.edit.line_decisions.find((row) => row.item_position === proposal.item_position);
+    return !decision || decision.method !== "whole_line" || decision.whole_purpose !== proposal.purpose;
+  });
+}
+function notesRequireCheck() {
+  const note = readNoteReview(state.selected);
+  return !!note && (note.status === "needs_review" || notePurposesDiffer());
+}
+function notesNeedAcknowledgement() { return notesRequireCheck() && !state.notesAcknowledged; }
+function canApplyNotePurposes() {
+  const note = readNoteReview(state.selected);
+  return note?.status === "matched" && noteItemsUnchanged() && note.decisions.every((proposal) => state.edit.line_decisions.some((row) => row.item_position === proposal.item_position && row.method === "whole_line"));
+}
+function applyNotePurposes() {
+  if (state.busy || state.confirmAttempt || state.conflict || state.saveUnknown || state.selected.status !== "needs_review" || !canApplyNotePurposes()) return;
+  for (const proposal of readNoteReview(state.selected).decisions) {
+    const index = state.edit.line_decisions.findIndex((row) => row.item_position === proposal.item_position);
+    state.edit.line_decisions[index] = {...blankLineDecision(proposal.item_position), whole_purpose: proposal.purpose};
+  }
+  markDirty(); renderShell();
+}
+function acknowledgeNotes() {
+  if (state.busy || state.confirmAttempt || state.conflict || state.saveUnknown || state.selected.status !== "needs_review") return;
+  state.notesAcknowledged = true; renderShell();
+}
+function noteReviewPanel(locked) {
+  const note = readNoteReview(state.selected);
+  if (!note || note.status === "none") return null;
+  const difference = notePurposesDiffer();
+  return el("section", {class: "review-section", id: "review-notes"}, el("h3", {}, "補充敘述與用途"),
+    el("p", {class: "section-note"}, state.notesAcknowledged ? "已核對敘述，保留目前用途。" : note.status === "needs_review" ? "補充敘述仍有無法對應的用途，請逐項核對。" : difference ? "敘述建議與目前用途不同；已保留你的編輯，請選擇套用或保留。" : "已依補充敘述帶入用途，請再核對品項。"),
+    [...new Set([...note.decisions.map((row) => row.note_quote), ...note.unresolved_notes])].map((quote) => el("p", {}, `來源敘述 · ${quote}`)),
+    difference && note.status === "matched" ? button("依補充敘述套用用途", applyNotePurposes, "secondary small", {disabled: locked || !canApplyNotePurposes()}) : null,
+    difference && !canApplyNotePurposes() ? el("p", {class: "caption"}, "品項已變更或目前含分攤，請逐項核對；不會替換既有分攤。") : null,
+    notesNeedAcknowledgement() ? button("保留目前用途，已核對敘述", acknowledgeNotes, "secondary small", {disabled: locked}) : null);
+}
+function browserLocalDate() {
+  const today = new Date();
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+}
 function makeEdit(draft) {
   const document = draft.review_document || {};
-  const suggestion = initialAdvanceSuggestion(draft);
+  const note = readNoteReview(draft);
+  const purposes = !draft.review_document && note?.status === "matched" ? new Map(note.decisions.map((row) => [row.item_position, row.purpose])) : null;
+  const suggestion = note ? null : initialAdvanceSuggestion(draft);
+  const candidate = clone(draft.candidate);
+  if (!draft.review_document && draft.status === "needs_review" && !candidate.receipt_date) candidate.receipt_date = browserLocalDate();
   return {
-    candidate: clone(draft.candidate), assembly_status: document.assembly_status || "unknown",
+    candidate, assembly_status: document.assembly_status || "unknown",
     line_decisions: draft.candidate.items.map((_, position) => clone(document.line_decisions?.find((decision) => decision.item_position === position) || {
-      ...blankLineDecision(position), whole_purpose: suggestion ? (suggestion.item_positions.includes(position) ? "advance" : "self") : null,
+      ...blankLineDecision(position), whole_purpose: purposes ? (purposes.get(position) || "self") : suggestion ? (suggestion.item_positions.includes(position) ? "advance" : "self") : null,
     })),
     adjustment_decisions: draft.candidate.adjustments.map((adjustment, position) => clone(document.adjustment_decisions?.find((decision) => decision.adjustment_position === position) || {
       adjustment_position: position, method: suggestion && adjustment.amount_effect === "separate_from_line_totals" ? "proportional_amount" : "", amounts_yuan: null,
@@ -374,7 +443,7 @@ async function openDraft(id, force = false, {replace = false} = {}) {
   state.draftController?.abort();
   const controller = new AbortController(); state.draftController = controller;
   state.loading = true; state.error = null; state.message = null;
-  state.view = "review"; state.dirty = false; state.conflict = false; state.saveUnknown = false;
+  state.view = "review"; state.dirty = false; state.conflict = false; state.saveUnknown = false; state.notesAcknowledged = false;
   state.intakeContext = {status: "loading", value: null};
   writeRoute({view: "review", draftId: id}, {replace});
   renderShell();
@@ -452,12 +521,12 @@ function renderWorkspace(workspace) {
     el("div", {}, el("p", {class: "caption"}, "票面總額"), el("strong", {class: "receipt-total", id: "review-printed-total"}, money(candidate.printed_total_yuan)),
       el("p", {class: "caption"}, "來源：收據印刷欄位，仍需對照原圖")),
     button("查看原圖", () => focusReviewSection("review-original"), "secondary small", {id: "review-original-open"}));
-  fields.append(overview, el("p", {class: "section-note", id: "review-advance-preview", hidden: true}), receiptFields);
+  fields.append(overview, el("p", {class: "section-note", id: "review-advance-preview", hidden: true}), ...[noteReviewPanel(locked)].filter(Boolean), receiptFields);
   const itemSection = el("section", { class: "review-section", id: "review-items" },
     el("div", {class: "review-section-heading"}, el("h3", {}, "品項"), el("span", {class: "caption"}, `${candidate.items.length} 項 · 金額依票面`)));
   candidate.items.forEach((item, index) => itemSection.append(el("details", {class: "review-item", id: `review-item-${index}`},
     el("summary", {"aria-label": `修改品項 ${index + 1}`},
-      el("span", {class: "review-item-copy"}, el("strong", {id: `item-name-${index}`}, item.raw_name || "品名待確認"), el("small", {id: `item-meta-${index}`})),
+      el("span", {class: "review-item-copy"}, el("strong", {id: `item-name-${index}`}, item.raw_name || "待補品名"), el("small", {id: `item-meta-${index}`})),
       el("span", {class: "review-item-end"}, el("strong", {id: `item-amount-${index}`}, money(item.printed_line_total_yuan)), el("small", {class: "edit-affordance"}, "修改"))), itemEditor(item, index))));
   itemSection.append(button("新增品項", () => { addItem(); focusReviewSection(`review-item-${state.edit.candidate.items.length - 1}`); }, "ghost small", { disabled: candidate.items.length >= 100 }));
   const adjustmentSection = el("section", {class: "review-section", id: "review-adjustments"},
@@ -551,7 +620,7 @@ function refreshReviewSummaries() {
   candidate.items.forEach((item, index) => {
     const decision = state.edit.line_decisions[index];
     const purpose = decision?.method === "whole_line" ? labels[decision.whole_purpose] || "用途未指定" : "分開分配";
-    setText(`item-name-${index}`, item.raw_name || "品名待確認");
+    setText(`item-name-${index}`, item.raw_name || "待補品名");
     setText(`item-meta-${index}`, `數量 ${item.quantity === null || item.quantity === undefined || item.quantity === "" ? "待確認" : item.quantity} · ${purpose}`);
     setText(`item-amount-${index}`, observedMoney(item.printed_line_total_yuan));
   });
@@ -573,7 +642,7 @@ function refreshReviewSummaries() {
     el("small", {}, adjustment.amount_effect === "included_in_line_totals" ? "已含在行金額" : adjustment.amount_effect === "separate_from_line_totals" ? "另外加減" : "是否已含待確認"))) : [el("p", {class: "caption"}, "沒有列出折扣或加減項")]));
   const attention = document.getElementById("review-attention");
   if (attention) {
-    const missingItems = candidate.items.filter((item) => !item.raw_name || item.quantity === null || item.quantity === "" || item.printed_line_total_yuan === null || item.printed_line_total_yuan === "").length;
+    const missingItems = candidate.items.filter((item) => item.quantity === null || item.quantity === "" || item.printed_line_total_yuan === null || item.printed_line_total_yuan === "").length;
     const actions = [];
     if (missingFacts) actions.push(button(`收據資料 ${missingFacts} 欄待確認`, () => focusReviewSection("receipt-facts"), "ghost small"));
     if (missingItems || !candidate.items.length) actions.push(button(`品項${missingItems ? ` ${missingItems} 項` : ""}待確認`, () => focusReviewSection("review-items"), "ghost small"));
@@ -683,7 +752,7 @@ function allocationEditor(item, index) {
     else detail.append(tripleFields(decision, "quantities", true), el("p", { class: "caption mt-10" }, "數量與金額都需填寫；無此用途請明確填 0，不能把金額分給數量為 0 的用途。"), tripleFields(decision, "amounts_yuan"));
   };
   controls.append(selectField("分配方式", decision.method, [["whole_line", "整項同一用途"], ["by_quantity", "按數量分配"], ["explicit_amounts", "直接指定金額"]], (value) => { decision.method = value; decision.whole_purpose = null; decision.quantities = null; decision.amounts_yuan = null; updateDetail(); }));
-  wrapper.append(el("p", { class: "allocation-name" }, `${index + 1}. ${item.raw_name || "品名待確認"}`), controls, detail); updateDetail();
+  wrapper.append(el("p", { class: "allocation-name" }, `${index + 1}. ${item.raw_name || "待補品名"}`), controls, detail); updateDetail();
   return wrapper;
 }
 function adjustmentAllocation(adjustment, index) {
@@ -824,7 +893,8 @@ function renderCalculation(container) {
     body.append(el("div", {class: "review-blockers"}, el("p", {}, "還有項目需要核對，現在不能入帳。"),
       el("ul", {class: "issues"}, ...calculation.blockers.map((issue) => el("li", {}, el("span", {}, blockerText(issue)), button("前往核對", () => focusBlocker(issue), "ghost small"))))));
   }
-  if ((calculation.ready && state.selected.status === "needs_review") || state.confirmAttempt) {
+  if (notesNeedAcknowledgement() && !state.confirmAttempt) body.append(notice("請先核對補充敘述與用途，再套用建議或保留目前用途。", "info", button("前往核對敘述", () => focusReviewSection("review-notes"), "ghost small")));
+  if ((calculation.ready && state.selected.status === "needs_review" && !notesNeedAcknowledgement()) || state.confirmAttempt) {
     const check = el("input", { type: "checkbox", disabled: !!state.confirmAttempt || state.selected.status !== "needs_review" || state.busy });
     const confirm = button(state.busy ? "正在確認…" : state.confirmAttempt ? "重試同一次確認" : "確認入帳", () => confirmDraft(), "", { disabled: state.busy || (!state.confirmAttempt) });
     check.addEventListener("change", () => confirm.disabled = !check.checked || !calculation.ready || state.busy);
@@ -919,7 +989,8 @@ function blockerText(issue) {
 async function confirmDraft() {
   if (demo || state.busy || state.dirty || state.conflict || state.saveUnknown || state.selected.status !== "needs_review" || !state.selected.calculation?.ready) return;
   if (!state.confirmAttempt) {
-    try { state.confirmAttempt = { id: state.selected.id, body: { expected_revision: state.selected.revision }, key: freshKey() }; }
+    if (notesNeedAcknowledgement()) { state.error = "請先核對補充敘述與用途，再套用建議或保留目前用途。"; refreshStatus(); return; }
+    try { state.confirmAttempt = { id: state.selected.id, body: { expected_revision: state.selected.revision, ...(notesRequireCheck() && state.notesAcknowledged ? {notes_acknowledgement: "checked"} : {}) }, key: freshKey() }; }
     catch (error) { state.error = errorMessage(error); refreshStatus(); return; }
   }
   const attempt = state.confirmAttempt;
@@ -952,7 +1023,10 @@ function pagination(offset, length, action) {
 
 function ledgerView(entry) {
   const snapshot = entry.snapshot || entry;
-  const candidate = snapshot.candidate || {};
+  const candidate = clone(snapshot.candidate || {});
+  if (Array.isArray(entry.display_item_names) && entry.display_item_names.length === candidate.items?.length && entry.display_item_names.every((name) => name === null || typeof name === "string")) {
+    candidate.items.forEach((item, index) => item.raw_name = entry.display_item_names[index]);
+  }
   const calculation = snapshot.calculation || {};
   return {
     merchant: candidate.merchant || entry.merchant || "店家待確認",
@@ -1053,7 +1127,7 @@ async function showLedgerEntry(id, {replace = false} = {}) {
     body.replaceChildren(el("h3", {}, view.merchant), el("p", { class: "caption ledger-date" }, dateLabel(view.receipt_date)), statusBadge(entry.status || "active"));
     if (view.calculation) body.append(calculationRows(view.calculation));
     else body.append(calcRow("收據實付", view.total), calcRow("個人支出", view.personal), calcRow("贈送", view.gift), calcRow("代墊", view.advance));
-    if (view.candidate.items) body.append(el("div", { class: "form-section" }, el("h3", {}, "已確認品項"), ...view.candidate.items.map((item) => el("div", { class: "product-row" }, el("span", {}, item.raw_name || "品名待確認"), el("strong", {}, money(item.printed_line_total_yuan))))));
+    if (view.candidate.items) body.append(el("div", { class: "form-section" }, el("h3", {}, "已確認品項"), ...view.candidate.items.map((item) => el("div", { class: "product-row" }, el("span", {}, item.raw_name || "待補品名"), el("strong", {}, money(item.printed_line_total_yuan))))));
     if (entry.snapshot?.evidence?.length) {
       const references = el("div", { class: "form-section" }, el("h3", {}, "原始收據"));
       entry.snapshot.evidence.forEach((reference, index) => references.append(button(`查看原檔 ${index + 1}（第 ${reference.pages.join("、")} 頁）`, () => openLedgerEvidence(reference, references), "secondary small", { class: "button secondary small evidence-link" })));
@@ -1448,7 +1522,7 @@ async function showIntake(id) {
     if (intake.reference_candidate) {
       content.append(el("h3", {}, "價格參考（未入帳）"));
       for (const item of intake.reference_candidate.items) content.append(el("p", {},
-        `${item.raw_name || "品名待確認"} · ${money(item.printed_line_total_yuan)}`));
+        `${item.raw_name || "待補品名"} · ${money(item.printed_line_total_yuan)}`));
     }
     if (intake.result) content.append(el("p", {class: "caption"},
       `${intake.result.provider || "來源待確認"} / ${intake.result.model || "模型待確認"} · 原始輸出已保存`));

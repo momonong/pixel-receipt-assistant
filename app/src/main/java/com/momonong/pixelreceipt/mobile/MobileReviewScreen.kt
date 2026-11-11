@@ -68,6 +68,7 @@ internal fun reviewErrors(review: MobileReview): Map<String, String> {
         if (message != null) errors[field] = message
     }
     errors.putAll(prepareReview(review).errors)
+    if (notesNeedAcknowledgement(review)) errors["notes"] = "請先核對補充敘述與用途，再套用建議或保留目前用途。"
     return errors
 }
 
@@ -88,6 +89,8 @@ internal fun MobileReviewScreen(state: MobileUiState, images: ImageStore, action
     val candidate = editor.getAsJsonObject("candidate")
     val draft = review.draft
     val advancePreview = review.advancePreview(draft, editor)
+    val noteReview = noteReviewState(draft)
+    val noteDifference = notePurposesDiffer(review)
     val errors = reviewErrors(review)
     val editable = !batch.deleted && state.mutations.none { it.batchId == batch.id && it.phase == "pending" } && state.busy == null && state.writable && !review.locked && batch.ledgerId == null && batch.draftStatus !in setOf("confirmed", "voided")
     var headerOpen by rememberSaveable(batch.id) { mutableStateOf(false) }
@@ -101,7 +104,7 @@ internal fun MobileReviewScreen(state: MobileUiState, images: ImageStore, action
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(candidate.text("merchant").ifBlank { "店家待確認" }, style = MaterialTheme.typography.headlineSmall)
-                        Text(candidate.text("receipt_date").ifBlank { "日期待確認" }, style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
+                        Text(reviewDateLabel(candidate.text("receipt_date")), style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
                         Text(moneyText(candidate["printed_total_yuan"]), style = MaterialTheme.typography.headlineMedium, color = MobileTealInk)
                         Text("收據實付 · ${candidate.array("items").size()} 個品項", style = MaterialTheme.typography.bodySmall, color = MobileMuted)
                     }
@@ -112,10 +115,39 @@ internal fun MobileReviewScreen(state: MobileUiState, images: ImageStore, action
                 }
                 // Fields are expanded only when needed; the receipt remains readable at first glance.
                 if (headerOpen) {
-                    ReviewField("消費日期", candidate.text("receipt_date"), errors["receipt_date"], "review-date", editable) { value -> change { it.getAsJsonObject("candidate").addProperty("receipt_date", value) } }
+                    MobileReviewDateField(candidate.text("receipt_date"), errors["receipt_date"], editable) { value -> change { it.getAsJsonObject("candidate").addProperty("receipt_date", value) } }
                     ReviewField("實付總額（元）", candidate.text("printed_total_yuan"), errors["printed_total_yuan"], "review-total", editable, true) { value -> change { it.getAsJsonObject("candidate").addProperty("printed_total_yuan", value) } }
                 } else listOf("merchant", "receipt_date", "printed_total_yuan").forEach { key -> errors[key]?.let { ReviewError(it) } }
+                if (editor.text("_default_receipt_date").isNotBlank() && editor.text("_default_receipt_date") == candidate.text("receipt_date")) {
+                    Text(if (candidate.text("receipt_date") == java.time.LocalDate.now().toString()) "收據未顯示日期，已先填今天，可修改" else "收據未顯示日期，已先填草稿建立當日，可修改", style = MaterialTheme.typography.bodySmall, color = MobileMuted)
+                }
                 errors["total"]?.let { ReviewError(it) }
+                if (noteReview != null && noteReview.status != "none") {
+                    Column(Modifier.fillMaxWidth().testTag("review-notes"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("補充敘述與用途", style = MaterialTheme.typography.titleMedium)
+                        if (noteReview.status == "needs_review") {
+                            if (editor.text("_notes_checked") == "checked") Text("無法自動對應的敘述已由你核對。", color = MobileMuted, style = MaterialTheme.typography.bodyMedium)
+                            else Text("補充敘述仍有無法對應的用途，請逐項核對。", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                        }
+                        else Text(if (noteDifference) "敘述建議與目前用途不同；已保留你的編輯，請選擇套用或保留。" else "已依補充敘述帶入用途，請再核對品項。", style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
+                        noteReview.decisions.map { it.quote }.plus(noteReview.unresolvedNotes).distinct().forEach { quote ->
+                            Text("來源敘述 · $quote", style = MaterialTheme.typography.bodyMedium)
+                        }
+                        noteReview.decisions.forEach { proposal ->
+                            val name = draft.getAsJsonObject("candidate").array("items")[proposal.position].asJsonObject.text("raw_name").ifBlank { "待補品名" }
+                            Text("${proposal.position + 1}. $name · 建議${purposeLabels[proposal.purpose]}", style = MaterialTheme.typography.bodySmall, color = MobileMuted)
+                        }
+                        if (noteDifference && noteReview.status == "matched") {
+                            OutlinedButton(onClick = { change { applyNotePurposes(review, it) } }, enabled = editable && canApplyNotePurposes(review), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("review-notes-apply")) { Text("依補充敘述套用用途") }
+                            if (!canApplyNotePurposes(review)) Text("品項已變更或目前含分攤；請逐項核對，分攤不會被整項用途取代。", style = MaterialTheme.typography.bodySmall, color = MobileMuted)
+                        }
+                        if (editor.text("_notes_checked") == "checked") Text("已核對敘述，保留目前用途。", style = MaterialTheme.typography.bodyMedium, color = MobileTealInk)
+                        else if (notesNeedAcknowledgement(review)) {
+                            errors["notes"]?.let { ReviewError(it) }
+                            OutlinedButton(onClick = { change { it.addProperty("_notes_checked", "checked") } }, enabled = editable, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("review-notes-keep")) { Text("保留目前用途，已核對敘述") }
+                        }
+                    }
+                }
                 val calc = draft.getAsJsonObject("calculation")
                 if (advancePreview != null) {
                     Text("依送出備註預填代買，請核對品項用途。", style = MaterialTheme.typography.bodySmall, color = MobileMuted)
@@ -178,7 +210,7 @@ internal fun MobileReviewScreen(state: MobileUiState, images: ImageStore, action
             ReviewCard {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("${index + 1}. ${item.text("raw_name").ifBlank { "品名待確認" }}", style = MaterialTheme.typography.titleSmall)
+                        Text("${index + 1}. ${item.text("raw_name").ifBlank { "待補品名" }}", style = MaterialTheme.typography.titleSmall)
                         Text("${item.text("quantity").ifBlank { "?" }} 件 · ${purposeSummary(decision)}", style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
                         Text(moneyText(item["printed_line_total_yuan"]), style = MaterialTheme.typography.titleMedium, color = MobileTealInk)
                     }
@@ -186,8 +218,8 @@ internal fun MobileReviewScreen(state: MobileUiState, images: ImageStore, action
                 }
                 errors.filterKeys { it.startsWith("item.$index.") }.values.distinct().forEach { ReviewError(it) }
                 if (open) {
-                    listOf("raw_name" to "品名", "quantity" to "購買數量", "printed_line_total_yuan" to "此品項行金額（元）", "printed_unit_price_yuan" to "票面單價（元，未知可留空）").forEach { (key, label) ->
-                        ReviewField(label, item.text(key), errors["item.$index.$key"], "review-item-$index-$key", editable, key != "raw_name") { value ->
+                    listOf("raw_name" to "品名（可留空）", "quantity" to "購買數量", "printed_line_total_yuan" to "此品項行金額（元）", "printed_unit_price_yuan" to "票面單價（元，未知可留空）").forEach { (key, label) ->
+                        ReviewField(label, item.text(key), errors["item.$index.$key"], "review-item-$index-$key", editable, key != "raw_name", placeholder = if (key == "raw_name") "稍後再補也可以" else null) { value ->
                             change { edit ->
                                 val editedItem = edit.getAsJsonObject("candidate").array("items")[index].asJsonObject
                                 val decisions = edit.array("line_decisions")
@@ -274,8 +306,8 @@ internal fun MobileReviewScreen(state: MobileUiState, images: ImageStore, action
     Surface(color = Color.White, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content) }
 }
 @Composable private fun ReviewError(message: String) { Text(message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-@Composable private fun ReviewField(label: String, value: String, error: String?, tag: String, enabled: Boolean, numeric: Boolean = false, change: (String) -> Unit) {
-    OutlinedTextField(value, change, modifier = Modifier.fillMaxWidth().testTag(tag), label = { Text(label) }, enabled = enabled,
+@Composable private fun ReviewField(label: String, value: String, error: String?, tag: String, enabled: Boolean, numeric: Boolean = false, placeholder: String? = null, change: (String) -> Unit) {
+    OutlinedTextField(value, change, modifier = Modifier.fillMaxWidth().testTag(tag), label = { Text(label) }, placeholder = placeholder?.let { { Text(it) } }, enabled = enabled,
         isError = error != null, supportingText = error?.let { { Text(it) } }, singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = if (numeric) KeyboardType.Number else KeyboardType.Text), shape = RoundedCornerShape(10.dp), textStyle = MaterialTheme.typography.bodyLarge)
 }

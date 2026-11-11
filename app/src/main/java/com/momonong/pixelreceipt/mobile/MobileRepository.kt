@@ -239,7 +239,10 @@ class MobileRepository(
                 val revision = review.draft["revision"].asLong
                 val completeBody = existing?.reviewBody ?: prepareReview(review, complete = true).body ?: throw MobileFailure("請先補齊標示的欄位。")
                 val attempt = existing ?: FrozenConfirmation(java.util.UUID.randomUUID().toString(),
-                    com.google.gson.JsonObject().apply { addProperty("expected_revision", revision + 1) }.toString(), completeBody, revision)
+                    com.google.gson.JsonObject().apply {
+                        addProperty("expected_revision", revision + 1)
+                        if (review.editor.text("_notes_checked") == "checked") addProperty("notes_acknowledgement", "checked")
+                    }.toString(), completeBody, revision)
                 // Freeze BOTH requests and the key before the first final mutation, including a lost PUT response.
                 store.update(id) { old -> old.copy(review = old.review!!.copy(confirmation = attempt, error = null)) }
                 val remote = authenticated { api.draft(it, review.draft.text("id")) }
@@ -268,7 +271,15 @@ class MobileRepository(
                     ledgerId = ledger.text("id"), ledgerStatus = ledger.text("status"), message = null,
                     review = old.review!!.copy(serverJson = ledger["snapshot"].toString(), error = null)) }
             } catch (error: Exception) {
-                withContext(NonCancellable) { runCatching { store.update(id) { old -> old.copy(review = old.review!!.copy(error = if (old.review.conflict) "中央版本有變更；手機編輯已保留，請比對版本。" else "尚未確認入帳結果；原確認內容已保存。請按查詢結果。")) } } }
+                withContext(NonCancellable) {
+                    if (error is MobileApiFailure && error.statusCode == 409 && error.code == "notes_review_required") {
+                        // This specific response proves confirmation did not commit.
+                        // Keep the user's editor and reopen the note check; unknown
+                        // outcomes and all other failures retain the frozen request.
+                        val remote = runCatching { authenticated { api.draft(it, store.batch(id).draftId!!) } }.getOrNull()
+                        store.notesConfirmationRejected(id, remote)
+                    } else runCatching { store.update(id) { old -> old.copy(review = old.review!!.copy(error = if (old.review.conflict) "中央版本有變更；手機編輯已保留，請比對版本。" else "尚未確認入帳結果；原確認內容已保存。請按查詢結果。")) } }
+                }
                 throw error
             }
         }
@@ -367,6 +378,7 @@ class MobileRepository(
         operation.withLock {
             val state = store.load()
             val pending = state.pendingLedgerMutation(id)
+            if (pending != null && pending.kind != "ledger_void") throw MobileFailure("補品名結果尚待確認；請先查詢原補品名結果，再作廢。")
             val linked = state.batches.firstOrNull { it.ledgerId == id }
             if (linked != null && state.pendingMutation(linked.id)?.kind in setOf("intake_delete", "draft_delete")) throw MobileFailure("原刪除結果尚待確認；請先查詢原刪除結果，再作廢帳目。")
             val attempt = pending ?: run {
@@ -378,6 +390,36 @@ class MobileRepository(
                 if (known != null && known["revision"].asLong != entry["revision"].asLong) throw MobileFailure("中央帳目版本已變更；請檢查最新內容，再確認作廢。")
                 val body = com.google.gson.JsonObject().apply { add("expected_revision", entry["revision"]); addProperty("reason", reason.trim().ifBlank { "未註明" }) }.toString()
                 store.recordMutation(ReceiptMutation("ledger_void", id, state.batches.firstOrNull { it.ledgerId == id || it.draftId == entry.text("draft_id") }?.id,
+                    java.util.UUID.randomUUID().toString(), body))
+            }
+            executeReceiptAction(attempt)
+        }
+    }
+    /** Save the exact metadata-only intent before sending; retries reconcile its original CAS event. */
+    suspend fun updateItemNames(id: String, names: Map<Int, String?>): Unit = withContext(Dispatchers.IO) {
+        operation.withLock {
+            val state = store.load()
+            val pending = state.pendingLedgerMutation(id)
+            if (pending != null && pending.kind != "ledger_names") throw MobileFailure("作廢結果尚待確認；請先查詢原作廢結果，再補品名。")
+            val attempt = pending ?: run {
+                val remote = authenticated { api.ledgerDetail(it, id) }; store.cacheEntry(remote)
+                val entry = ledgerObject(remote)
+                if (entry.text("status") == "voided") { refreshAfterReceiptAction(id); throw MobileFailure("這筆帳目已作廢，不能補品名。") }
+                val known = state.ledgerDetailsJson?.let(::jsonObject)?.get(id)?.asJsonObject
+                    ?: state.ledgerJson?.let(::jsonObject)?.array("entries")?.firstOrNull { it.asJsonObject.text("id") == id }?.asJsonObject
+                if (known != null && known["revision"].asLong != entry["revision"].asLong) throw MobileFailure("中央帳目版本已變更；請檢查最新品名，再保存。")
+                val count = entry.getAsJsonObject("snapshot").getAsJsonObject("candidate").array("items").size()
+                if (names.isEmpty() || names.keys.any { it !in 0 until count }) throw MobileFailure("請核對要補的品項。")
+                val body = com.google.gson.JsonObject().apply {
+                    add("expected_revision", entry["revision"])
+                    add("item_names", com.google.gson.JsonArray().apply {
+                        names.toSortedMap().forEach { (position, name) -> add(com.google.gson.JsonObject().apply {
+                            addProperty("item_position", position)
+                            add("name", name?.trim()?.takeIf { it.isNotBlank() }?.let { com.google.gson.JsonPrimitive(it) } ?: com.google.gson.JsonNull.INSTANCE)
+                        }) }
+                    })
+                }.toString()
+                store.recordMutation(ReceiptMutation("ledger_names", id, state.batches.firstOrNull { it.ledgerId == id || it.draftId == entry.text("draft_id") }?.id,
                     java.util.UUID.randomUUID().toString(), body))
             }
             executeReceiptAction(attempt)
@@ -397,6 +439,20 @@ class MobileRepository(
                     val result = if (draftObject(current).text("status") == "deleted") current else authenticated { api.deleteDraft(it, attempt.targetId, attempt) }
                     check(draftObject(result).text("status") == "deleted"); tombstone(attempt.batchId!!)
                 }
+                "ledger_names" -> {
+                    val current = authenticated { api.ledgerDetail(it, attempt.targetId) }
+                    val entry = ledgerObject(current); store.cacheEntry(current)
+                    if (!itemNamesEventMatches(entry, attempt)) {
+                        if (entry.text("status") == "voided" || entry["revision"].asLong != jsonObject(attempt.body)["expected_revision"].asLong) {
+                            store.finishMutation(attempt.key, "rejected", "中央版本或狀態已改變，補品名未確認；原請求已保留，請檢查最新狀態。")
+                            refreshAfterReceiptAction(attempt.targetId)
+                            throw MobileFailure("中央版本或狀態已改變，請檢查最新品名；未重送請求。")
+                        }
+                        val result = authenticated { api.updateItemNames(it, attempt.targetId, attempt) }
+                        check(itemNamesEventMatches(ledgerObject(result), attempt))
+                        store.cacheEntry(result)
+                    }
+                }
                 "ledger_void" -> {
                     val current = authenticated { api.ledgerDetail(it, attempt.targetId) }
                     val result = if (ledgerObject(current).text("status") == "voided") current else authenticated { api.voidLedger(it, attempt.targetId, attempt) }
@@ -404,11 +460,11 @@ class MobileRepository(
                 }
             }
             store.finishMutation(attempt.key, "completed")
-            refreshAfterReceiptAction(attempt.targetId.takeIf { attempt.kind == "ledger_void" })
+            refreshAfterReceiptAction(attempt.targetId.takeIf { attempt.kind in setOf("ledger_void", "ledger_names") })
         } catch (error: MobileApiFailure) {
             if (error.statusCode in setOf(403, 409, 422)) {
                 store.finishMutation(attempt.key, "rejected", if (error.statusCode == 409) "中央版本或狀態已改變，本次未完成；已保留原紀錄，請檢查最新狀態。" else mobileError(error))
-                refreshAfterReceiptAction(attempt.targetId.takeIf { attempt.kind == "ledger_void" })
+                refreshAfterReceiptAction(attempt.targetId.takeIf { attempt.kind in setOf("ledger_void", "ledger_names") })
             }
             throw error
         }
