@@ -92,6 +92,18 @@ private fun initialAdvanceSuggestion(draft: JsonObject): AdvanceSuggestion? {
 
 internal fun MobileReview.advancePreview(draft: JsonObject, editor: JsonObject): AdvanceSuggestion? {
     if (editRevision != 0L || conflict || confirmation != null || editor["candidate"] != draft["candidate"]) return null
+    val semantic = noteReviewState(draft)
+    if (semantic != null) {
+        if (semantic.status != "matched" || draft["review_document"]?.isJsonObject == true || semantic.decisions.any { it.purpose == "gift" }) return null
+        val note = draft.getAsJsonObject("note_review")
+        val purposes = semantic.decisions.associate { it.position to it.purpose }
+        val advances = semantic.decisions.filter { it.purpose == "advance" }.map { it.position }.toSet()
+        if (advances.isEmpty() || editor.array("line_decisions").withIndex().any { (index, value) -> value != wholeDecision(index, purposes[index] ?: "self") }) return null
+        return runCatching {
+            fun amount(key: String) = note[key]?.takeUnless { it.isJsonNull }?.let { strictLong(it) }
+            AdvanceSuggestion(advances, amount("personal_yuan"), amount("advance_yuan"))
+        }.getOrNull()
+    }
     val suggestion = initialAdvanceSuggestion(draft) ?: return null
     val decisions = editor.array("line_decisions")
     // A restored local editor from an older App may still contain its original defaults.
@@ -103,24 +115,105 @@ internal fun MobileReview.advancePreview(draft: JsonObject, editor: JsonObject):
     }
 }
 
-internal fun createReview(serverJson: String): MobileReview {
+internal data class NotePurposeDecision(val position: Int, val purpose: String, val quote: String)
+internal data class NoteReviewState(val status: String, val decisions: List<NotePurposeDecision>, val unresolvedNotes: List<String>)
+
+/** Server proposals remain distinct from both immutable receipt facts and human editor decisions. */
+internal fun noteReviewState(draft: JsonObject): NoteReviewState? {
+    val value = draft["note_review"] ?: return null
+    return runCatching {
+        check(value.isJsonObject)
+        val note = value.asJsonObject
+        val status = note.text("status")
+        check(status in setOf("none", "matched", "needs_review"))
+        val count = draft.getAsJsonObject("candidate").array("items").size()
+        check(note.array("decisions").size() <= 100 && note.array("unresolved_notes").size() <= 100)
+        val decisions = note.array("decisions").map { entry ->
+            val item = entry.asJsonObject
+            val position = strictLong(item["item_position"], 0, count.toLong() - 1).toInt()
+            check(item.text("purpose") in purposeLabels)
+            check(item["note_quote"]?.isJsonPrimitive == true && item["note_quote"].asJsonPrimitive.isString)
+            val quote = item.text("note_quote")
+            check(quote.isNotBlank() && quote.length <= 4000)
+            NotePurposeDecision(position, item.text("purpose"), quote)
+        }
+        check(decisions.map { it.position }.distinct().size == decisions.size)
+        val unresolved = note.array("unresolved_notes").map { entry ->
+            check(entry.isJsonPrimitive && entry.asJsonPrimitive.isString)
+            entry.asString.also { check(it.isNotBlank() && it.length <= 4000) }
+        }
+        check(status != "none" || decisions.isEmpty() && unresolved.isEmpty())
+        check(status != "matched" || decisions.isNotEmpty() && unresolved.isEmpty())
+        NoteReviewState(status, decisions, unresolved)
+    }.getOrElse { NoteReviewState("needs_review", emptyList(), emptyList()) }
+}
+
+private fun noteItemsUnchanged(review: MobileReview, editor: JsonObject): Boolean {
+    val original = review.draft.getAsJsonObject("candidate").array("items")
+    val current = editor.getAsJsonObject("candidate").array("items")
+    return original.size() == current.size() && original.withIndex().all { (index, value) ->
+        listOf("raw_name", "quantity").all { key -> value.asJsonObject.text(key).trim() == current[index].asJsonObject.text(key).trim() }
+    }
+}
+
+internal fun notePurposesDiffer(review: MobileReview): Boolean {
+    val note = noteReviewState(review.draft) ?: return false
+    val editor = review.editor
+    if (note.status == "none") return false
+    if (!noteItemsUnchanged(review, editor)) return true
+    return note.decisions.any { proposed ->
+        val decision = editor.array("line_decisions").firstOrNull { it.asJsonObject["item_position"].asInt == proposed.position }?.asJsonObject
+        decision == null || decision.text("method") != "whole_line" || decision.text("whole_purpose") != proposed.purpose
+    }
+}
+
+internal fun notesNeedAcknowledgement(review: MobileReview): Boolean {
+    if (review.draft.text("status") != "needs_review" || review.editor.text("_notes_checked") == "checked") return false
+    val note = noteReviewState(review.draft) ?: return false
+    return note.status == "needs_review" || notePurposesDiffer(review)
+}
+
+internal fun canApplyNotePurposes(review: MobileReview, editor: JsonObject = review.editor): Boolean {
+    val note = noteReviewState(review.draft) ?: return false
+    return !review.locked && !review.conflict && note.status == "matched" && note.decisions.isNotEmpty() && noteItemsUnchanged(review, editor) && note.decisions.all { proposed ->
+        editor.array("line_decisions").any { it.asJsonObject["item_position"].asInt == proposed.position && it.asJsonObject.text("method") == "whole_line" }
+    }
+}
+
+/** Explicit action only changes whole-line uses. Splits and every candidate field remain intact. */
+internal fun applyNotePurposes(review: MobileReview, editor: JsonObject): Boolean {
+    if (!canApplyNotePurposes(review, editor)) return false
+    noteReviewState(review.draft)!!.decisions.forEach { proposed ->
+        val index = editor.array("line_decisions").indexOfFirst { it.asJsonObject["item_position"].asInt == proposed.position }
+        editor.array("line_decisions").set(index, wholeDecision(proposed.position, proposed.purpose))
+    }
+    editor.addProperty("_notes_checked", "none")
+    return true
+}
+
+internal fun createReview(serverJson: String, today: LocalDate = LocalDate.now()): MobileReview {
     val draft = draftObject(serverJson)
     val document = draft["review_document"]?.takeIf { it.isJsonObject }?.asJsonObject
-    val suggestedAdvances = initialAdvanceSuggestion(draft)?.positions.orEmpty()
+    val noteReview = noteReviewState(draft)
+    val suggestedPurposes = if (noteReview?.status == "matched") noteReview.decisions.associate { it.position to it.purpose } else emptyMap()
+    val suggestedAdvances = if (noteReview == null) initialAdvanceSuggestion(draft)?.positions.orEmpty() else emptySet()
     val candidate = draft.getAsJsonObject("candidate").deepCopy()
+    val defaultDate = document == null && draft.text("status") == "needs_review" && candidate.text("receipt_date").isBlank()
+    if (defaultDate) candidate.addProperty("receipt_date", today.toString())
     val lines = document?.array("line_decisions")?.map { it.asJsonObject }?.associateBy { it["item_position"].asInt }.orEmpty()
     val adjustments = document?.array("adjustment_decisions")?.map { it.asJsonObject }?.associateBy { it["adjustment_position"].asInt }.orEmpty()
     val editor = JsonObject().apply {
         add("candidate", candidate)
+        addProperty("_notes_checked", "none")
+        if (defaultDate) addProperty("_default_receipt_date", today.toString())
         addProperty("assembly_status", if (document?.text("assembly_status") == "incomplete") "incomplete" else "unknown")
         addProperty("tolerance_acknowledgement", document?.text("tolerance_acknowledgement").orEmpty().ifBlank { "none" })
         add("line_decisions", JsonArray().apply {
             candidate.array("items").forEachIndexed { index, _ ->
                 val existing = lines[index]?.deepCopy()
-                // Only untouched whole-line decisions receive the default. Preserve every split/exception.
-                add(if (existing == null || (existing.text("method") == "whole_line" && existing.text("whole_purpose").isBlank() &&
-                    existing["quantities"].let { it == null || it.isJsonNull } && existing["amounts_yuan"].let { it == null || it.isJsonNull }))
-                    wholeDecision(index, if (index in suggestedAdvances) "advance" else "self") else existing)
+                // Saved human decisions, including partial allocations, always win.
+                val purpose = if (document == null) suggestedPurposes[index] ?: if (index in suggestedAdvances) "advance" else "self" else "self"
+                add(existing ?: wholeDecision(index, purpose))
             }
         })
         add("adjustment_decisions", JsonArray().apply {
@@ -143,6 +236,9 @@ internal fun wholeDecision(index: Int, purpose: String) = JsonObject().apply {
 internal fun prepareReview(review: MobileReview, complete: Boolean = false): ReviewPrepared {
     val errors = linkedMapOf<String, String>()
     val value = review.editor.deepCopy()
+    value.remove("_notes_checked")
+    value.remove("_default_receipt_date")
+    if (complete && notesNeedAcknowledgement(review)) errors["notes"] = "請先核對補充敘述與用途，再套用建議或保留目前用途。"
     val candidate = value.getAsJsonObject("candidate")
     fun text(obj: JsonObject, key: String, path: String, required: Boolean = false, limit: Int = 500) {
         val input = obj.text(key).trim()
@@ -157,7 +253,7 @@ internal fun prepareReview(review: MobileReview, complete: Boolean = false): Rev
     }
     text(candidate, "merchant", "merchant")
     text(candidate, "receipt_date", "receipt_date")
-    if (candidate.text("receipt_date").isNotBlank() && runCatching { LocalDate.parse(candidate.text("receipt_date")) }.isFailure) errors["receipt_date"] = "請填有效日期，例如 2026-10-23。"
+    if (candidate.text("receipt_date").isNotBlank() && runCatching { LocalDate.parse(candidate.text("receipt_date")) }.isFailure) errors["receipt_date"] = "請選擇有效日期。"
     number(candidate, "printed_total_yuan", "printed_total_yuan")
     candidate.array("items").forEachIndexed { index, element ->
         val item = element.asJsonObject
@@ -243,7 +339,7 @@ internal fun reviewDifferences(review: MobileReview): List<String> {
     val local = flattened(review.editor); val latest = flattened(createReview(remote).editor)
     val labels = mapOf("merchant" to "店家", "receipt_date" to "日期", "printed_total_yuan" to "實付", "raw_name" to "品名", "quantity" to "數量", "printed_unit_price_yuan" to "票面單價", "printed_line_total_yuan" to "行金額", "brand" to "品牌", "specification" to "規格", "value_decimal" to "包裝含量", "unit" to "單位", "raw_label" to "名稱", "direction" to "加減方式", "amount_yuan" to "金額", "amount_effect" to "折扣列法", "scope" to "影響範圍", "item_positions" to "受影響品項", "method" to "分攤方式", "whole_purpose" to "用途", "assembly_status" to "完整性", "tolerance_acknowledgement" to "差額確認", "review_note" to "核對備註")
     val values = purposeLabels + mapOf("whole_line" to "整項同一用途", "by_quantity" to "按數量分攤", "explicit_amounts" to "指定金額", "proportional_amount" to "依金額比例", "subtract" to "折扣", "add" to "加收", "included_in_line_totals" to "已含行金額", "separate_from_line_totals" to "另外加減總額", "receipt" to "整張收據", "items" to "指定品項", "unknown" to "未確認", "incomplete" to "缺照片或品項", "none" to "尚未確認", "accept_within_tolerance" to "接受差額")
-    return (local.keys + latest.keys).distinct().filter { local[it] != latest[it] && it.substringAfterLast('.') !in setOf("schema", "item_position", "adjustment_position", "currency", "amount_unit") }.map { path ->
+    return (local.keys + latest.keys).distinct().filter { local[it] != latest[it] && it.substringAfterLast('.') !in setOf("schema", "item_position", "adjustment_position", "currency", "amount_unit", "_notes_checked", "_default_receipt_date") }.map { path ->
         val parts = path.split('.')
         val group = when { "items" in parts -> "品項 ${(parts.getOrNull(2)?.toIntOrNull() ?: 0) + 1} · "; "line_decisions" in parts -> "品項 ${(parts.getOrNull(1)?.toIntOrNull() ?: 0) + 1} · "; "adjustments" in parts -> "折扣／加收 ${(parts.getOrNull(2)?.toIntOrNull() ?: 0) + 1} · "; "adjustment_decisions" in parts -> "折扣／加收 ${(parts.getOrNull(1)?.toIntOrNull() ?: 0) + 1} · "; else -> "" }
         val last = parts.last(); val label = labels[last] ?: purposeLabels[last]?.let { "$it${if ("quantities" in parts) "分攤數量" else "分攤金額"}" } ?: "受影響品項／內容"

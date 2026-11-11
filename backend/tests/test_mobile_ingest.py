@@ -49,9 +49,19 @@ def intake(body, purpose="purchase", engine="broker"):
 
 
 class BrokerFixture:
-    def __init__(self, store, candidate, *, mode="vision", lost_submit=False, truncated=False):
+    def __init__(
+        self,
+        store,
+        candidate,
+        *,
+        mode="vision",
+        lost_submit=False,
+        truncated=False,
+        model_review=None,
+    ):
         self.store = store
         self.candidate = candidate
+        self.model_review = model_review or {"note_intents": [], "unresolved_note_quotes": []}
         self.calls = []
         self.mode = mode
         self.lost_submit = lost_submit
@@ -91,7 +101,7 @@ class BrokerFixture:
                 "model": "fixture-model",
                 "finish_reason": "stop",
                 "response_truncated": self.truncated,
-                "result": {"text": canonical(self.candidate)},
+                "result": {"text": canonical({"candidate": self.candidate, **self.model_review})},
             }
         return {
             "request_key": self.job,
@@ -552,6 +562,7 @@ def test_v3_to_v4_preserves_rows_and_future_version_refuses(store, body):
         (8, "0.5.1"),
         (9, "0.5.2"),
         (10, "0.5.3"),
+        (11, "0.5.4"),
     ],
 )
 def test_mobile_release_authenticated_fixed_metadata_streaming_integrity(
@@ -614,6 +625,8 @@ def test_mobile_release_authenticated_fixed_metadata_streaming_integrity(
         (8, "0.5.2", "com.momonong.pixelreceipt.mobile"),
         (10, "0.5.2", "com.momonong.pixelreceipt.mobile"),
         (9, "0.5.3", "com.momonong.pixelreceipt.mobile"),
+        (10, "0.5.4", "com.momonong.pixelreceipt.mobile"),
+        (11, "0.5.3", "com.momonong.pixelreceipt.mobile"),
         (8, "0.5.0", "com.momonong.pixelreceipt.mobile"),
         (True, "0.4.2", "com.momonong.pixelreceipt.mobile"),
         ("4", "0.4.2", "com.momonong.pixelreceipt.mobile"),
@@ -756,7 +769,18 @@ def test_fenced_result_preserves_raw_parser_provenance_and_completion_gate(store
     record, _ = journal.create(intake(body), "fence-provenance")
     runner, fixture = worker(store, body, truncated=truncated)
     request = fixture.request
-    text = fenced_synthetic_text()
+    candidate_text = fenced_synthetic_text()
+    text = (
+        "```json\n"
+        + canonical(
+            {
+                "candidate": parse_candidate(candidate_text),
+                "note_intents": [],
+                "unresolved_note_quotes": [],
+            }
+        )
+        + "\n```"
+    )
 
     async def fenced(method, path, payload=None):
         value = await request(method, path, payload)
@@ -779,5 +803,5 @@ def test_fenced_result_preserves_raw_parser_provenance_and_completion_gate(store
         assert saved["draft_id"] is None
     else:
         assert saved["status"] == "succeeded"
-        assert store.get_draft(saved["draft_id"])["candidate"] == parse_candidate(text)
+        assert store.get_draft(saved["draft_id"])["candidate"] == parse_candidate(candidate_text)
     assert len([call for call in fixture.calls if call[1] == "/v1/queue"]) == 1

@@ -12,8 +12,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .domain import calculate
-from .ledger_models import ConfirmReceipt, ReviewDocument, ReviewReceipt, VoidReceipt
+from .intake_models import CreateIntake
+from .ledger_models import (
+    AdjustmentDecision,
+    ConfirmReceipt,
+    LineDecision,
+    ReviewDocument,
+    ReviewReceipt,
+    UpdateItemNames,
+    VoidReceipt,
+)
 from .models import LONG_MAX, Candidate, CreateDraft, DeleteDraft, ReviewDraft
+from .note_review import build_note_review
 
 SCHEMA_VERSION = 4
 INTAKE_DELETE_JOURNAL_SCHEMA = "pixelreceipt-delete-intake-journal-1"
@@ -661,7 +671,7 @@ class Store:
     def confirm(self, draft_id: str, request: ConfirmReceipt, key: str) -> tuple[dict, bool]:
         with self.connection(write=True) as connection:
             replay, digest = self._replay(
-                connection, "confirm", draft_id, request.model_dump(), key
+                connection, "confirm", draft_id, request.model_dump(exclude_none=True), key
             )
             if replay:
                 return replay, False
@@ -682,6 +692,20 @@ class Store:
                 error = StoreError(409, "confirmation_blocked")
                 error.calculation = draft["calculation"]
                 raise error
+            notes = self._note_review(connection, draft)
+            if notes is not None and request.notes_acknowledgement != "checked":
+                decisions = {
+                    item["item_position"]: item
+                    for item in draft["review_document"]["line_decisions"]
+                }
+                mismatches = any(
+                    decisions.get(item["item_position"], {}).get("method") != "whole_line"
+                    or decisions.get(item["item_position"], {}).get("whole_purpose")
+                    != item["purpose"]
+                    for item in notes["decisions"]
+                )
+                if notes["status"] == "needs_review" or mismatches:
+                    raise StoreError(409, "notes_review_required")
             # Recheck evidence when creating the durable confirmation snapshot.
             for reference in draft["evidence"]:
                 self._read_blob(reference["sha256"])
@@ -717,6 +741,61 @@ class Store:
             return value, True
 
     @staticmethod
+    def _note_review(connection, draft):
+        row = connection.execute(
+            "SELECT input,result FROM intakes WHERE draft_id=?", (draft["id"],)
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            body = CreateIntake.model_validate(json.loads(row["input"]))
+            if body.purpose != "purchase" or draft["evidence"] != [
+                {"sha256": entry.sha256, "pages": [1]} for entry in body.evidence
+            ]:
+                raise ValueError("intake relation mismatch")
+            stored = json.loads(row["result"]) if row["result"] else {}
+            model_review = stored.get("model_note_review")
+            candidate = Candidate.model_validate(draft["candidate"])
+            notes = [body.user_notes, *(entry.notes for entry in body.evidence)]
+            review = build_note_review(candidate, notes, model_review)
+        except (ValueError, TypeError):
+            return {
+                "status": "needs_review",
+                "decisions": [],
+                "unresolved_notes": ["補充敘述的關聯資料需要重新核對。"],
+            }
+        if review["status"] == "matched":
+            purposes = {item["item_position"]: item["purpose"] for item in review["decisions"]}
+            document = ReviewDocument(
+                assembly_status="unknown",
+                line_decisions=[
+                    LineDecision(
+                        item_position=i, method="whole_line", whole_purpose=purposes.get(i, "self")
+                    )
+                    for i in range(len(candidate.items))
+                ],
+                adjustment_decisions=[
+                    AdjustmentDecision(adjustment_position=i, method="proportional_amount")
+                    for i, adjustment in enumerate(candidate.adjustments)
+                    if adjustment.amount_effect == "separate_from_line_totals"
+                ],
+            )
+            calculated = calculate(candidate, document)
+            balanced = (
+                calculated["reconciliation_status"] == "balanced" and calculated["expenses_ready"]
+            )
+            review["personal_yuan"] = calculated["personal_yuan"] if balanced else None
+            review["advance_yuan"] = calculated["advance_yuan"] if balanced else None
+        return review
+
+    def note_review(self, draft_id):
+        with self.connection() as connection:
+            row = connection.execute("SELECT * FROM drafts WHERE id=?", (draft_id,)).fetchone()
+            if row is None:
+                raise StoreError(404, "draft_not_found")
+            return self._note_review(connection, self._draft(row))
+
+    @staticmethod
     def _ledger(connection, ledger_id: str) -> dict:
         row = connection.execute("SELECT * FROM ledger WHERE id = ?", (ledger_id,)).fetchone()
         if row is None:
@@ -729,12 +808,28 @@ class Store:
                 (ledger_id,),
             )
         ]
+        snapshot = json.loads(row["snapshot"])
+        names = [item["raw_name"] for item in snapshot["candidate"]["items"]]
+        for event in events:
+            if event["action"] == "item_names_updated":
+                try:
+                    update = UpdateItemNames.model_validate(
+                        {"expected_revision": event["revision"] - 1, **json.loads(event["reason"])}
+                    )
+                    for item in update.item_names:
+                        if item.item_position >= len(names):
+                            raise ValueError("unknown item position")
+                        names[item.item_position] = item.name
+                except (ValueError, TypeError) as error:
+                    raise StoreError(503, "item_name_history_invalid") from error
         return {
             "id": row["id"],
             "draft_id": row["draft_id"],
             "revision": events[-1]["revision"],
             "status": "voided" if events[-1]["action"] == "voided" else "active",
-            "snapshot": json.loads(row["snapshot"]),
+            "snapshot": snapshot,
+            "display_item_names": names,
+            "missing_item_name_count": sum(name is None for name in names),
             "confirmed_at": row["confirmed_at"],
             "confirmed_by": row["confirmed_by"],
             "events": events,
@@ -751,6 +846,36 @@ class Store:
                 (limit, offset),
             ).fetchall()
             return [self._ledger(connection, row["id"]) for row in ids]
+
+    def update_item_names(self, ledger_id: str, request: UpdateItemNames, key: str):
+        with self.connection(write=True) as connection:
+            replay, digest = self._replay(
+                connection, "item_names", ledger_id, request.model_dump(mode="json"), key
+            )
+            if replay:
+                return replay, False
+            entry = self._ledger(connection, ledger_id)
+            if entry["revision"] != request.expected_revision:
+                raise StoreError(409, "revision_conflict")
+            if entry["status"] != "active":
+                raise StoreError(409, "ledger_voided")
+            if any(
+                item.item_position >= len(entry["display_item_names"])
+                for item in request.item_names
+            ):
+                raise StoreError(422, "unknown_item_position")
+            now = timestamp()
+            body = {"item_names": [item.model_dump(mode="json") for item in request.item_names]}
+            connection.execute(
+                "INSERT INTO ledger_events VALUES (?, ?, 'item_names_updated', 'reviewer', ?, ?)",
+                (ledger_id, entry["revision"] + 1, canonical(body), now),
+            )
+            value = self._ledger(connection, ledger_id)
+            connection.execute(
+                "INSERT INTO mutations VALUES (?, ?, ?, ?, ?)",
+                (key, "item_names", ledger_id, digest, canonical(value)),
+            )
+            return value, True
 
     def void(self, ledger_id: str, request: VoidReceipt, key: str) -> tuple[dict, bool]:
         with self.connection(write=True) as connection:

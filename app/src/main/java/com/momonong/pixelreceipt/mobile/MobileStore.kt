@@ -85,9 +85,24 @@ class MobileStore(private val root: File, private val beforeWrite: () -> Unit = 
     }
     /** A stale editor cannot overwrite a frozen submission or a newer server response. */
     fun update(id: String, expectedRevision: Long? = null, acceptIdentical: Boolean = false, transform: (MobileBatch) -> MobileBatch): MobileBatch = locked {
-        updateLocked(read(), id, expectedRevision, acceptIdentical, transform)
+        updateLocked(read(), id, expectedRevision, acceptIdentical, transform = transform)
     }
-    private fun updateLocked(state: MobileState, id: String, expectedRevision: Long?, acceptIdentical: Boolean = false, transform: (MobileBatch) -> MobileBatch): MobileBatch {
+    /** Only a definitive notes_review_required response can release a dispatched confirmation. */
+    internal fun notesConfirmationRejected(id: String, remote: String?): MobileBatch = locked {
+        val state = read()
+        val old = state.batches.first { it.id == id }
+        val review = requireNotNull(old.review)
+        val attempt = requireNotNull(review.confirmation)
+        check(review.confirmationDispatched)
+        remote?.let { check(draftObject(it).text("id") == old.draftId) }
+        updateLocked(state, id, old.revision, rejectedConfirmation = attempt) { batch ->
+            val editor = review.editor.apply { remove("_notes_checked") }
+            batch.copy(review = review.copy(serverJson = remote ?: review.serverJson, editorJson = editor.toString(),
+                confirmation = null, finalReviewDispatched = false, confirmationDispatched = false,
+                error = "尚未入帳：請先核對補充敘述與用途，再確認。"))
+        }
+    }
+    private fun updateLocked(state: MobileState, id: String, expectedRevision: Long?, acceptIdentical: Boolean = false, rejectedConfirmation: FrozenConfirmation? = null, transform: (MobileBatch) -> MobileBatch): MobileBatch {
         val old = state.batches.firstOrNull { it.id == id } ?: throw MobileFailure("找不到這筆本機收件。")
         if (expectedRevision != null && old.revision != expectedRevision && acceptIdentical && transform(old).copy(revision = old.revision) == old) {
             mutable.value = state
@@ -104,7 +119,9 @@ class MobileStore(private val root: File, private val beforeWrite: () -> Unit = 
         old.review?.confirmation?.let { attempt ->
             val releasedBeforeConfirm = next.review?.confirmation == null && !old.review.confirmationDispatched && next.review?.conflict == true &&
                 next.review.comparisonJson?.let { draftObject(it).text("status") == "needs_review" && draftObject(it).text("ledger_id").isBlank() } == true
-            check(next.review?.confirmation == attempt || releasedBeforeConfirm)
+            val notesRejected = rejectedConfirmation == attempt && next.review?.confirmation == null &&
+                old.review.confirmationDispatched && next.review?.confirmationDispatched == false
+            check(next.review?.confirmation == attempt || releasedBeforeConfirm || notesRejected)
         }
         if (state.pendingMutation(id) != null) check(next.images == old.images && next.userNotes == old.userNotes && next.review?.editorJson == old.review?.editorJson) { "Pending receipt action cannot edit original content" }
         if (old.deleted) check(next.deleted && next.deletedAt == old.deletedAt && next.status == old.status && next.draftStatus == old.draftStatus)

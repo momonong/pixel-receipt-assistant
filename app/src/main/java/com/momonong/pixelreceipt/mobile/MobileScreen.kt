@@ -65,6 +65,7 @@ internal class MobileActions(
     val compareReview: (String) -> Unit = {},
     val resolveReview: (String, Boolean) -> Unit = { _, _ -> },
     val deleteBatch: (String, String) -> Unit = { _, _ -> },
+    val updateItemNames: (String, Map<Int, String?>) -> Unit = { _, _ -> },
     val voidEntry: (String, String) -> Unit = { _, _ -> },
     val cancelDuplicate: (DuplicateShareReminder) -> Unit = {},
     val openDuplicate: (DuplicateShareReminder, String) -> Unit = { _, _ -> },
@@ -108,7 +109,7 @@ fun MobileScreen(viewModel: MobileViewModel) {
         dashboard = viewModel::openAccounting, help = viewModel::help, ledger = viewModel::ledger,
         ledgerDetail = viewModel::openLedger, refreshLedger = viewModel::refreshLedger,
         editReview = viewModel::editReview, saveReview = viewModel::saveReview, confirmReview = viewModel::confirmReview,
-        compareReview = viewModel::compareReview, resolveReview = viewModel::resolveReview, deleteBatch = viewModel::deleteBatch, voidEntry = viewModel::voidEntry,
+        compareReview = viewModel::compareReview, resolveReview = viewModel::resolveReview, deleteBatch = viewModel::deleteBatch, voidEntry = viewModel::voidEntry, updateItemNames = viewModel::updateItemNames,
         cancelDuplicate = viewModel::cancelDuplicateShare, openDuplicate = viewModel::openDuplicateShare, sendSeparateDuplicate = viewModel::sendSeparateDuplicate,
     )
     MobileContent(state, viewModel.images, actions)

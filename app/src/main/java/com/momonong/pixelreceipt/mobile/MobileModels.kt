@@ -120,13 +120,30 @@ data class ReceiptMutation(
     override fun toString() = "ReceiptMutation(kind=$kind, phase=$phase; body and key redacted)"
 }
 internal fun MobileState.pendingMutation(batchId: String): ReceiptMutation? = mutations.orEmpty().lastOrNull { it.batchId == batchId && it.phase == "pending" }
-internal fun MobileState.pendingLedgerMutation(id: String): ReceiptMutation? = mutations.orEmpty().lastOrNull { it.targetId == id && it.kind == "ledger_void" && it.phase == "pending" }
+internal fun MobileState.pendingLedgerMutation(id: String): ReceiptMutation? = mutations.orEmpty().lastOrNull { it.targetId == id && it.kind in setOf("ledger_void", "ledger_names") && it.phase == "pending" }
 internal fun validateMutation(value: ReceiptMutation) {
-    check(value.kind in setOf("intake_delete", "draft_delete", "ledger_void") && validUuid(value.targetId) && validUuid(value.key))
+    check(value.kind in setOf("intake_delete", "draft_delete", "ledger_void", "ledger_names") && validUuid(value.targetId) && validUuid(value.key))
     check(value.batchId == null || validUuid(value.batchId))
     check(value.phase in setOf("pending", "completed", "rejected"))
     check(sha256(value.body.toByteArray(Charsets.UTF_8)) == value.bodySha256)
     val body = jsonObject(value.body)
+    if (value.kind == "ledger_names") {
+        check(body.keySet() == setOf("expected_revision", "item_names"))
+        strictLong(body["expected_revision"], 1)
+        check(body["item_names"]?.isJsonArray == true)
+        val names = body.array("item_names")
+        check(names.size() in 1..100)
+        val positions = mutableSetOf<Long>()
+        names.forEach { element ->
+            check(element.isJsonObject)
+            val item = element.asJsonObject
+            check(item.keySet() == setOf("item_position", "name"))
+            check(positions.add(strictLong(item["item_position"], 0, 99)))
+            val name = item["name"]
+            check(name.isJsonNull || (name.isJsonPrimitive && name.asJsonPrimitive.isString && name.asString.length <= 500 && name.asString.isNotBlank()))
+        }
+        return
+    }
     val revision = if (value.kind == "intake_delete") "expected_draft_revision" else "expected_revision"
     check(body.keySet() == setOf(revision, "reason") && body.has(revision))
     if (!body[revision].isJsonNull) strictLong(body[revision], 1) else check(value.kind == "intake_delete")
@@ -135,4 +152,34 @@ internal fun validateMutation(value: ReceiptMutation) {
 internal fun overviewObject(json: String): JsonObject = jsonObject(json).also {
     check(it.text("scope") == "active_confirmed_ledger")
     listOf("receipt_count", "personal_yuan", "printed_total_yuan").forEach { key -> strictLong(it[key]) }
+    listOf("missing_item_name_count", "receipts_missing_item_names").forEach { key -> it[key]?.let { value -> strictLong(value) } }
+}
+
+/** Match the specific revision and metadata values, never just the latest display name. */
+internal fun itemNamesEventMatches(entry: JsonObject, attempt: ReceiptMutation): Boolean {
+    val body = jsonObject(attempt.body)
+    val revision = body["expected_revision"].asLong + 1
+    val event = entry.array("events").firstOrNull { value ->
+        value.isJsonObject && value.asJsonObject.text("action") == "item_names_updated" && value.asJsonObject["revision"]?.let { !it.isJsonNull && it.asLong == revision } == true
+    }?.asJsonObject ?: return false
+    return runCatching { jsonObject(event.text("reason"))["item_names"] == body["item_names"] }.getOrDefault(false)
+}
+internal fun ledgerItemNames(entry: JsonObject): List<String?> {
+    val items = entry.getAsJsonObject("snapshot").getAsJsonObject("candidate").array("items")
+    val display = entry["display_item_names"]?.let { value ->
+        check(value.isJsonArray && value.asJsonArray.size() == items.size())
+        value.asJsonArray
+    }
+    return items.mapIndexed { index, item ->
+        val name = if (display != null && index < display.size()) display[index] else item.asJsonObject["raw_name"]
+        if (name == null || name.isJsonNull) null else {
+            check(name.isJsonPrimitive && name.asJsonPrimitive.isString && name.asString.length <= 500)
+            name.asString.takeIf { it.isNotBlank() }
+        }
+    }
+}
+
+internal fun ledgerNamesObject(json: String): JsonObject = ledgerObject(json).also { entry ->
+    ledgerItemNames(entry)
+    entry["missing_item_name_count"]?.let { strictLong(it, 0, 100) }
 }

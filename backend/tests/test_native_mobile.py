@@ -245,7 +245,7 @@ def test_intake_accounting_projection_tracks_review_confirm_void_without_recogni
     )
     confirmed = client.post(
         "/v2/drafts/" + draft_id + "/confirm",
-        json={"expected_revision": 2},
+        json={"expected_revision": 2, "notes_acknowledgement": "checked"},
         headers={"Idempotency-Key": "projected-confirm"},
     )
     assert confirmed.status_code == 201

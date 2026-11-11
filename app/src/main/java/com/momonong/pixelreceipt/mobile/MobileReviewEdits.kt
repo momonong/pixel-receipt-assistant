@@ -17,7 +17,9 @@ internal class MobileReviewEdits(private val saved: SavedStateHandle) {
         val prior = mutable.value[batch.id]
         val review = prior?.value ?: batch.review ?: return
         if (review.locked) return
-        val editor = review.editor.also(change)
+        val before = review.editor
+        val editor = before.deepCopy().also(change)
+        if (before["candidate"] != editor["candidate"] || before["line_decisions"] != editor["line_decisions"]) editor.addProperty("_notes_checked", "none")
         publish(mutable.value + (batch.id to ReviewEdit(batch.id, review.copy(editorJson = editor.toString(), editRevision = review.editRevision + 1, error = null), prior?.expectedRevision ?: review.editRevision, prior?.error)))
     }
     fun pending(id: String) = id in mutable.value

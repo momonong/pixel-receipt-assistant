@@ -119,8 +119,8 @@
       "tolerance_acknowledgement": "none"
     },
     "calculation": {
-      "ruleset": "pixelreceipt-central-ledger-1",
-      "basis_sha256": "52e8da16a518b0d6827c2cb1a8b20043b0b668db0d29567c6b01b94e5e891ab0",
+      "ruleset": "pixelreceipt-central-ledger-2",
+      "basis_sha256": "a295b72e0e0baa24080978777efb136bc837339824e261e60f1e4c6ac78b4661",
       "ready": true,
       "blockers": [],
       "reconciliation_status": "balanced",

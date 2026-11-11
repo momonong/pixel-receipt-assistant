@@ -95,6 +95,8 @@ class AnalysisStore:
             )
         except InvalidPriceReview as error:
             raise StoreError(503, "price_review_integrity_failure") from error
+        for line in lines:
+            line["raw_name"] = ledger["display_item_names"][line["item_position"]]
         if ledger["status"] != "active":
             for line in lines:
                 line["comparison_eligible"] = False
@@ -185,7 +187,7 @@ class AnalysisStore:
             haystack = "\n".join(
                 [
                     candidate["merchant"] or "",
-                    *[item["raw_name"] or "" for item in candidate["items"]],
+                    *[name or "" for name in entry["display_item_names"]],
                 ]
             ).casefold()
             if search is not None and search not in haystack:
@@ -233,8 +235,12 @@ class AnalysisStore:
                 connection, date_from=date_from, date_to=date_to, status="active"
             )
             count = 0
+            missing_names = 0
+            receipts_missing_names = 0
             for entry in entries:
                 count += 1
+                missing_names += entry["missing_item_name_count"]
+                receipts_missing_names += bool(entry["missing_item_name_count"])
                 snapshot = entry["snapshot"]
                 for key in keys:
                     totals[key] += snapshot["calculation"][key]
@@ -250,6 +256,8 @@ class AnalysisStore:
                 "date_from": date_from,
                 "date_to": date_to,
                 "receipt_count": count,
+                "missing_item_name_count": missing_names,
+                "receipts_missing_item_names": receipts_missing_names,
                 **totals,
             }
 

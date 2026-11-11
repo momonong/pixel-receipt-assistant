@@ -25,7 +25,7 @@ internal fun ReceiptActionMenu(batch: MobileBatch?, entry: JsonObject?, state: M
     val voided = entry?.text("status") == "voided" || batch?.ledgerStatus == "voided" || batch?.draftStatus == "voided"
     val target = ledgerId ?: batch?.id ?: return
     val localBatchId = batch?.id ?: state.batches.firstOrNull { it.ledgerId == ledgerId || it.draftId == entry?.text("draft_id") }?.id
-    val pending = state.mutations.lastOrNull { it.phase == "pending" && ((localBatchId != null && it.batchId == localBatchId) || (it.targetId == ledgerId && it.kind == "ledger_void")) }
+    val pending = state.mutations.lastOrNull { it.phase == "pending" && ((localBatchId != null && it.batchId == localBatchId) || (it.targetId == ledgerId && it.kind in setOf("ledger_void", "ledger_names"))) }
     if (voided && pending == null) return
     val candidate = entry?.getAsJsonObject("snapshot")?.getAsJsonObject("candidate") ?: batch?.review?.editor?.getAsJsonObject("candidate")
     val title = candidate?.text("merchant")?.takeIf { it.isNotBlank() } ?: batch?.let(::batchTitle) ?: "這筆帳目"
@@ -52,7 +52,7 @@ internal fun ReceiptActionMenu(batch: MobileBatch?, entry: JsonObject?, state: M
             }
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            DropdownMenuItem(text = { Text(if (pending != null) "查詢${if (pending.kind == "ledger_void") "作廢" else "刪除"}結果" else actionLabel) },
+            DropdownMenuItem(text = { Text(if (pending != null) "查詢${pending.resultLabel}結果" else actionLabel) },
                 onClick = {
                     menu = false
                     if (pending != null) actions.retryReceiptMutation(pending)
@@ -86,6 +86,10 @@ internal fun ReceiptActionMenu(batch: MobileBatch?, entry: JsonObject?, state: M
 }
 
 internal fun MobileActions.retryReceiptMutation(value: ReceiptMutation) {
-    if (value.kind == "ledger_void") voidEntry(value.targetId, "未註明") else value.batchId?.let { deleteBatch(it, "未註明") }
+    when (value.kind) {
+        "ledger_void" -> voidEntry(value.targetId, "未註明")
+        "ledger_names" -> updateItemNames(value.targetId, emptyMap())
+        else -> value.batchId?.let { deleteBatch(it, "未註明") }
+    }
 }
-internal val ReceiptMutation.resultLabel: String get() = if (kind == "ledger_void") "作廢" else "刪除"
+internal val ReceiptMutation.resultLabel: String get() = when (kind) { "ledger_void" -> "作廢"; "ledger_names" -> "補品名"; else -> "刪除" }

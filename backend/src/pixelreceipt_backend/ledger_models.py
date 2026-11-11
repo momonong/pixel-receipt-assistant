@@ -2,7 +2,7 @@
 
 from typing import Annotated, Literal
 
-from pydantic import Field, StringConstraints, model_validator
+from pydantic import Field, StringConstraints, field_validator, model_validator
 
 from .models import INT_MAX, LONG_MAX, Candidate, Money, StrictModel
 
@@ -101,6 +101,29 @@ class ReviewReceipt(ReviewDocument):
 
 class ConfirmReceipt(StrictModel):
     expected_revision: Annotated[int, Field(ge=1, lt=LONG_MAX)]
+    notes_acknowledgement: Literal["checked"] | None = None
+
+
+class ItemName(StrictModel):
+    item_position: Position
+    name: Annotated[str, StringConstraints(max_length=500)] | None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def optional_name(cls, value):
+        return value.strip() or None if isinstance(value, str) else value
+
+
+class UpdateItemNames(StrictModel):
+    expected_revision: Annotated[int, Field(ge=1, lt=LONG_MAX)]
+    item_names: Annotated[list[ItemName], Field(min_length=1, max_length=100)]
+
+    @model_validator(mode="after")
+    def unique_positions(self):
+        positions = [item.item_position for item in self.item_names]
+        if len(set(positions)) != len(positions):
+            raise ValueError("duplicate item positions")
+        return self
 
 
 class VoidReceipt(StrictModel):

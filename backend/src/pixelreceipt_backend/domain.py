@@ -10,7 +10,7 @@ import json
 from .ledger_models import ReviewDocument
 from .models import LONG_MAX, Candidate
 
-RULESET = "pixelreceipt-central-ledger-1"
+RULESET = "pixelreceipt-central-ledger-2"
 PURPOSES = ("self", "advance", "gift")  # Android's deterministic largest-remainder tie order.
 
 
@@ -56,7 +56,6 @@ def calculate(candidate: Candidate, document: ReviewDocument | None) -> dict:
     money_known = candidate.printed_total_yuan is not None and bool(candidate.items)
     for index, item in enumerate(candidate.items):
         for value, code in (
-            (item.raw_name, "item_name_unknown"),
             (item.quantity, "item_quantity_unknown"),
             (item.printed_line_total_yuan, "item_amount_unknown"),
         ):

@@ -315,6 +315,12 @@ class MobileViewModel @JvmOverloads constructor(
             messageMutable.value = "帳目已作廢，不再計入有效支出；原帳目與原因保留。"
         }
     }
+    fun updateItemNames(id: String, names: Map<Int, String?>) {
+        online("正在確認補品名結果…") {
+            repository.updateItemNames(id, names)
+            messageMutable.value = "品名已保存；原入帳金額與用途保留。"
+        }
+    }
     fun stopNetwork() { network?.cancel() }
     fun background() { network?.cancel() }
 }

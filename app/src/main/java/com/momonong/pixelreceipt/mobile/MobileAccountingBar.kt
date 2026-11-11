@@ -23,7 +23,7 @@ internal fun NativePrimaryBar(state: MobileUiState, actions: MobileActions, comp
     val batch = state.batch; val review = batch?.review
     val pending = state.mutations.lastOrNull { it.batchId == batch?.id && it.phase == "pending" }
     val blockers = review?.let(::reviewBlockers).orEmpty().filter { it.text("code") != "receipt_completeness_unconfirmed" }
-    val invalid = review?.let(::prepareReview)?.errors?.isNotEmpty() == true
+    val invalid = review?.let { prepareReview(it, complete = true) }?.errors?.isNotEmpty() == true
     val formal = batch?.ledgerId != null || batch?.draftStatus in setOf("confirmed", "voided")
     val waiting = review?.dirty == true || state.savingReview || batch?.id in state.pendingReviewEdits
     val label: String

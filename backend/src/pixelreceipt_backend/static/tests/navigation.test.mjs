@@ -52,7 +52,8 @@ async function appHarness(hash = "#overview") {
     loadOverview = async () => {}; loadLedger = async () => {};
     loadProducts = async () => {}; loadIntakes = async () => {}; loadData = async () => {};
     dialog = () => fakeNode();
-    el = (tag, attributes = {}, ...children) => ({tag, attributes, children, append(...more) {this.children.push(...more);}, replaceChildren(...more) {this.children = more;}});
+    el = (tag, attributes = {}, ...children) => ({tag, attributes, children, listeners: new Map(), append(...more) {this.children.push(...more);}, replaceChildren(...more) {this.children = more;}, addEventListener(name, callback) {this.listeners.set(name, callback);}});
+    const actualLedgerView = ledgerView;
     ledgerView = () => ({merchant: "Synthetic", candidate: {items: []}});
     statusBadge = () => null; calcRow = () => null;
     priceReviewSection = () => null; voidForm = () => null;
@@ -286,4 +287,120 @@ test("deleted draft deep link renders a final read-only notice without editing c
   visit(rendered);
   assert.equal(tags.includes("form"), false);
   assert.equal(tags.includes("fieldset"), false);
+});
+
+
+function noteDraft({saved = false, status = "matched", purpose = "advance"} = {}) {
+  return {id: B, status: "needs_review", revision: saved ? 2 : 1,
+    candidate: {merchant: "合成商店", receipt_date: null, printed_total_yuan: 100,
+      items: [{raw_name: "牙膏", quantity: 2, printed_unit_price_yuan: 50, printed_line_total_yuan: 100}], adjustments: []},
+    calculation: {ready: true, printed_total_yuan: 100},
+    review_document: saved ? {assembly_status: "complete_by_user", line_decisions: [{item_position: 0, method: "whole_line", whole_purpose: "self", quantities: null, amounts_yuan: null}], adjustment_decisions: []} : null,
+    note_review: {status, decisions: [{item_position: 0, purpose, note_quote: "牙膏兩條全部幫小美買"}], unresolved_notes: []}};
+}
+function findNode(node, predicate) {
+  if (!node || typeof node !== "object") return null;
+  if (predicate(node)) return node;
+  for (const child of (Array.isArray(node) ? node : node.children || [])) {
+    const match = findNode(child, predicate); if (match) return match;
+  }
+  return null;
+}
+function buttonNamed(node, name) {
+  return findNode(node, (item) => item.tag === "button" && item.children.includes(name));
+}
+async function reviewHarness(options) {
+  const app = await appHarness(); app.context.fixtureDraft = noteDraft(options);
+  app.context.document.querySelector = () => null;
+  app.run('state.view = "review"; state.selected = fixtureDraft; state.edit = makeEdit(fixtureDraft);');
+  return app;
+}
+
+test("fresh semantic purposes and browser-local date default preserve original receipt facts", async () => {
+  const app = await appHarness(); const draft = noteDraft({purpose: "gift"}); draft.revision = 2;
+  app.context.fixtureDraft = draft;
+  app.run(`Date = class {getFullYear() {return 2026;} getMonth() {return 0;} getDate() {return 2;} toISOString() {return "2026-01-01T16:30:00Z";}}; state.edit = makeEdit(fixtureDraft);`);
+  assert.equal(app.run('state.edit.line_decisions[0].whole_purpose'), "gift");
+  assert.equal(app.run('state.edit.candidate.receipt_date'), "2026-01-02");
+  assert.equal(draft.candidate.receipt_date, null);
+  const saved = noteDraft({saved: true}); app.context.savedDraft = saved;
+  assert.equal(app.run('makeEdit(savedDraft).candidate.receipt_date'), null);
+});
+
+test("saved self purposes show exact source and explicit apply changes no receipt facts or money", async () => {
+  const app = await reviewHarness({saved: true});
+  const before = plain(app.run('state.edit.candidate'));
+  assert.equal(app.run('state.edit.line_decisions[0].whole_purpose'), "self");
+  const panel = app.run('noteReviewPanel(false)');
+  assert.match(JSON.stringify(plain(panel)), /來源敘述 · 牙膏兩條全部幫小美買/);
+  const apply = buttonNamed(panel, "依補充敘述套用用途"); assert.ok(apply);
+  apply.attributes.onclick();
+  assert.equal(app.run('state.edit.line_decisions[0].whole_purpose'), "advance");
+  assert.deepEqual(plain(app.run('state.edit.candidate')), before);
+  assert.equal(app.run('state.dirty'), true);
+  assert.equal(app.calls.length, 0);
+});
+
+test("unresolved notes cannot confirm until explicit keep, whose acknowledgement is frozen on retry", async () => {
+  const app = await reviewHarness({saved: true, status: "needs_review"});
+  app.context.freshKey = () => "synthetic-note-confirm";
+  await app.run('confirmDraft()');
+  assert.equal(app.calls.filter(([path]) => path.endsWith('/confirm')).length, 0);
+  const panel = app.run('noteReviewPanel(false)');
+  assert.match(JSON.stringify(plain(panel)), /仍有無法對應/);
+  const keep = buttonNamed(panel, "保留目前用途，已核對敘述"); assert.ok(keep);
+  keep.attributes.onclick();
+  assert.equal(app.run('state.dirty'), false);
+  const api = app.run('api'); const attempts = [];
+  api.request = (path, options) => {
+    attempts.push(plain(options));
+    if (attempts.length === 1) return Promise.reject(new Error("response lost"));
+    return Promise.resolve({id: L, status: "active"});
+  };
+  await app.run('confirmDraft()');
+  assert.deepEqual(attempts[0].body, {expected_revision: 2, notes_acknowledgement: "checked"});
+  app.run('state.notesAcknowledged = false');
+  await app.run('confirmDraft()');
+  assert.deepEqual(attempts[1], attempts[0]);
+});
+
+test("purpose mismatch blocks confirm and editing invalidates a previous keep acknowledgement", async () => {
+  const app = await reviewHarness({saved: true});
+  app.context.freshKey = () => "synthetic-note-edit";
+  await app.run('confirmDraft()');
+  assert.equal(app.calls.length, 0);
+  buttonNamed(app.run('noteReviewPanel(false)'), "保留目前用途，已核對敘述").attributes.onclick();
+  assert.equal(app.run('state.notesAcknowledged'), true);
+  app.run('state.edit.candidate.items[0].quantity = "3"; markDirty();');
+  assert.equal(app.run('state.notesAcknowledged'), false);
+});
+
+test("explicit note apply never replaces partial split or changed item identity", async () => {
+  const app = await reviewHarness({saved: true});
+  const split = {item_position: 0, method: "explicit_amounts", whole_purpose: null, quantities: {self: 1, gift: 0, advance: 1}, amounts_yuan: {self: 50, gift: 0, advance: 50}};
+  app.context.partial = split; app.run('state.edit.line_decisions[0] = partial');
+  let apply = buttonNamed(app.run('noteReviewPanel(false)'), "依補充敘述套用用途");
+  assert.ok(apply.attributes.disabled);
+  assert.deepEqual(plain(app.run('state.edit.line_decisions[0]')), split);
+  app.run('state.edit.line_decisions[0] = {...blankLineDecision(0), whole_purpose: "self"}; state.edit.candidate.items[0].raw_name = "不同品項";');
+  apply = buttonNamed(app.run('noteReviewPanel(false)'), "依補充敘述套用用途");
+  assert.ok(apply.attributes.disabled);
+});
+
+test("ledger display name overlay preserves original snapshot and all financial values", async () => {
+  const app = await appHarness();
+  const entry = {id: L, snapshot: {candidate: {merchant: "合成", items: [{raw_name: null, quantity: 2, printed_line_total_yuan: 100}, {raw_name: null, quantity: 1, printed_line_total_yuan: 20}]}, calculation: {printed_total_yuan: 120, personal_yuan: 120}}, display_item_names: ["已補牙膏", null]};
+  app.context.overlayEntry = entry; const before = structuredClone(entry);
+  const view = plain(app.run('actualLedgerView(overlayEntry)'));
+  assert.equal(view.candidate.items[0].raw_name, "已補牙膏");
+  assert.equal(view.candidate.items[1].raw_name, null);
+  assert.equal(view.total, 120);
+  assert.deepEqual(entry, before);
+});
+
+test("overview surfaces missing-name counts without inventing a completion action", async () => {
+  const app = await appHarness();
+  const rendered = app.run('state.overview = {receipt_count:2, missing_item_name_count:3, receipts_missing_item_names:2}; const view=el("main"); renderOverview(view); view;');
+  assert.match(JSON.stringify(plain(rendered)), /待補品名 3 項/);
+  assert.match(JSON.stringify(plain(rendered)), /2 張收據/);
 });
