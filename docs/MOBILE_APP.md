@@ -1,8 +1,16 @@
-# PixelReceipt 手機使用說明（0.5.4 候選）
+# PixelReceipt 手機使用說明（0.5.5）
 
-0.5.4／versionCode 11 將核對、用途分配、確認入帳與中央帳本留在 Android App。中央帳本是正式紀錄；本機保留原圖與待同步草稿。application ID 沿用 `com.momonong.pixelreceipt.mobile`，不讀取或遷移舊 `com.momonong.pixelreceipt` App 資料。
+0.5.5／versionCode 12 將核對、用途分配、確認入帳與中央帳本留在 Android App。中央帳本是正式紀錄；本機保留原圖與待同步草稿。application ID 沿用 `com.momonong.pixelreceipt.mobile`，不讀取或遷移舊 `com.momonong.pixelreceipt` App 資料。
 
 0.5.4 在辨識品項後核對補充敘述，加入日曆日期與待補品名，沿用可能重複提醒、原生刪除與作廢。Git 發布、正式部署、永久簽章 APK 與手機更新的完成狀態另行核對，不以本機工程驗證代替。版本與驗證範圍見 [0.5.4 發行說明](RELEASE_v0.5.4.md)；前版紀錄保留於 [0.5.3](RELEASE_v0.5.3.md)、[0.5.2](RELEASE_v0.5.2.md)、[0.5.1](RELEASE_v0.5.1.md) 與 [0.5.0](RELEASE_v0.5.0.md)。
+
+## 在 App 更新
+
+開啟右上「設定」→「App 更新」→「檢查更新」。有新版時可直接按「下載更新」，畫面會顯示大小與進度；下載後按「安裝更新」交給 Android 確認，全程不需開網站。第一次可能顯示「允許安裝更新」：允許 PixelReceipt 安裝應用程式，再返回 App 繼續。這是 Android 系統設定與安裝確認；取消後可再操作，不會被標成更新成功。
+
+更新採相同套件與永久簽章覆蓋，不卸載或清除收據、帳本、草稿與登入資料。舊版第一次仍需先安裝含此入口的 0.5.5，之後即可從 App 更新。是否已提供下載、部署及手機安裝，見當次交付證據。
+
+更新僅在按鈕操作後查詢或下載，沿用中央帳本登入。未登入、連線失敗、更新檔改版或下載逾時會在同區提示，可重新檢查；下載中也可取消。離開後返回可繼續查看進度；程序中斷會停止該次工作，下次檢查會重新驗證完整檔，不安裝未完成檔。重新登入會停止舊更新工作，過期回應不清掉新登入。伺服器提供的版本較舊時不降版。
 
 ## 日常使用
 
@@ -91,4 +99,6 @@
 ./gradlew testDebugUnitTest lintDebug assembleDebug --offline --no-daemon --max-workers=1 --no-parallel
 ```
 
-0.5.4 候選的 Android 390 tests、嚴格 lint 與未簽 APK 建置通過；後端 388 tests 與網頁 47 tests 通過。歷史上 0.5.1 為 335 Android tests、0.5.2 為 355、0.5.3 為 356；各次驗證不混算。範圍見本版發行說明。合成收據與真實 MainActivity／ViewModel／Compose/Robolectric native graphics 涵蓋 390dp、320dp／150% 字級及可捲動短橫向對話框；鍵盤輸入模式下核對取消焦點。這是主機工程與版面證據，完整鍵盤／TalkBack 與實機分享、OEM Keystore、手機更新及真人帳務接受另列。
+0.5.5 的 Android 410 tests、嚴格 lint 與 APK 建置通過。後端除了 0.5.5 APK metadata 配對外 bytes 相同，沿用已核對的 388 後端／47 網頁測試；簽章與實際 APK metadata 另驗。
+
+歷史上 0.5.4 候選的 Android 390 tests、嚴格 lint 與未簽 APK 建置通過；後端 388 tests 與網頁 47 tests 通過。歷史上 0.5.1 為 335 Android tests、0.5.2 為 355、0.5.3 為 356；各次驗證不混算。範圍見本版發行說明。合成收據與真實 MainActivity／ViewModel／Compose/Robolectric native graphics 涵蓋 390dp、320dp／150% 字級及可捲動短橫向對話框；鍵盤輸入模式下核對取消焦點。這是主機工程與版面證據，完整鍵盤／TalkBack 與實機分享、OEM Keystore、手機更新及真人帳務接受另列。

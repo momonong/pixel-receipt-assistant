@@ -19,8 +19,10 @@ class MobileRepository(
     val images: ImageStore,
     private val vault: TokenVault,
     private val api: MobileApi,
-) {
+) : MobileUpdateSource {
     private val operation = Mutex()
+    override suspend fun appRelease(): AppRelease = withContext(Dispatchers.IO) { authenticated { api.appRelease(it) } }
+    override suspend fun downloadAppUpdate(release: AppRelease, file: File, progress: (Long) -> Unit): Unit = withContext(Dispatchers.IO) { authenticated { api.downloadAppUpdate(it, release, file, progress) } }
     suspend fun initialize(): Boolean = withContext(Dispatchers.IO) { store.load(); vault.read() != null }
     suspend fun reviewerSession(): Boolean = withContext(Dispatchers.IO) { vault.read()?.startsWith("prm_") == true }
     suspend fun login(password: String) = withContext(Dispatchers.IO) {
@@ -45,7 +47,10 @@ class MobileRepository(
     private suspend fun <T> authenticated(action: suspend (String) -> T): T {
         store.load() // A fresh device identity must be durable before any authenticated request.
         val token = vault.read() ?: throw MobileApiFailure(401)
-        try { return action(token) } catch (error: MobileApiFailure) { if (error.statusCode == 401) vault.clear(); throw error }
+        try { return action(token) } catch (error: MobileApiFailure) {
+            if (error.statusCode == 401 && !vault.clearIfMatching(token)) throw MobileFailure("登入狀態已更新，這次舊連線已停止，請重試。")
+            throw error
+        }
     }
     suspend fun import(id: String, notes: String, inputs: List<ImportInput>): MobileBatch = withContext(Dispatchers.IO) {
         operation.withLock {

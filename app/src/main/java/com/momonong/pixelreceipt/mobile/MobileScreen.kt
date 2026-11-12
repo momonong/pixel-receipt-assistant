@@ -37,10 +37,15 @@ internal data class MobileUiState(
     val accountingStale: Boolean = false,
     val accountingError: String? = null,
     val duplicateShare: DuplicateShareReminder? = null,
+    val appUpdate: AppUpdateState = AppUpdateState(),
 ) {
     val batch: MobileBatch? get() = batches.firstOrNull { it.id == selectedId }
 }
 internal class MobileActions(
+    val checkAppUpdate: () -> Unit = {},
+    val downloadAppUpdate: () -> Unit = {},
+    val installAppUpdate: () -> Unit = {},
+    val cancelAppUpdate: () -> Unit = {},
     val select: (String?) -> Unit = {},
     val settings: () -> Unit = {},
     val back: () -> Unit = {},
@@ -75,6 +80,7 @@ internal class MobileActions(
 @Composable
 fun MobileScreen(viewModel: MobileViewModel) {
     MobileSystemBars()
+    val update by viewModel.appUpdate.collectAsStateWithLifecycle()
     val persisted by viewModel.state.collectAsStateWithLifecycle()
     val selected by viewModel.selected.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -100,8 +106,10 @@ fun MobileScreen(viewModel: MobileViewModel) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(20), viewModel::picked)
     val state = MobileUiState(persisted != null, persisted?.batches.orEmpty(), selected,
         if (settings) MobilePage.Settings else MobilePage.valueOf(destination),
-        signedIn, busy, message, engines, writable, edits, reviewer, persisted?.ledgerJson, persisted?.ledgerUpdatedAt, selectedLedger, savingReview, reviewEdits.keys, persisted?.ledgerDetailsJson, persisted?.mutations.orEmpty(), persisted?.overviewJson, persisted?.accountingStale == true, persisted?.accountingError, duplicate)
+        signedIn, busy, message, engines, writable, edits, reviewer, persisted?.ledgerJson, persisted?.ledgerUpdatedAt, selectedLedger, savingReview, reviewEdits.keys, persisted?.ledgerDetailsJson, persisted?.mutations.orEmpty(), persisted?.overviewJson, persisted?.accountingStale == true, persisted?.accountingError, duplicate, update)
     val actions = MobileActions(
+        checkAppUpdate = viewModel::checkAppUpdate, downloadAppUpdate = viewModel::downloadAppUpdate,
+        installAppUpdate = viewModel::installAppUpdate, cancelAppUpdate = viewModel::cancelAppUpdate,
         select = viewModel::select, settings = { viewModel.openSettings(true) }, back = viewModel::back,
         pick = { id -> viewModel.pickerTarget(id); picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
         edit = viewModel::edit, login = viewModel::login, logout = viewModel::logout, refresh = viewModel::refreshEngines,

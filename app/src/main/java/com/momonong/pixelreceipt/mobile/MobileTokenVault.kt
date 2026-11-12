@@ -15,6 +15,10 @@ interface TokenVault {
     fun read(): String?
     fun save(token: String)
     fun clear()
+    /** Implementations serialize credential writes on the same monitor. */
+    fun clearIfMatching(expected: String): Boolean = synchronized(this) {
+        if (read() != expected) false else { clear(); true }
+    }
 }
 
 /** Only ciphertext is written, exclusively in noBackupFilesDir. Never logs credential material. */

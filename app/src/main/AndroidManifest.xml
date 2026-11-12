@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".app.ReceiptApplication"
@@ -14,6 +15,10 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.PixelReceipt"
         android:usesCleartextTraffic="false">
+        <provider android:name=".mobile.AppUpdateFileProvider"
+            android:authorities="${applicationId}.updates" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_paths" />
+        </provider>
         <property android:name="android.app.appfunctions.app_metadata"
             android:resource="@xml/app_metadata" tools:targetApi="36" />
         <service android:name=".appfunctions.ReceiptFunctionService"

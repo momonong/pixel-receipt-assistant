@@ -476,6 +476,7 @@ class MobileRenderingTest {
             engines = mapOf("broker" to EngineAvailability(true, null), "local" to EngineAvailability(false, "recognition_not_configured")))
         render(state, "settings-840")
         ui.onNodeWithText("中央尚未啟用").assertExists()
+        ui.onNodeWithTag("mobile-settings-page").performScrollToNode(hasTestTag("legacy-ledger-entry"))
         ui.onNodeWithTag("legacy-ledger-entry").performScrollTo().assertIsDisplayed()
         ui.onNodeWithText("本機帳本（此 App）").assertIsDisplayed()
         ui.onNodeWithText("此 App 的本機帳本與中央帳本分開保存，不會自動匯入或上傳資料。").assertIsDisplayed()

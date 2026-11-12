@@ -34,6 +34,8 @@ interface MobileApi {
     suspend fun updateItemNames(token: String, id: String, attempt: ReceiptMutation): String = throw UnsupportedOperationException()
     suspend fun voidLedger(token: String, id: String, attempt: ReceiptMutation): String = throw UnsupportedOperationException()
     suspend fun overview(token: String): String = throw UnsupportedOperationException()
+    suspend fun appRelease(token: String): AppRelease = throw UnsupportedOperationException()
+    suspend fun downloadAppUpdate(token: String, release: AppRelease, file: File, progress: (Long) -> Unit): Unit = throw UnsupportedOperationException()
 }
 
 /** Deliberately not a data class: neither body nor Bearer may appear in debug strings. */
@@ -116,7 +118,7 @@ internal class HttpsMobileTransport(private val connectionFactory: (URL) -> Http
     }
 }
 
-class HttpsMobileApi internal constructor(private val transport: MobileTransport) : MobileApi {
+class HttpsMobileApi internal constructor(private val transport: MobileTransport, private val apkDownload: ApkDownload = HttpsApkDownload()) : MobileApi {
     constructor() : this(HttpsMobileTransport())
     override suspend fun login(deviceId: String, password: String): String {
         require(validUuid(deviceId) && password.length in 1..1024)
@@ -185,6 +187,8 @@ class HttpsMobileApi internal constructor(private val transport: MobileTransport
         return transport.call(MobileRequest("v1/ledger/$id/item-names", "POST", token, json = attempt.body, idempotencyKey = attempt.key)).also { check(ledgerNamesObject(it).text("id") == id) }
     }
     override suspend fun overview(token: String): String = transport.call(MobileRequest("v1/overview", token = token)).also { overviewObject(it) }
+    override suspend fun appRelease(token: String): AppRelease = parseAppRelease(transport.call(MobileRequest("v1/mobile/release", token = token)))
+    override suspend fun downloadAppUpdate(token: String, release: AppRelease, file: File, progress: (Long) -> Unit) = apkDownload.download(token, release, file, progress)
     private fun objectJson(body: String): JsonObject = JsonParser.parseString(body).asJsonObject
     private fun parseIntake(body: String): ServerIntake {
         val json = objectJson(body)
@@ -209,7 +213,7 @@ class HttpsMobileApi internal constructor(private val transport: MobileTransport
 internal fun allowedMobileRequest(path: String, method: String): Boolean {
     val uuid = "[0-9a-fA-F-]{36}"
     return when (method) {
-        "GET" -> path in setOf("v1/recognition", "v1/overview") || path.matches(Regex("v1/(intakes|drafts|ledger)/$uuid")) ||
+        "GET" -> path in setOf("v1/recognition", "v1/overview", "v1/mobile/release") || path.matches(Regex("v1/(intakes|drafts|ledger)/$uuid")) ||
             path.matches(Regex("v1/ledger\\?limit=20&offset=(0|[1-9][0-9]{0,5})"))
         "POST" -> path in setOf("v1/mobile/logout", "v2/mobile/login", "v2/mobile/logout", "v1/evidence", "v1/intakes") ||
             path.matches(Regex("v2/drafts/$uuid/confirm")) || path.matches(Regex("v1/(intakes|drafts)/$uuid/delete")) || path.matches(Regex("v1/ledger/$uuid/(void|item-names)"))
