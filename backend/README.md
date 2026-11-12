@@ -1,12 +1,20 @@
 # PixelReceipt 中央帳本與核對 Dashboard
 
-這是 Python／FastAPI、SQLite 與原始 bytes blob store 的中央服務：保存原圖與候選、人類核對／用途分配、確定性確認入帳／作廢，以及獨立的商品身份與價格分析。[中央服務](https://momonong.me/receipts/) 提供登入後的 Dashboard 與 APK 下載；在役主機為 HP，原 ASUS 部署文件保留為歷史。0.5.4 是本輪敘述核對、日期與待補品名候選，正式部署與手機驗收分開記錄，見 [發行說明](../docs/RELEASE_v0.5.4.md)。
+這是 Python／FastAPI、SQLite 與原始 bytes blob store 的中央服務：保存原圖與候選、人類核對／用途分配、確定性確認入帳／作廢，以及獨立的商品身份與價格分析。[中央服務](https://momonong.me/receipts/) 提供登入後的 Dashboard 與 APK 下載；在役主機為 HP，原 ASUS 部署文件保留為歷史。目前新增的生活分類、餐別、地區與無收據記帳是 0.7.0 工程候選，正式部署與手機驗收分開記錄，見 [候選說明](../docs/RELEASE_v0.7.0.md)。
+
+## 0.7.0 生活分析候選
+
+`GET /v1/insights` 與 `/v1/insights/entries` 提供同一讀取快照的完整有效帳目分析，按品項分類／餐別、按帳目店家／品牌／分店／縣市／行政區／通路／日期交叉篩選。來源及操作契約見 [生活分析設計](../docs/plans/2026-11-12-spending-dimensions-design.md)，使用方式見 [生活支出分析](../docs/LIVING_SPENDING_ANALYSIS.md)。
+
+`GET/PUT /v1/drafts/{id}/insights` 與 `/v1/ledger/{id}/insights` 是同一草稿的可修訂分析註記，PUT 為 reviewer-only、CAS 與 Idempotency-Key。`POST /v1/manual-entries` 由人類明確確認一筆無照片支出，以同一 transaction 建立 draft、review、ledger、註記及操作紀錄。`GET /v1/analysis-operations/{key}` 僅可查本輪分析／手動／商品與價格寫入的原結果，不能列舉其他 mutation。
+
+`GET /v1/session` 新增非秘密穩定 `ledger_id`。Schema 5 在同資料庫新增 `ledger_metadata` 與分析註記／歷史；UUID 只在初始化／v4 migration 生成，遺失或損壞不自行換身份。備份還原保留此 UUID，session 仍按原規則失效。舊 API 及財務 snapshot 保持相容。
 
 主流程是 APK 將原圖、整批說明與逐圖角色／備註交給中央 intake，由後端透過已配置來源辨識，再在 App 內人工核對與確認入帳。精確 DTO／狀態見 [手機契約](../docs/MOBILE_INGEST_CONTRACT.md)。原生 App 使用 v2 reviewer session；舊 v1 device ingest token 保留收件權限，不自動升權。purchase 成功只形成 needs_review，reference 只保存價格候選，不形成消費草稿。未配置 engine 明示 unavailable，不假裝辨識。
 
 核對頁會透過 reviewer-only `GET /v1/drafts/{draft_id}/intake-context` 顯示整批原說明、逐圖角色與備註。關聯只讀取中央 intake 保存的草稿 ID 並核對原圖順序。無關聯時回傳 `intake: null`。待核對草稿的 GET 與 review PUT 均提供 `note_review`：用途提案、原文引句及無法對應部分。原有一次辨識回覆在抽出品項後一併核對說明，不新增模型請求；新舊 prompt 的凍結工作分別解析。用途衝突或未解析敘述需要明確核對，最終 confirm 可帶字串 `notes_acknowledgement: "checked"`；省略欄位的舊成功請求仍可依原 idempotency key 重取結果。Dashboard 的五個主頁、草稿與帳本明細會同步 URL，重新整理或重新登入後回到通過 allowlist 的同一頁。
 
-品名可為 null 而不阻擋金額與用途合法的入帳。帳本回傳 `display_item_names`、`missing_item_name_count`；overview 另提供 `receipts_missing_item_names`。reviewer 的 `POST /v1/ledger/{id}/item-names` 使用 expected_revision、item_names 陣列及固定 Idempotency-Key，只新增顯示名稱事件，絕不改寫財務 snapshot；作廢後不可修改。後補名稱可供帳本搜尋與顯示，原商品對應及價格計算基準保留。schema 仍為 4，計算規則識別更新為 `pixelreceipt-central-ledger-2`。
+品名可為 null 而不阻擋金額與用途合法的入帳。帳本回傳 `display_item_names`、`missing_item_name_count`；overview 另提供 `receipts_missing_item_names`。reviewer 的 `POST /v1/ledger/{id}/item-names` 使用 expected_revision、item_names 陣列及固定 Idempotency-Key，只新增顯示名稱事件，絕不改寫財務 snapshot；作廢後不可修改。後補名稱可供帳本搜尋與顯示，原商品對應及價格計算基準保留。此品名功能原於 schema 4 加入；本候選整體 schema 為 5，計算規則識別為 `pixelreceipt-central-ledger-2`。
 
 
 上傳原圖完整保存；衍生 JPEG 每張 384 KiB／最長邊 1600，合計 8 MiB；完整序列化 request 16 MiB、result 4 MiB。部署以固定 `document_pdf` 路由按圖片順序封裝成真 PDF，接既有 Google 文件能力；v1 intake 仍只收圖片，沒有宣稱 APK PDF 分享完成。`vision` 是另一個已測可配置 mode，不能由 adapter 存在推定現場路由可用。完整 payload 先落盤、routes/explain 通過後才標 submitting 並 queue POST；不重試 POST。結果未知沿原 key GET，保存原 raw outcome／來源／模型／截斷／版本及衍生 hashes。候選 parser 僅接受純 JSON 或完整單一 `json` code fence，僅移除外層 fence／空白；原文不變，另記 parser 版本、是否執行與是否去 fence，仍拒絕散文抽取、重複鍵、非整數金額或截斷結果。
@@ -97,7 +105,7 @@ repo 根目錄的 [ingest CLI](../scripts/receipt_api.py) 只有 health／原檔
 
 刪除是持久 tombstone，不移除原圖、候選、歷史或資料列，也沒有公開復原按鈕。`POST /v1/intakes/{id}/delete` 的 `expected_draft_revision` **必填**：沒有 linked draft 才能用 null，有 draft 必須是該草稿目前 revision；`reason` 為 1–1000 字元非空白文字，App 未填時凍結送出 `未註明`。成功與同 key／同 body 重送皆回 200 完整 intake，`status=deleted`、`polling_finished=true`；linked draft 同交易標 `deleted`、revision +1，原因存入歷史。draft-only 可用 `/v1/drafts/{id}/delete`，必填整數 `expected_revision` 及相同 reason；若有正式 intake 關聯也一起 tombstone，不根據不可信 source.label 推斷關聯。
 
-已知 deleted ID 的 GET 保留完整 tombstone，重送原 create key 也回 tombstone；預設 intake／draft 列表在分頁前排除 deleted。不同 body／target／operation 重用 mutation key、過期 revision、已刪除改用新 key、已入帳或已作廢的草稿皆回 409；未知 ID 回 404。結果未知時先 GET 原 ID，重試只沿用原 key 與完全相同 body。無草稿 intake 的原因保存在既有 mutations TEXT 內部 request／response journal，不更動對外 DTO。review、confirm、delete 的檢查／更新／journal 由 `BEGIN IMMEDIATE` 序列化；schema 仍為 4，無 migration。舊 split-transaction worker 若留下精確 `intake:<id>` key 的草稿卻沒有 FK 連結，兩種 delete 都回 `409 intake_draft_reconciliation_required`；不依 label 猜所有權，也不留下「intake 已刪、孤立草稿仍可入帳」的成功狀態。合法舊結果可用既有 worker 沿相同 derived key／完整 body digest 重跑完成原子連結，再以目前 revision 刪除；內容衝突須先人工核對。
+已知 deleted ID 的 GET 保留完整 tombstone，重送原 create key 也回 tombstone；預設 intake／draft 列表在分頁前排除 deleted。不同 body／target／operation 重用 mutation key、過期 revision、已刪除改用新 key、已入帳或已作廢的草稿皆回 409；未知 ID 回 404。結果未知時先 GET 原 ID，重試只沿用原 key 與完全相同 body。無草稿 intake 的原因保存在既有 mutations TEXT 內部 request／response journal，不更動對外 DTO。review、confirm、delete 的檢查／更新／journal 由 `BEGIN IMMEDIATE` 序列化；此刪除功能於 schema 4 加入、無獨立 migration；本候選整體 schema 為 5。舊 split-transaction worker 若留下精確 `intake:<id>` key 的草稿卻沒有 FK 連結，兩種 delete 都回 `409 intake_draft_reconciliation_required`；不依 label 猜所有權，也不留下「intake 已刪、孤立草稿仍可入帳」的成功狀態。合法舊結果可用既有 worker 沿相同 derived key／完整 body digest 重跑完成原子連結，再以目前 revision 刪除；內容衝突須先人工核對。
 
 辨識 worker 在 dispatch 前以 guarded write 保存 intent；deleted row 不再 claim、poll 或更新。已 dispatch 的工作可能仍在 provider 執行，刪除不承諾取消或退回配額；晚到的成功、錯誤及 raw result 都不能覆寫 tombstone。建立 purchase draft 與連結 intake 是同一交易，失敗會回滾草稿；沿用歷史精確的 `intake:<id>` derived key，避免當中斷重跑時新增孤立草稿。
 
@@ -105,7 +113,7 @@ repo 根目錄的 [ingest CLI](../scripts/receipt_api.py) 只有 health／原檔
 
 有效 API no-store；原圖 attachment。常見錯誤：401 認證、403 reviewer／Origin／CSRF、409 revision／key／狀態衝突、413 大小、415 媒體、422 不合法輸入或計算範圍、503 DB／完整性／隔離檢查不可用、507 evidence 上限。錯誤不回顯原候選或 parser stderr。總 evidence 上限 1 GiB，不含 SQLite／歷史，也不等於磁碟配額。
 
-目前 DB user_version=4；v1→v2 人類核對／ledger、v2→v3 商品分析、v3→v4 intakes／device_sessions 為明確 additive migration，未知／不符的既有 schema 拒絕，不破壞性 fallback。沒有自動 GC、刪除原圖或保證對管理者防竄改。DB 與 blob 不放 public root、Git 或靜態目錄；使用 [備份／還原工具](../deploy/receipt_backup.py) 的一致 SQLite snapshot + 原圖驗證，不能在運作時只複製主 DB。還原僅寫全新 private dir，必須清除 sessions 及 device_sessions，不自動切換 live／重啟。
+本候選 DB user_version=5；v1→v2 人類核對／ledger、v2→v3 商品分析、v3→v4 intakes／device_sessions、v4→v5 分析註記及穩定帳本身份，均為明確 additive migration，未知／不符的既有 schema 拒絕，不破壞性 fallback。沒有自動 GC、刪除原圖或保證對管理者防竄改。DB 與 blob 不放 public root、Git 或靜態目錄；使用 [備份／還原工具](../deploy/receipt_backup.py) 的一致 SQLite snapshot + 原圖驗證，不能在運作時只複製主 DB。還原僅寫全新 private dir，必須清除 sessions 及 device_sessions，不自動切換 live／重啟。
 
 ## 驗證與交付狀態
 

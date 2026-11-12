@@ -68,6 +68,52 @@ class MobileViewModel @JvmOverloads constructor(
     private val appUpdater = MobileUpdateController(viewModelScope, repository, AndroidMobileUpdateHost(application), com.momonong.pixelreceipt.BuildConfig.VERSION_CODE) {
         signedInMutable.value = false; reviewerMutable.value = false
     }
+    private var nativeScopeGeneration = 0L
+    private val nativeScopeHints = InsightScopeHintStore(application.noBackupFilesDir)
+    private fun cachedNativeScope(): String? = repository.nativeToken()?.let { token -> runCatching { nativeScopeHints.read(token) }.getOrNull() }
+    private var verifiedNativeScope: Pair<String, String>? = null
+    private fun nativeScope(): String? = verifiedNativeScope?.takeIf { it.first == repository.nativeToken() }?.second
+    private fun clearNativeScope() { nativeScopeGeneration++; verifiedNativeScope = null }
+    private suspend fun verifyNativeScope() {
+        val expected = repository.nativeToken() ?: return
+        val generation = nativeScopeGeneration
+        try {
+            val scope = withContext(Dispatchers.IO) { repository.nativeApi().ledgerScope(expected) }
+            UUID.fromString(scope)
+            if (generation == nativeScopeGeneration && repository.nativeToken() == expected) {
+                verifiedNativeScope = expected to scope
+                withContext(Dispatchers.IO) { runCatching { nativeScopeHints.write(expected, scope) } }
+            }
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            if (generation == nativeScopeGeneration && repository.nativeToken() == expected) {
+                if (error is MobileApiFailure && error.statusCode == 401 && repository.nativeUnauthorized(expected)) { signedInMutable.value = false; reviewerMutable.value = false }
+                messageMutable.value = "帳本身份尚未驗證；可檢視資料，連線後再新增或保存分析。"
+            }
+        }
+    }
+    private fun restoreNativePage() {
+        if (destination.value == MobilePage.InsightEditor.name) saved.get<String>("mobileInsightTarget")?.let { insightController.openMetadata(it, saved.get<Boolean>("mobileInsightLedger") == true, saved.get<Boolean>("mobileInsightReadOnly") == true) }
+        if (destination.value == MobilePage.Prices.name) priceController.open(saved.get<String>("mobilePriceLedger"))
+    }
+    internal val insightController = MobileInsightController(repository.nativeApi(), viewModelScope,
+        repository::nativeToken, { expected -> if (repository.nativeUnauthorized(expected)) { signedInMutable.value = false; reviewerMutable.value = false } },
+        { spendingController.invalidate(); refreshLedger() }, application.noBackupFilesDir,
+        runCatching { saved.get<String>("mobileInsightQuery")?.let(::insightQueryFromJson) }.getOrNull() ?: InsightQuery.month(),
+        { query -> saved["mobileInsightQuery"] = query.filters().toString() }, accountScope = ::nativeScope, cachedScope = ::cachedNativeScope)
+    internal val insightState = insightController.state
+    internal val priceController = MobilePriceController(repository.nativeApi(), viewModelScope,
+        repository::nativeToken, { expected -> if (repository.nativeUnauthorized(expected)) { signedInMutable.value = false; reviewerMutable.value = false } },
+        { insightController.invalidate(); spendingController.invalidate(); refreshLedger() }, application.noBackupFilesDir, accountScope = ::nativeScope)
+    internal fun recoverInsightPending() { val pending=insightState.value.pending ?: return; if(pending.kind=="manual")manual() else pending.target?.let{editInsight(it,pending.ledger,false)} }
+    internal fun insightQuery(query: InsightQuery) = insightController.select(query)
+    internal fun refreshInsights() { if (signedIn.value) viewModelScope.launch { if (nativeScope() == null) verifyNativeScope(); insightController.restorePending(); insightController.refresh() } else openSettings(true) }
+    internal fun submitManual(body: String) = online("正在確認帳本身份…") { if (nativeScope() == null) verifyNativeScope(); insightController.restorePending(); insightController.submitManual(body) }
+    internal fun saveInsightMetadata(document: com.google.gson.JsonObject) = online("正在確認帳本身份…") { if (nativeScope() == null) verifyNativeScope(); insightController.restorePending(); insightController.saveMetadata(document) }
+    internal fun moreInsights() = insightController.loadEntries(true)
+    internal fun manual() { viewModelScope.launch { if (nativeScope() == null) verifyNativeScope(); insightController.restorePending() }; insightController.newManual(); saved["mobileManualReturn"] = destination.value; saved["mobileDestination"] = MobilePage.Manual.name; insightController.restorePending() }
+    internal fun editInsight(id: String, ledger: Boolean, readOnly: Boolean) { if (destination.value != MobilePage.InsightEditor.name) saved["mobileInsightReturn"] = destination.value; saved["mobileInsightTarget"] = id; saved["mobileInsightLedger"] = ledger; saved["mobileInsightReadOnly"] = readOnly; saved["mobileDestination"] = MobilePage.InsightEditor.name; insightController.openMetadata(id, ledger, readOnly) }
+    internal fun prices(ledgerId: String?) { saved["mobilePriceLedger"] = ledgerId; saved["mobilePriceReturnLedger"] = selectedLedger.value; saved["mobilePriceReturn"] = destination.value; saved["mobileDestination"] = MobilePage.Prices.name; viewModelScope.launch { if (nativeScope() == null) verifyNativeScope(); priceController.open(ledgerId) } }
     private val spendingSaved = MobileSpendingSavedState(saved)
     private val spendingController = MobileSpendingController(viewModelScope, object : MobileSpendingSource {
         override fun marker() = spendingMarker(repository.store.state.value ?: error("Receipt state not loaded"))
@@ -81,7 +127,7 @@ class MobileViewModel @JvmOverloads constructor(
     internal val spendingState = spendingController.state
     internal fun spending() {
         duplicateMutable.value = null; saved["mobileSettings"] = false; saved["mobileDestination"] = MobilePage.Spending.name
-        if (signedIn.value) activateSpending()
+        if (signedIn.value) { insightController.restorePending(); insightController.refresh() }
     }
     internal fun refreshSpending() { if (signedIn.value) activateSpending(force = true) else openSettings(true) }
     private fun activateSpending(force: Boolean = false) {
@@ -102,11 +148,14 @@ class MobileViewModel @JvmOverloads constructor(
     init {
         viewModelScope.launch {
             try {
-                signedInMutable.value = repository.initialize(); reviewerMutable.value = repository.reviewerSession()
-                if (signedIn.value) {
+                val hasCredential = repository.initialize(); reviewerMutable.value = repository.reviewerSession(); if (hasCredential) verifyNativeScope(); insightController.restorePending()
+                val initializedSignedIn = hasCredential && repository.nativeToken() != null
+                if (initializedSignedIn) {
+                    restoreNativePage()
                     withContext(Dispatchers.IO) { spendingController.restore() }
-                    if (destination.value == MobilePage.Spending.name) spendingController.ensureLoaded()
+                    if (destination.value == MobilePage.Spending.name) insightController.refresh()
                 }
+                signedInMutable.value = initializedSignedIn
             }
             catch (error: Exception) { if (error is CancellationException) throw error; messageMutable.value = mobileError(error) }
         }
@@ -118,8 +167,8 @@ class MobileViewModel @JvmOverloads constructor(
             repository.store.state.filterNotNull().map { spendingMarker(it) }.distinctUntilChanged().collect { marker ->
                 val prior = observedSpendingMarker; observedSpendingMarker = marker
                 if (prior != null && prior != marker) {
-                    spendingController.invalidate()
-                    if (signedIn.value && destination.value == MobilePage.Spending.name && !settings.value) spendingController.ensureLoaded()
+                    spendingController.invalidate(); insightController.invalidate()
+                    if (signedIn.value && destination.value == MobilePage.Spending.name && !settings.value) insightController.refresh()
                 }
             }
         }
@@ -130,15 +179,19 @@ class MobileViewModel @JvmOverloads constructor(
     }
     fun openSettings(open: Boolean) { duplicateMutable.value = null; saved["mobileSettings"] = open }
     fun back() {
+        if (destination.value == MobilePage.Prices.name) { priceController.close(); saved["mobileLedger"] = saved.get<String>("mobilePriceReturnLedger") }
         if (duplicateMutable.value != null) { duplicateMutable.value = null; return }
         if (settings.value) saved["mobileSettings"] = false
         else when (destination.value) {
+            MobilePage.Manual.name -> saved["mobileDestination"] = saved.get<String>("mobileManualReturn") ?: MobilePage.Ledger.name
+            MobilePage.InsightEditor.name -> saved["mobileDestination"] = saved.get<String>("mobileInsightReturn") ?: MobilePage.Ledger.name
+            MobilePage.Prices.name -> saved["mobileDestination"] = saved.get<String>("mobilePriceReturn") ?: MobilePage.Spending.name
             MobilePage.Help.name -> saved["mobileDestination"] = saved.get<String>("mobileHelpReturn") ?: MobilePage.Inbox.name
             MobilePage.Review.name -> saved["mobileDestination"] = MobilePage.Detail.name
             MobilePage.LedgerDetail.name -> saved["mobileDestination"] = saved.get<String>("mobileLedgerReturn") ?: MobilePage.Ledger.name
             else -> select(null)
         }
-        if (!settings.value && destination.value == MobilePage.Spending.name && signedIn.value) spendingController.ensureLoaded()
+        if (!settings.value && destination.value == MobilePage.Spending.name && signedIn.value && insightState.value.stale) insightController.refresh()
     }
     fun help() { duplicateMutable.value = null; saved["mobileHelpReturn"] = destination.value; saved["mobileDestination"] = MobilePage.Help.name }
     fun ledger() { duplicateMutable.value = null; saved["mobileSettings"] = false; saved["mobileDestination"] = MobilePage.Ledger.name; refreshLedger() }
@@ -306,20 +359,23 @@ class MobileViewModel @JvmOverloads constructor(
         }
     }
     fun login(password: String) = online("正在登入…") {
-        appUpdater.sessionChanged(); spendingController.sessionChanged()
+        clearNativeScope(); appUpdater.sessionChanged(); spendingController.sessionChanged(); insightController.accountChanged(); priceController.accountChanged()
         repository.login(password)
         signedInMutable.value = true
+        verifyNativeScope()
+        insightController.accountChanged(); priceController.accountChanged(); restoreNativePage()
         reviewerMutable.value = repository.reviewerSession()
         messageMutable.value = "已登入，可在 App 內核對與入帳。"
         enginesMutable.value = repository.availability()
-        if (destination.value == MobilePage.Spending.name) spendingController.ensureLoaded()
+        if (destination.value == MobilePage.Spending.name) insightController.refresh()
     }
     fun logout() = online("正在登出…") {
-        appUpdater.sessionChanged(); spendingController.sessionChanged()
+        clearNativeScope(); appUpdater.sessionChanged(); spendingController.sessionChanged(); insightController.accountChanged(); priceController.accountChanged()
         try {
             val revoked = repository.logout()
             messageMutable.value = if (revoked) "已登出；照片與待傳資料保留。" else "已清除本機登入；中央撤銷尚未確認，請在網頁的裝置管理撤銷此裝置。"
         } finally {
+            insightController.accountChanged(); priceController.accountChanged()
             signedInMutable.value = false
             reviewerMutable.value = false
             enginesMutable.value = emptyMap()

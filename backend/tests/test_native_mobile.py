@@ -270,7 +270,7 @@ def test_intake_accounting_projection_tracks_review_confirm_void_without_recogni
         assert final[key] == succeeded[key]
     assert len(store.list_ledger(100, 0)) == 1
     with store.connection() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
     reopened = Store(store.data_dir)
     assert IntakeStore(reopened).get(initial["id"])["ledger_status"] == "voided"
 
@@ -444,3 +444,16 @@ def test_device_list_ignores_expired_or_malformed_native_markers_and_keeps_legac
     assert now + 3599 <= devices[0]["expires_at"] <= int(time.time()) + 3600
     assert client.delete("/v1/devices/" + DEVICE).status_code == 200
     assert client.delete("/v1/devices/unknown-device").status_code == 200
+
+
+def test_native_relogin_after_expiry_keeps_verified_ledger_scope(native_client, store):
+    first = native_client.post("/v2/mobile/login", json=login_body()).json()["access_token"]
+    native_client.headers["Authorization"] = "Bearer " + first
+    scope = native_client.get("/v1/session").json()["ledger_id"]
+    with store.connection(write=True) as connection:
+        connection.execute("UPDATE sessions SET expires_at=1")
+    assert native_client.get("/v1/session").status_code == 401
+    second = native_client.post("/v2/mobile/login", json=login_body()).json()["access_token"]
+    assert second != first
+    native_client.headers["Authorization"] = "Bearer " + second
+    assert native_client.get("/v1/session").json()["ledger_id"] == scope

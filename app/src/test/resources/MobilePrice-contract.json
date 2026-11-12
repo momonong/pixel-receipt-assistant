@@ -1,0 +1,573 @@
+{
+  "status": "Implemented contract; engineering and browser verification remain separate evidence.",
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/v1/products",
+      "query": [
+        "query (literal substring, max 500 chars)",
+        "limit (1..100, default20)",
+        "offset (0..100000, default0)"
+      ],
+      "auth": "ingest or reviewer"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/products",
+      "auth": "reviewer; Idempotency-Key required; 201 new/200 replay"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/ledger/{id}/price-review",
+      "auth": "ingest or reviewer"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/ledger/{id}/price-review",
+      "auth": "reviewer; CAS; 200"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/ledger/{id}/price-review/history",
+      "auth": "ingest or reviewer"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/products/{id}/prices",
+      "query": [
+        "date_from/date_to (optional valid YYYY-MM-DD, inclusive)",
+        "limit/offset"
+      ],
+      "auth": "ingest or reviewer"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/overview",
+      "query": [
+        "date_from/date_to (optional valid YYYY-MM-DD, inclusive)"
+      ],
+      "auth": "ingest or reviewer"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/ledger",
+      "query": [
+        "q (literal merchant/raw-name substring, max500)",
+        "date_from/date_to (inclusive receipt_date)",
+        "status (active|voided, omitted=all)",
+        "limit/offset"
+      ],
+      "auth": "ingest or reviewer"
+    }
+  ],
+  "product_create_request": {
+    "display_name": "合成無糖茶500mL",
+    "brand": "合成茶品牌",
+    "specification": "無糖500mL",
+    "purchase_unit": "瓶",
+    "content_quantity": {
+      "value_decimal": "500",
+      "unit": "ml"
+    }
+  },
+  "product_response": {
+    "id": "10000000-0000-4000-8000-000000000001",
+    "display_name": "合成無糖茶500mL",
+    "brand": "合成茶品牌",
+    "specification": "無糖500mL",
+    "purchase_unit": "瓶",
+    "content_quantity": {
+      "value_decimal": "500",
+      "unit": "ml"
+    },
+    "created_at": "2026-10-20T00:00:00+00:00"
+  },
+  "product_list_response": {
+    "products": [
+      {
+        "id": "10000000-0000-4000-8000-000000000001",
+        "display_name": "合成無糖茶500mL",
+        "brand": "合成茶品牌",
+        "specification": "無糖500mL",
+        "purchase_unit": "瓶",
+        "content_quantity": {
+          "value_decimal": "500",
+          "unit": "ml"
+        },
+        "created_at": "2026-10-20T00:00:00+00:00"
+      },
+      {
+        "id": "10000000-0000-4000-8000-000000000002",
+        "display_name": "合成肥皂100g",
+        "brand": "合成肥皂品牌",
+        "specification": "100g",
+        "purchase_unit": "塊",
+        "content_quantity": {
+          "value_decimal": "100",
+          "unit": "g"
+        },
+        "created_at": "2026-10-20T00:00:00+00:00"
+      }
+    ],
+    "query": null,
+    "limit": 20,
+    "offset": 0,
+    "total_count": 2
+  },
+  "price_review_put_request": {
+    "expected_revision": 0,
+    "item_mappings": [
+      {
+        "item_position": 0,
+        "product_id": "10000000-0000-4000-8000-000000000001",
+        "unit_match": "confirmed_same_product_and_unit"
+      },
+      {
+        "item_position": 1,
+        "product_id": "10000000-0000-4000-8000-000000000002",
+        "unit_match": "confirmed_same_product_and_unit"
+      }
+    ],
+    "adjustment_decisions": [
+      {
+        "adjustment_position": 0,
+        "method": "proportional_line_amount",
+        "amounts_by_item": null
+      }
+    ]
+  },
+  "price_review_explicit_adjustment_example": {
+    "adjustment_position": 0,
+    "method": "explicit_amounts",
+    "amounts_by_item": [
+      {
+        "item_position": 0,
+        "amount_yuan": 12
+      },
+      {
+        "item_position": 1,
+        "amount_yuan": 8
+      }
+    ]
+  },
+  "price_review_response": {
+    "ledger_id": "20000000-0000-4000-8000-000000000001",
+    "revision": 1,
+    "item_mappings": [
+      {
+        "item_position": 0,
+        "product_id": "10000000-0000-4000-8000-000000000001",
+        "unit_match": "confirmed_same_product_and_unit"
+      },
+      {
+        "item_position": 1,
+        "product_id": "10000000-0000-4000-8000-000000000002",
+        "unit_match": "confirmed_same_product_and_unit"
+      }
+    ],
+    "adjustment_decisions": [
+      {
+        "adjustment_position": 0,
+        "method": "proportional_line_amount",
+        "amounts_by_item": null
+      }
+    ],
+    "line_prices": [
+      {
+        "item_position": 0,
+        "product_id": "10000000-0000-4000-8000-000000000001",
+        "product": {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "display_name": "合成無糖茶500mL",
+          "brand": "合成茶品牌",
+          "specification": "無糖500mL",
+          "purchase_unit": "瓶",
+          "content_quantity": {
+            "value_decimal": "500",
+            "unit": "ml"
+          },
+          "created_at": "2026-10-20T00:00:00+00:00"
+        },
+        "raw_name": "合成茶飲",
+        "quantity": 2,
+        "printed_line_total_yuan": 120,
+        "paid_line_total_yuan": 108,
+        "printed_unit_price": {
+          "numerator_yuan": 120,
+          "denominator": 2,
+          "display_yuan": "60"
+        },
+        "paid_unit_price": {
+          "numerator_yuan": 108,
+          "denominator": 2,
+          "display_yuan": "54"
+        },
+        "comparison_eligible": true,
+        "unknown_reasons": [],
+        "allocations": [
+          {
+            "adjustment_position": 0,
+            "method": "proportional_line_amount",
+            "direction": "subtract",
+            "amount_yuan": 12
+          }
+        ]
+      },
+      {
+        "item_position": 1,
+        "product_id": "10000000-0000-4000-8000-000000000002",
+        "product": {
+          "id": "10000000-0000-4000-8000-000000000002",
+          "display_name": "合成肥皂100g",
+          "brand": "合成肥皂品牌",
+          "specification": "100g",
+          "purchase_unit": "塊",
+          "content_quantity": {
+            "value_decimal": "100",
+            "unit": "g"
+          },
+          "created_at": "2026-10-20T00:00:00+00:00"
+        },
+        "raw_name": "合成肥皂",
+        "quantity": 1,
+        "printed_line_total_yuan": 80,
+        "paid_line_total_yuan": 72,
+        "printed_unit_price": {
+          "numerator_yuan": 80,
+          "denominator": 1,
+          "display_yuan": "80"
+        },
+        "paid_unit_price": {
+          "numerator_yuan": 72,
+          "denominator": 1,
+          "display_yuan": "72"
+        },
+        "comparison_eligible": true,
+        "unknown_reasons": [],
+        "allocations": [
+          {
+            "adjustment_position": 0,
+            "method": "proportional_line_amount",
+            "direction": "subtract",
+            "amount_yuan": 8
+          }
+        ]
+      }
+    ],
+    "basis_sha256": "b98eea61cf6e885a136f878b610416f1623bc0ea850808b057167e4636d66efe",
+    "updated_at": "2026-10-20T00:05:00+00:00",
+    "actor": "reviewer"
+  },
+  "price_review_unreviewed_response": {
+    "ledger_id": "20000000-0000-4000-8000-000000000001",
+    "revision": 0,
+    "item_mappings": [],
+    "adjustment_decisions": [],
+    "line_prices": [
+      {
+        "item_position": 0,
+        "product_id": null,
+        "product": null,
+        "raw_name": "合成茶飲",
+        "quantity": 2,
+        "printed_line_total_yuan": 120,
+        "paid_line_total_yuan": null,
+        "printed_unit_price": {
+          "numerator_yuan": 120,
+          "denominator": 2,
+          "display_yuan": "60"
+        },
+        "paid_unit_price": null,
+        "comparison_eligible": false,
+        "unknown_reasons": [
+          "product_mapping_unconfirmed",
+          "shared_adjustment_unallocated"
+        ],
+        "allocations": []
+      },
+      {
+        "item_position": 1,
+        "product_id": null,
+        "product": null,
+        "raw_name": "合成肥皂",
+        "quantity": 1,
+        "printed_line_total_yuan": 80,
+        "paid_line_total_yuan": null,
+        "printed_unit_price": {
+          "numerator_yuan": 80,
+          "denominator": 1,
+          "display_yuan": "80"
+        },
+        "paid_unit_price": null,
+        "comparison_eligible": false,
+        "unknown_reasons": [
+          "product_mapping_unconfirmed",
+          "shared_adjustment_unallocated"
+        ],
+        "allocations": []
+      }
+    ],
+    "basis_sha256": "016fe44e662406c79753f8f0bff4130fc3e649728815ab3a0558046f34e0a2e0",
+    "updated_at": null,
+    "actor": null
+  },
+  "price_review_history_response": {
+    "revisions": [
+      {
+        "revision": 1,
+        "item_mappings": [
+          {
+            "item_position": 0,
+            "product_id": "10000000-0000-4000-8000-000000000001",
+            "unit_match": "confirmed_same_product_and_unit"
+          },
+          {
+            "item_position": 1,
+            "product_id": "10000000-0000-4000-8000-000000000002",
+            "unit_match": "confirmed_same_product_and_unit"
+          }
+        ],
+        "adjustment_decisions": [
+          {
+            "adjustment_position": 0,
+            "method": "proportional_line_amount",
+            "amounts_by_item": null
+          }
+        ],
+        "actor": "reviewer",
+        "created_at": "2026-10-20T00:05:00+00:00"
+      }
+    ]
+  },
+  "product_prices_response": {
+    "product": {
+      "id": "10000000-0000-4000-8000-000000000001",
+      "display_name": "合成無糖茶500mL",
+      "brand": "合成茶品牌",
+      "specification": "無糖500mL",
+      "purchase_unit": "瓶",
+      "content_quantity": {
+        "value_decimal": "500",
+        "unit": "ml"
+      },
+      "created_at": "2026-10-20T00:00:00+00:00"
+    },
+    "observations": [
+      {
+        "item_position": 0,
+        "product_id": "10000000-0000-4000-8000-000000000001",
+        "product": {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "display_name": "合成無糖茶500mL",
+          "brand": "合成茶品牌",
+          "specification": "無糖500mL",
+          "purchase_unit": "瓶",
+          "content_quantity": {
+            "value_decimal": "500",
+            "unit": "ml"
+          },
+          "created_at": "2026-10-20T00:00:00+00:00"
+        },
+        "raw_name": "合成茶飲",
+        "quantity": 2,
+        "printed_line_total_yuan": 120,
+        "paid_line_total_yuan": 108,
+        "printed_unit_price": {
+          "numerator_yuan": 120,
+          "denominator": 2,
+          "display_yuan": "60"
+        },
+        "paid_unit_price": {
+          "numerator_yuan": 108,
+          "denominator": 2,
+          "display_yuan": "54"
+        },
+        "comparison_eligible": true,
+        "unknown_reasons": [],
+        "allocations": [
+          {
+            "adjustment_position": 0,
+            "method": "proportional_line_amount",
+            "direction": "subtract",
+            "amount_yuan": 12
+          }
+        ],
+        "ledger_id": "20000000-0000-4000-8000-000000000001",
+        "receipt_date": "2026-10-20",
+        "merchant": "合成甲店",
+        "price_review_revision": 1
+      },
+      {
+        "item_position": 0,
+        "product_id": "10000000-0000-4000-8000-000000000001",
+        "product": {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "display_name": "合成無糖茶500mL",
+          "brand": "合成茶品牌",
+          "specification": "無糖500mL",
+          "purchase_unit": "瓶",
+          "content_quantity": {
+            "value_decimal": "500",
+            "unit": "ml"
+          },
+          "created_at": "2026-10-20T00:00:00+00:00"
+        },
+        "raw_name": "合成茶飲",
+        "quantity": 2,
+        "printed_line_total_yuan": 100,
+        "paid_line_total_yuan": 100,
+        "printed_unit_price": {
+          "numerator_yuan": 100,
+          "denominator": 2,
+          "display_yuan": "50"
+        },
+        "paid_unit_price": {
+          "numerator_yuan": 100,
+          "denominator": 2,
+          "display_yuan": "50"
+        },
+        "comparison_eligible": true,
+        "unknown_reasons": [],
+        "allocations": [],
+        "ledger_id": "20000000-0000-4000-8000-000000000002",
+        "receipt_date": "2026-10-19",
+        "merchant": "合成乙店",
+        "price_review_revision": 1
+      }
+    ],
+    "lowest_paid_observation": {
+      "item_position": 0,
+      "product_id": "10000000-0000-4000-8000-000000000001",
+      "product": {
+        "id": "10000000-0000-4000-8000-000000000001",
+        "display_name": "合成無糖茶500mL",
+        "brand": "合成茶品牌",
+        "specification": "無糖500mL",
+        "purchase_unit": "瓶",
+        "content_quantity": {
+          "value_decimal": "500",
+          "unit": "ml"
+        },
+        "created_at": "2026-10-20T00:00:00+00:00"
+      },
+      "raw_name": "合成茶飲",
+      "quantity": 2,
+      "printed_line_total_yuan": 100,
+      "paid_line_total_yuan": 100,
+      "printed_unit_price": {
+        "numerator_yuan": 100,
+        "denominator": 2,
+        "display_yuan": "50"
+      },
+      "paid_unit_price": {
+        "numerator_yuan": 100,
+        "denominator": 2,
+        "display_yuan": "50"
+      },
+      "comparison_eligible": true,
+      "unknown_reasons": [],
+      "allocations": [],
+      "ledger_id": "20000000-0000-4000-8000-000000000002",
+      "receipt_date": "2026-10-19",
+      "merchant": "合成乙店",
+      "price_review_revision": 1
+    },
+    "date_from": null,
+    "date_to": null,
+    "limit": 20,
+    "offset": 0,
+    "total_count": 2
+  },
+  "overview_response": {
+    "scope": "active_confirmed_ledger",
+    "date_from": null,
+    "date_to": null,
+    "receipt_count": 2,
+    "printed_total_yuan": 280,
+    "allocated_total_yuan": 280,
+    "self_yuan": 154,
+    "gift_yuan": 72,
+    "advance_yuan": 54,
+    "personal_yuan": 226,
+    "difference_yuan": 0,
+    "explicit_discount_yuan": 20
+  },
+  "exact_fraction_example": {
+    "numerator_yuan": 189,
+    "denominator": 2,
+    "display_yuan": "189 / 2"
+  },
+  "unknown_reason_codes": [
+    "product_mapping_unconfirmed",
+    "shared_adjustment_unallocated",
+    "negative_paid_line_total",
+    "price_amount_out_of_range",
+    "ledger_voided"
+  ],
+  "errors": {
+    "401": "authentication_required",
+    "403": "reviewer_required / csrf_check_failed / origin_check_failed",
+    "404": "product_not_found / ledger_not_found",
+    "409": "revision_conflict / ledger_voided / idempotency_key_content_conflict",
+    "422": "invalid_candidate_request / invalid_product_reference / invalid_price_allocation / price_amount_out_of_range / summary_amount_out_of_range / invalid_date_range / zero_price_allocation_basis"
+  },
+  "rules": [
+    "Price revision0 means no human price review; PUT expected_revision0 creates revision1. Price revision independent of ledger revision.",
+    "Mapping omission revokes mapping. Adjustment-decision omission leaves shared adjustment unresolved. Only valid human-confirmed mapping enters a product observation.",
+    "included_in_line_totals is never allocated again. A separate adjustment with exactly one eligible line is assigned directly (allocation method single_line_scope).",
+    "Multi-line or receipt adjustments require independent explicit/proportional price decisions. Purpose allocation is never reused for product pricing.",
+    "Explicit allocation must list every in-scope line, including zeros; no out-of-scope or duplicate positions; sums must equal adjustment amount.",
+    "Products are immutable identities and may share display names. No fuzzy identity matching. source names and ledger snapshots never change.",
+    "Active confirmed ledger only in overview and prices. Voided entries remain retrievable with prior price-review history.",
+    "All totals, lowest-price selection and total_count use complete filtered scope before pagination. Ratios sorted by exact arithmetic. display_yuan contains integer or exact numerator / denominator without rounding.",
+    "No prices observed response: observations=[],lowest_paid_observation=null,total_count=0. Empty overview numeric sums are0.",
+    "Schema migration v2->v3 additive; prior ledger, sessions, drafts, evidence, history preserved."
+  ],
+  "price_source_candidate": {
+    "schema": "pixelreceipt-central-candidate-1",
+    "currency": "TWD",
+    "amount_unit": "TWD_YUAN",
+    "merchant": "合成甲店",
+    "receipt_date": "2026-10-20",
+    "printed_total_yuan": 180,
+    "items": [
+      {
+        "raw_name": "合成茶飲",
+        "quantity": 2,
+        "printed_unit_price_yuan": null,
+        "printed_line_total_yuan": 120,
+        "brand": null,
+        "specification": null,
+        "content_quantity": null
+      },
+      {
+        "raw_name": "合成肥皂",
+        "quantity": 1,
+        "printed_unit_price_yuan": null,
+        "printed_line_total_yuan": 80,
+        "brand": null,
+        "specification": null,
+        "content_quantity": null
+      }
+    ],
+    "adjustments": [
+      {
+        "raw_label": "合成整單折扣",
+        "direction": "subtract",
+        "amount_yuan": 20,
+        "amount_effect": "separate_from_line_totals",
+        "scope": "receipt",
+        "item_positions": []
+      }
+    ]
+  },
+  "product_required_fields": [
+    "display_name",
+    "specification",
+    "purchase_unit"
+  ],
+  "product_optional_nullable_fields": [
+    "brand",
+    "content_quantity"
+  ]
+}

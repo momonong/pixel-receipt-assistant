@@ -77,6 +77,9 @@ internal fun MobileContent(state: MobileUiState, images: ImageStore, actions: Mo
                                 MobilePage.LedgerDetail -> "帳目明細"
                                 MobilePage.Help -> "使用說明"
                                 MobilePage.Spending -> "支出分析"
+                                MobilePage.Manual -> "手動記帳"
+                                MobilePage.InsightEditor -> "分析標籤"
+                                MobilePage.Prices -> "商品價格"
                                 else -> if (state.batch?.editable == true) "照片與說明" else "收件進度"
                             },
                                 style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -101,7 +104,10 @@ internal fun MobileContent(state: MobileUiState, images: ImageStore, actions: Mo
                         MobilePage.Ledger -> MobileLedger(state, actions, width, ledgerScroll)
                         MobilePage.LedgerDetail -> MobileLedgerDetail(state, images, actions, width, ledgerDetailScroll)
                         MobilePage.Help -> MobileHelp(width, helpScroll)
-                        MobilePage.Spending -> MobileSpendingScreen(state, actions, width, spendingScroll)
+                        MobilePage.Spending -> if (state.insight.enabled) MobileInsightScreen(state, actions, width, spendingScroll) else MobileSpendingScreen(state, actions, width, spendingScroll)
+                        MobilePage.Manual -> MobileManualScreen(state, actions, width)
+                        MobilePage.InsightEditor -> MobileInsightEditor(state, actions, width)
+                        MobilePage.Prices -> Unit
                     }
                 }
             }
@@ -111,7 +117,8 @@ internal fun MobileContent(state: MobileUiState, images: ImageStore, actions: Mo
 
 @Composable
 private fun MobilePrimaryBar(state: MobileUiState, password: String, login: (String) -> Unit, actions: MobileActions, compactInput: Boolean) {
-    if (state.page in setOf(MobilePage.Review, MobilePage.Ledger, MobilePage.LedgerDetail, MobilePage.Help, MobilePage.Spending)) {
+    if (state.page in setOf(MobilePage.Manual, MobilePage.InsightEditor)) return
+    if (state.page in setOf(MobilePage.Review, MobilePage.Ledger, MobilePage.LedgerDetail, MobilePage.Help, MobilePage.Spending, MobilePage.Manual, MobilePage.InsightEditor, MobilePage.Prices)) {
         NativePrimaryBar(state, actions, compactInput)
         return
     }

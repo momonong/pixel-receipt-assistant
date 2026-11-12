@@ -32,7 +32,7 @@ class RealStoreBackupTests(unittest.TestCase):
         from pixelreceipt_backend.store import SCHEMA_VERSION, Store, StoreError
 
         self.assertIn(
-            SCHEMA_VERSION, (3, 4), "round trip supports actual v3/v4 Store only"
+            SCHEMA_VERSION, (3, 4, 5), "round trip supports actual v3/v4/v5 Store only"
         )
         with tempfile.TemporaryDirectory(
             prefix="pixelreceipt-store-backup-synthetic-"

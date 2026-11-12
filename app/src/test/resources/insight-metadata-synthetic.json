@@ -1,0 +1,44 @@
+{
+  "draft_id": "f85863ca-4292-426e-9df3-a0a52e896d26",
+  "ledger_id": "85e13fc3-33d3-4332-952c-250d74f5ddf9",
+  "revision": 1,
+  "document": {
+    "address": null,
+    "branch": null,
+    "brand": null,
+    "channel": "unknown",
+    "city": null,
+    "date_source": "user",
+    "district": null,
+    "items": [
+      {
+        "category": "food",
+        "item_position": 0,
+        "meal": "dinner",
+        "meal_group": null,
+        "subcategory": null
+      }
+    ],
+    "transaction_time": null
+  },
+  "sources": {
+    "address": "user",
+    "branch": "user",
+    "brand": "user",
+    "channel": "user",
+    "city": "user",
+    "date_source": "user",
+    "district": "user",
+    "items": [
+      {
+        "category": "user",
+        "item_position": 0,
+        "meal": "user",
+        "meal_group": "user",
+        "subcategory": "user"
+      }
+    ],
+    "transaction_time": "user"
+  },
+  "updated_at": "2026-11-12T14:26:54.978540+00:00"
+}

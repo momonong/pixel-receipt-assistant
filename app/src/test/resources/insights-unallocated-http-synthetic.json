@@ -1,0 +1,212 @@
+{
+  "scope": "active_confirmed_ledger",
+  "currency": "TWD",
+  "amount_unit": "TWD_YUAN",
+  "filters": {
+    "date_from": null,
+    "date_to": null,
+    "compare_from": null,
+    "compare_to": null,
+    "category": null,
+    "meal": null,
+    "brand_key": null,
+    "branch_key": null,
+    "city_key": null,
+    "district_key": null,
+    "channel": null,
+    "day_type": null,
+    "bucket": "auto",
+    "undated_only": false
+  },
+  "generated_at": "2026-11-12T14:39:17.778093+00:00",
+  "bucket": "day",
+  "summary": {
+    "personal_yuan": 80,
+    "self_yuan": 80,
+    "gift_yuan": 0,
+    "advance_yuan": 0,
+    "receipt_count": 1,
+    "item_count": 2,
+    "explicit_discount_yuan": 30,
+    "missing_item_name_count": 0
+  },
+  "comparison": null,
+  "series": [
+    {
+      "date_from": "2026-11-12",
+      "date_to": "2026-11-12",
+      "label": "2026-11-12",
+      "personal_yuan": 80,
+      "receipt_count": 1
+    }
+  ],
+  "groups": {
+    "categories": [
+      {
+        "key": "food",
+        "label": "食",
+        "personal_yuan": 100,
+        "receipt_count": 1,
+        "item_count": 2,
+        "average_yuan": {
+          "numerator": 100,
+          "denominator": 1
+        }
+      },
+      {
+        "key": "unallocated",
+        "label": "待分配",
+        "personal_yuan": -20,
+        "receipt_count": 1,
+        "item_count": 0,
+        "average_yuan": null
+      }
+    ],
+    "subcategories": [
+      {
+        "key": "29697f6eabe21a78beebf5ec81234c5794fcbf6232b66738db397d8a47913b87",
+        "label": "食／未細分",
+        "personal_yuan": 100,
+        "receipt_count": 1,
+        "item_count": 2,
+        "average_yuan": {
+          "numerator": 100,
+          "denominator": 1
+        }
+      },
+      {
+        "key": "unallocated",
+        "label": "待分配",
+        "personal_yuan": -20,
+        "receipt_count": 1,
+        "item_count": 0,
+        "average_yuan": null
+      }
+    ],
+    "meals": [
+      {
+        "key": "dinner",
+        "label": "晚餐",
+        "personal_yuan": 100,
+        "receipt_count": 1,
+        "item_count": 2,
+        "average_yuan": {
+          "numerator": 100,
+          "denominator": 1
+        },
+        "meal_count": 1
+      },
+      {
+        "key": "unallocated",
+        "label": "待分配",
+        "personal_yuan": -20,
+        "receipt_count": 1,
+        "item_count": 0,
+        "average_yuan": null,
+        "meal_count": 0
+      }
+    ],
+    "brands": [
+      {
+        "key": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "label": null,
+        "personal_yuan": 80,
+        "receipt_count": 1,
+        "item_count": 2,
+        "average_yuan": {
+          "numerator": 80,
+          "denominator": 1
+        }
+      }
+    ],
+    "branches": [
+      {
+        "key": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "label": null,
+        "personal_yuan": 80,
+        "receipt_count": 1,
+        "item_count": 2,
+        "average_yuan": {
+          "numerator": 80,
+          "denominator": 1
+        }
+      }
+    ],
+    "cities": [
+      {
+        "key": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "label": null,
+        "personal_yuan": 80,
+        "receipt_count": 1,
+        "item_count": 2,
+        "average_yuan": {
+          "numerator": 80,
+          "denominator": 1
+        }
+      }
+    ],
+    "districts": [
+      {
+        "key": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+        "label": null,
+        "personal_yuan": 80,
+        "receipt_count": 1,
+        "item_count": 2,
+        "average_yuan": {
+          "numerator": 80,
+          "denominator": 1
+        }
+      }
+    ],
+    "merchants": [
+      {
+        "key": "4322d9d7bdd8d3aba7161612b02ffb5217fd1a0804dc3c6600ede14a0b68fb13",
+        "label": "合成甲店",
+        "personal_yuan": 80,
+        "receipt_count": 1,
+        "item_count": 2,
+        "average_yuan": {
+          "numerator": 80,
+          "denominator": 1
+        }
+      }
+    ],
+    "weekdays": [
+      {
+        "key": "3",
+        "label": "週四",
+        "personal_yuan": 80,
+        "receipt_count": 1,
+        "item_count": 2,
+        "average_yuan": {
+          "numerator": 80,
+          "denominator": 1
+        }
+      }
+    ],
+    "times": [
+      {
+        "key": "unknown",
+        "label": "時間未知",
+        "personal_yuan": 80,
+        "receipt_count": 1,
+        "item_count": 2,
+        "average_yuan": {
+          "numerator": 80,
+          "denominator": 1
+        }
+      }
+    ]
+  },
+  "coverage": {
+    "uncategorized_personal_yuan": 0,
+    "unknown_city_personal_yuan": 80,
+    "unknown_meal_personal_yuan": 0,
+    "undated_receipt_count": 0,
+    "undated_personal_yuan": 0,
+    "estimated_date_receipt_count": 0,
+    "pending_price_receipt_count": 1,
+    "unallocated_personal_yuan": -20
+  },
+  "discount_scope": "matched_receipts_including_advances"
+}

@@ -527,6 +527,9 @@ def test_v3_to_v4_preserves_rows_and_future_version_refuses(store, body):
     draft, _ = store.create_draft(CreateDraft.model_validate(body), "v3-preserved")
     store.create_session("synthetic-old-session", "old-csrf")
     with store.connection(write=True) as connection:
+        connection.execute("DROP TABLE ledger_metadata")
+        connection.execute("DROP TABLE insight_history")
+        connection.execute("DROP TABLE insight_annotations")
         connection.execute("DROP TABLE intakes")
         connection.execute("DROP TABLE device_sessions")
         connection.execute("PRAGMA user_version=3")
@@ -537,18 +540,18 @@ def test_v3_to_v4_preserves_rows_and_future_version_refuses(store, body):
     reopened = Store(store.data_dir)
     assert reopened.get_draft(draft["id"]) == draft
     with reopened.connection() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
         assert not connection.execute("PRAGMA foreign_key_check").fetchall()
         assert all(
             [tuple(row) for row in connection.execute(f"SELECT * FROM {table}")] == rows
             for table, rows in before.items()
         )
     with reopened.connection(write=True) as connection:
-        connection.execute("PRAGMA user_version=5")
+        connection.execute("PRAGMA user_version=6")
     with pytest.raises(RuntimeError, match="unsupported database version"):
         Store(store.data_dir)
     with sqlite3.connect(store.database) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
         assert connection.execute("SELECT COUNT(*) FROM drafts").fetchone()[0] == 1
 
 
@@ -565,6 +568,7 @@ def test_v3_to_v4_preserves_rows_and_future_version_refuses(store, body):
         (11, "0.5.4"),
         (12, "0.5.5"),
         (13, "0.6.0"),
+        (14, "0.7.0"),
     ],
 )
 def test_mobile_release_authenticated_fixed_metadata_streaming_integrity(
@@ -631,6 +635,8 @@ def test_mobile_release_authenticated_fixed_metadata_streaming_integrity(
         (11, "0.5.3", "com.momonong.pixelreceipt.mobile"),
         (8, "0.5.0", "com.momonong.pixelreceipt.mobile"),
         (True, "0.4.2", "com.momonong.pixelreceipt.mobile"),
+        (14, "0.6.0", "com.momonong.pixelreceipt.mobile"),
+        (13, "0.7.0", "com.momonong.pixelreceipt.mobile"),
         ("4", "0.4.2", "com.momonong.pixelreceipt.mobile"),
         (4, "0.4.2", "com.momonong.pixelreceipt"),
         (4, "0.4.2", "com.unapproved.receipts"),

@@ -88,3 +88,15 @@ YYYY-MM-DD／YYYY-MM／YYYY，只傳有帳目的桶。前端依真實時間定�
 與任一日期界限一起使用回 422 `undated_only_date_conflict`。分析明細固定 status=active。
 列表每個 entry 增加 merchant_key 作為 representation，不修改 snapshot、事件、schema。
 本次沒有 migration、價格重算、帳本寫入或正式資料操作。
+
+## 0.7.0 生活分類投影與可修訂註記
+
+0.6.0 的 `/v1/spending` 定義維持不變。0.7.0 候選另以 `/v1/insights` 分析品項分類／餐別與帳目店家／品牌／分店／地區／時間；metadata 可修訂且留歷史，不改財務快照。原始店家與品牌分店分開；城市只做明確台／臺字形別名正規化，原地址及註記原文保留，不由店名或定位推論。
+
+分類的每項負擔起於確認 snapshot 的 `line_shares`。額外加減項依原 `adjustment_shares` 的 self／gift／advance 金額，在該加減項 scope 的品項中以整數最大餘數分配；平手依 item_position。內含折扣不重扣。分配不產生新帳務，也不代替商品價格核對；無合法非負分配時，殘額放入待分配類別，分類合計（含待分配）仍等於原個人支出。
+
+類別或餐別篩選只選符合品項，商家／品牌／地區／日期先選帳目，之後才分頁。餐數不按品項數累計；同日同餐別明確給相同 meal_group 才合併，純代買不降低個人每餐均額。未分類、未知地區、未知餐別、缺日期、採用今天及價格待核對明示，不以零或上傳時間假補。
+
+`summary.explicit_discount_yuan` 的 `discount_scope=matched_receipts_including_advances`：是符合條件帳目的整張明列折扣，包含代買，不稱篩選品項自己的折扣／市場節省。商品實付單價及最低價仍遵守上方獨立價格核對，未分配額外折扣時維持未知。
+
+0.7.0 schema 5 是新增註記與非秘密穩定 ledger_id 的 migration；上方「本次沒有 migration」僅描述已發布 0.6.0 API，不能套用於 0.7.0 部署。

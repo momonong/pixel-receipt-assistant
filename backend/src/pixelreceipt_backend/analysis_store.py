@@ -24,6 +24,11 @@ class AnalysisStore:
         body = request.model_dump(mode="json")
         digest = hashlib.sha256(canonical(body).encode()).hexdigest()
         with self.store.connection(write=True) as connection:
+            replay, _digest = self.store._replay(
+                connection, "product_create", "products", body, key
+            )
+            if replay is not None:
+                return replay, False
             existing = connection.execute(
                 "SELECT * FROM products WHERE idempotency_key = ?", (key,)
             ).fetchone()
@@ -41,9 +46,14 @@ class AnalysisStore:
                 "INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)",
                 (product_id, canonical(body), search, key, digest, timestamp()),
             )
-            return self._product(
+            value = self._product(
                 connection.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
-            ), True
+            )
+            connection.execute(
+                "INSERT INTO mutations VALUES (?, 'product_create', 'products', ?, ?)",
+                (key, digest, canonical(value)),
+            )
+            return value, True
 
     def list_products(self, query: str | None, limit: int, offset: int) -> dict:
         search = query.casefold() if query is not None else None
@@ -116,8 +126,14 @@ class AnalysisStore:
         with self.store.connection() as connection:
             return self._price_review(connection, ledger_id)
 
-    def review_prices(self, ledger_id: str, request: ReviewPrices) -> dict:
+    def review_prices(self, ledger_id: str, request: ReviewPrices, key: str | None = None) -> dict:
         with self.store.connection(write=True) as connection:
+            if key is not None:
+                replay, digest = self.store._replay(
+                    connection, "price_review", ledger_id, request.model_dump(mode="json"), key
+                )
+                if replay is not None:
+                    return replay
             ledger = self.store._ledger(connection, ledger_id)
             if ledger["status"] != "active":
                 raise StoreError(409, "ledger_voided")
@@ -150,7 +166,13 @@ class AnalysisStore:
                 "INSERT INTO price_review_history VALUES (?, ?, ?, ?, 'reviewer')",
                 (ledger_id, revision + 1, encoded, now),
             )
-            return self._price_review(connection, ledger_id, ledger=ledger)
+            value = self._price_review(connection, ledger_id, ledger=ledger)
+            if key is not None:
+                connection.execute(
+                    "INSERT INTO mutations VALUES (?, 'price_review', ?, ?, ?)",
+                    (key, ledger_id, digest, canonical(value)),
+                )
+            return value
 
     def price_history(self, ledger_id: str) -> dict:
         with self.store.connection() as connection:
@@ -337,7 +359,8 @@ class AnalysisStore:
                     if line["comparison_eligible"]:
                         key = (
                             Fraction(line["paid_line_total_yuan"], line["quantity"]),
-                            observation["receipt_date"],
+                            observation["receipt_date"] is None,
+                            observation["receipt_date"] or "",
                             observation["ledger_id"],
                             observation["item_position"],
                         )

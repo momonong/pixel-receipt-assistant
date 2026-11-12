@@ -23,7 +23,7 @@ LIVE_FILES = AUTH_FILES | {
 }
 SNAPSHOT_FILES = AUTH_FILES | {"drafts.sqlite3", "blobs", "snapshot.json"}
 HASH = re.compile(r"[0-9a-f]{64}\Z")
-SUPPORTED_VERSIONS = {1, 2, 3, 4}
+SUPPORTED_VERSIONS = {1, 2, 3, 4, 5}
 SESSION_TABLES = ("sessions", "device_sessions")
 
 
