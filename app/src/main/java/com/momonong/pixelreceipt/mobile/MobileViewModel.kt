@@ -60,6 +60,14 @@ class MobileViewModel @JvmOverloads constructor(
     private var network: Job? = null
     private var importing = 0
     private val acceptedShares = mutableSetOf<String>()
+    private val appUpdater = MobileUpdateController(viewModelScope, repository, AndroidMobileUpdateHost(application), com.momonong.pixelreceipt.BuildConfig.VERSION_CODE) {
+        signedInMutable.value = false; reviewerMutable.value = false
+    }
+    internal val appUpdate = appUpdater.state
+    fun checkAppUpdate() = appUpdater.check()
+    fun downloadAppUpdate() = appUpdater.download()
+    fun installAppUpdate() = appUpdater.install()
+    fun cancelAppUpdate() = appUpdater.cancel()
 
     init {
         viewModelScope.launch {
@@ -111,6 +119,7 @@ class MobileViewModel @JvmOverloads constructor(
         repository.ledger(if (more) count else 0)
     }
     fun foreground() {
+        appUpdater.resumed()
         val now = System.currentTimeMillis()
         if (!signedIn.value || busy.value != null || now - refreshedAt < 30_000) return
         refreshedAt = now
@@ -246,6 +255,7 @@ class MobileViewModel @JvmOverloads constructor(
         }
     }
     fun login(password: String) = online("正在登入…") {
+        appUpdater.sessionChanged()
         repository.login(password)
         signedInMutable.value = true
         reviewerMutable.value = repository.reviewerSession()
@@ -253,6 +263,7 @@ class MobileViewModel @JvmOverloads constructor(
         enginesMutable.value = repository.availability()
     }
     fun logout() = online("正在登出…") {
+        appUpdater.sessionChanged()
         try {
             val revoked = repository.logout()
             messageMutable.value = if (revoked) "已登出；照片與待傳資料保留。" else "已清除本機登入；中央撤銷尚未確認，請在網頁的裝置管理撤銷此裝置。"

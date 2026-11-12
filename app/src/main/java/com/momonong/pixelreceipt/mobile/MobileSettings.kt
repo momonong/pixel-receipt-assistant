@@ -50,6 +50,9 @@ internal fun MobileSettings(state: MobileUiState, password: String, changePasswo
             }
         }
         item {
+            SettingsSection("App 更新", "直接在這裡下載新版。") { MobileUpdateContent(state, actions) }
+        }
+        item {
             SettingsSection("辨識來源", "可用狀態由中央帳本回報。") {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("${if (state.batch == null) "預設" else "本次"}來源", style = MaterialTheme.typography.titleSmall)
