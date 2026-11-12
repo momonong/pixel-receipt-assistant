@@ -622,3 +622,36 @@ def test_read_transaction_remains_consistent_while_wal_writer_commits(client, bo
         assert result[0]["status"] == "voided"
         assert store._ledger(reader, ledger["id"])["status"] == "active"
     assert store.get_ledger(ledger["id"])["status"] == "voided"
+
+
+def test_equal_unit_prices_keep_undated_history_and_choose_stable_known_date_tie(
+    client, body, store
+):
+    p = product(client, "mixed-date-product")
+    undated = receipt(client, body, key="mixed-undated", amounts=(100,))
+    # Historical confirmed rows may lack a date although current confirmation blocks it.
+    # Seed that legacy shape only in this isolated synthetic database.
+    from pixelreceipt_backend.store import canonical
+
+    undated["snapshot"]["candidate"]["receipt_date"] = None
+    with store.connection(write=True) as connection:
+        connection.execute(
+            "UPDATE ledger SET snapshot=? WHERE id=?",
+            (canonical(undated["snapshot"]), undated["id"]),
+        )
+    dated = receipt(client, body, key="mixed-dated", amounts=(100,), receipt_date="2026-10-20")
+    assert review_prices(client, undated, p["id"]).status_code == 200
+    assert review_prices(client, dated, p["id"]).status_code == 200
+    response = client.get(f"/v1/products/{p['id']}/prices")
+    assert response.status_code == 200
+    result = response.json()
+    assert result["total_count"] == 2
+    assert {row["ledger_id"] for row in result["observations"]} == {undated["id"], dated["id"]}
+    assert (
+        next(row for row in result["observations"] if row["ledger_id"] == undated["id"])[
+            "receipt_date"
+        ]
+        is None
+    )
+    assert result["lowest_paid_observation"]["ledger_id"] == dated["id"]
+    assert client.get(f"/v1/products/{p['id']}/prices").json() == result

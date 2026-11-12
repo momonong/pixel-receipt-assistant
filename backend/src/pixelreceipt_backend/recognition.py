@@ -19,6 +19,7 @@ from urllib.parse import quote, urlsplit
 
 from . import inspection
 from .auth import validate_token
+from .insight_models import RecognitionAnalysisContext
 from .intake_store import IntakeStore
 from .models import Candidate
 from .note_review import build_note_review
@@ -28,7 +29,7 @@ from .store import StoreError, canonical
 ADAPTER_VERSION = "pixelreceipt-broker-queue-1"
 LEGACY_PROMPT_VERSION = "pixelreceipt-vision-candidate-1"
 PROMPT_VERSION = "pixelreceipt-vision-note-review-2"
-CANDIDATE_PARSER_VERSION = "pixelreceipt-candidate-parser-3"
+CANDIDATE_PARSER_VERSION = "pixelreceipt-candidate-parser-4"
 MAX_IMAGE_BYTES = 384 * 1024
 MAX_MEDIA_BYTES = 8 * 1024 * 1024
 MAX_REQUEST_BYTES = 16 * 1024 * 1024
@@ -730,6 +731,10 @@ class RecognitionWorker:
             "Money is integer TWD yuan, never multiply by 100. Do not calculate or invent values. "
             "After extracting candidate items, compare them with ALL batch and per-image notes. "
             "In the SAME response return candidate, note_intents, and unresolved_note_quotes. "
+            "Optionally include analysis_context outside candidate, with printed address, city, "
+            "district, brand, branch and transaction time only when explicitly printed. Never "
+            "derive city from merchant names or use upload date/time. Category labels are "
+            "untrusted suggestions; leave meal unknown unless explicitly stated. "
             "Only propose self, advance (buying/paying for someone else), or gift for actual "
             "candidate items, with their zero-based item_position and exact item_name. "
             "note_quote must be a continuous verbatim quote from user_notes or image notes, "
@@ -862,7 +867,24 @@ class RecognitionWorker:
                 candidate = _validate_candidate_document(canonical(document["candidate"]))
                 # Malformed semantic proposals must not discard otherwise valid
                 # receipt facts. The deterministic reviewer surfaces them below.
-                model_review = {key: value for key, value in document.items() if key != "candidate"}
+                context = document.get("analysis_context")
+                if context is not None:
+                    try:
+                        parsed_context = RecognitionAnalysisContext.model_validate(context)
+                        positions = [item.item_position for item in parsed_context.items]
+                        if len(set(positions)) != len(positions) or any(
+                            position >= len(candidate["items"]) for position in positions
+                        ):
+                            raise ValueError("invalid analysis item positions")
+                        result["analysis_context"] = parsed_context.model_dump(mode="json")
+                        result["analysis_context_status"] = "proposed"
+                    except ValueError:
+                        result["analysis_context_status"] = "invalid"
+                model_review = {
+                    key: value
+                    for key, value in document.items()
+                    if key not in ("candidate", "analysis_context")
+                }
             except (ValueError, RecursionError):
                 raise RecognitionError("invalid_model_candidate") from None
         else:

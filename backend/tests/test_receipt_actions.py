@@ -68,7 +68,7 @@ def test_delete_intake_replay_reopen_backup_retains_evidence(
     with sqlite3.connect(store.database) as source, sqlite3.connect(backup) as destination:
         source.backup(destination)
     with sqlite3.connect(backup) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
         assert connection.execute("SELECT status,polling_finished FROM intakes").fetchone() == (
             "deleted",
             1,

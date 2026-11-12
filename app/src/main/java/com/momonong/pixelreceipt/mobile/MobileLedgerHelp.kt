@@ -54,6 +54,7 @@ internal fun MobileLedger(state: MobileUiState, actions: MobileActions, modifier
                 else if (overview != null) Text("已作廢帳目不計入有效支出。", style = MaterialTheme.typography.bodySmall, color = MobileMuted)
             }
         }
+        item { OutlinedButton(onClick = actions.manual, enabled = state.signedIn && state.reviewer, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("ledger-manual")) { Text("手動記帳・沒有收據") } }
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 Checkbox(checked = showVoided, onCheckedChange = { showVoided = it }, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).testTag("ledger-show-voided"))
@@ -69,7 +70,7 @@ internal fun MobileLedger(state: MobileUiState, actions: MobileActions, modifier
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     StatusTag(state.mutations.lastOrNull { it.targetId == entry.text("id") && it.phase == "pending" }?.let { "${it.resultLabel}結果待確認" } ?: if (entry.text("status") == "voided") "已作廢" else "已完成", problem = entry.text("status") == "voided")
                     Row(Modifier.fillMaxWidth()) {
-                        Text(candidate.text("merchant"), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                        Text(ledgerMerchant(entry), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                         ReceiptActionMenu(null, entry, state, actions)
                     }
                     Text("${candidate.text("receipt_date")} · ${moneyText(snapshot.getAsJsonObject("calculation")["printed_total_yuan"])}", style = MaterialTheme.typography.bodyLarge)
@@ -112,7 +113,7 @@ internal fun MobileLedgerDetail(state: MobileUiState, images: ImageStore, action
                     Column(Modifier.weight(1f)) { StatusTag(state.mutations.lastOrNull { it.targetId == entry.text("id") && it.phase == "pending" }?.let { "${it.resultLabel}結果待確認" } ?: if (entry.text("status") == "voided") "已作廢" else "已完成", problem = entry.text("status") == "voided") }
                     ReceiptActionMenu(null, entry, state, actions)
                 }
-                Text(candidate.text("merchant"), style = MaterialTheme.typography.headlineSmall)
+                Text(ledgerMerchant(entry), style = MaterialTheme.typography.headlineSmall)
                 Text(candidate.text("receipt_date"), style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
                 Text(moneyText(calculation["printed_total_yuan"]), style = MaterialTheme.typography.headlineMedium, color = MobileTealInk)
                 Text(if (entry.text("status") == "voided") "這筆已作廢，保留原入帳內容供查閱。" else "中央已確認入帳。", style = MaterialTheme.typography.bodyMedium)
@@ -126,6 +127,10 @@ internal fun MobileLedgerDetail(state: MobileUiState, images: ImageStore, action
                 }
             }
         }
+        item { FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { actions.editInsight(entry.text("id"), true, entry.text("status") == "voided") }, modifier = Modifier.heightIn(min = 48.dp).testTag("ledger-insight-edit")) { Text("分析標籤") }
+            OutlinedButton(onClick = { actions.prices(entry.text("id")) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("商品價格核對") }
+        } }
         state.message?.let { item { MobileNotice(it) } }
         if (state.accountingStale) item { MobileNotice(state.accountingError ?: "帳本或統計尚未同步；顯示上次紀錄。") }
         state.mutations.lastOrNull { it.targetId == entry.text("id") }?.let { mutation ->
@@ -158,7 +163,7 @@ internal fun MobileLedgerDetail(state: MobileUiState, images: ImageStore, action
             LedgerCard {
                 Text("原圖", style = MaterialTheme.typography.titleMedium)
                 val references = snapshot.array("evidence")
-                if (references.size() == 0) Text("這筆沒有原圖索引。", style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
+                if (references.size() == 0) Text(if (snapshot.getAsJsonObject("source")?.text("kind") == "manual") "手動記帳來源，未提供收據照片。" else "這筆沒有原圖索引。", style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
                 references.forEachIndexed { index, value ->
                     val hash = value.asJsonObject.text("sha256")
                     if (hash.matches(Regex("[0-9a-f]{64}"))) {
@@ -200,8 +205,8 @@ private fun LedgerItemNamesDialog(entry: com.google.gson.JsonObject, enabled: Bo
         confirmButton = { TextButton(onClick = { save(values.mapIndexed { index, value -> index to value.trim().takeIf { it.isNotBlank() } }.toMap()) }, enabled = enabled && !tooLong && values.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp).testTag("ledger-item-names-save")) { Text("保存品名") } })
 }
 
-@Composable private fun LedgerCard(content: @Composable ColumnScope.() -> Unit) {
-    Surface(color = Color.White, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content) }
+@Composable internal fun LedgerCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Surface(color = Color.White, shape = RoundedCornerShape(18.dp), modifier = modifier.fillMaxWidth()) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content) }
 }
 
 @Composable
@@ -212,6 +217,9 @@ internal fun MobileHelp(modifier: Modifier, list: LazyListState) {
         "收據篩選" to "收據頁預設一般收據，顯示正常新收件、待核對與已完成。刪除、作廢、缺照片或等待過久的收據仍保留，可從篩選選全部或單一狀態；需要處理可直接點數量。每種狀態有獨立顏色與文字。刪除或作廢結果尚未確認時不會因隱藏而假裝完成。",
         "看懂支出分析" to "點底部分析，先看本期個人支出；本月、上月、今年、全部或自訂日曆可切換範圍。金額怎麼算可看自己用、送人、代買、實付及明列折扣。送人計入個人支出，代買另列，折扣不再扣一次。統計涵蓋整個期間的有效已入帳帳目，沒有包含草稿或作廢。",
         "從圖表找到帳目" to "點趨勢圖、前一筆／下一筆或店家，再往下看對應帳目；點帳目可開原生明細，返回保留目前選擇。顯示本期全部帳目可清除篩選。未填日期不計入日期期間，在全部可另行查看；離線顯示上次保存的分析與提示，登入更新後確認最新狀態。一般手機直向，折疊展開可並排查看。",
+        "生活分類與餐別" to "分析可交叉選生活分類、餐別、品牌分店、縣市地區、通路與平日週末。缺資料仍保留支出；進核對或帳目點分析標籤可事後補。餐別不由上傳時間猜測，地區不由店名猜測。同日同餐別且同餐代號可合併為一餐。",
+        "沒有收據也能記帳" to "帳本點手動記帳，填整數金額，日期預設今天、歸屬預設自己用。商家品名與分類可留空，最後確認金額與歸屬再按確認記帳。未知結果請查原操作；不要另建相同支出。手動來源不會假裝收據照片。",
+        "商品歷史價格" to "分析可查看商品價格，帳目可人工核對商品與規格、單位及折扣分配。同名不同規格不自動合併，未確認實付不參與最低價排名；歷史最低價不是目前售價。",
         "等待辨識" to "點送出後，中央會繼續處理，不必一直開著 App。回來更新進度即可；等待或失敗時只查詢原工作，不會再建立辨識。",
         "核對後一次入帳" to "辨識完成後，直接在 App 看店家、日期、實付、品項與折扣。點「修改」才展開欄位；編輯自動保存草稿、更新金額。最後按「確認入帳」代表你確認畫面內容、用途及收據完整。",
         "敘述與品項一起核對" to "辨識完品項會再對照整批與逐圖說明，帶入自己用、送人或代買的建議。若與已保存用途不同，可選套用建議或保留目前用途；無法對應時會提醒你核對，不會當作已成功分類。送人計入個人支出，代買另列。分攤可按數量或指定金額，沒有分配的用途填 0。",
@@ -232,4 +240,9 @@ internal fun MobileHelp(modifier: Modifier, list: LazyListState) {
         item { Text("分享 → 辨識 → App 內核對 → 確認入帳", style = MaterialTheme.typography.bodyLarge, color = MobileTealInk) }
         items(entries) { (title, body) -> LedgerCard { Text(title, style = MaterialTheme.typography.titleMedium); Text(body, style = MaterialTheme.typography.bodyLarge, color = MobileMuted) } }
     }
+}
+
+internal fun ledgerMerchant(entry:com.google.gson.JsonObject):String {
+    val snapshot=entry.getAsJsonObject("snapshot");val merchant=snapshot.getAsJsonObject("candidate").text("merchant")
+    return if(snapshot.getAsJsonObject("source")?.text("kind")=="manual" && merchant=="手動記帳")"未填商家・手動記帳"else merchant.ifBlank{"未填商家"}
 }

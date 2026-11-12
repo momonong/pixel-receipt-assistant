@@ -1,5 +1,7 @@
 package com.momonong.pixelreceipt.mobile
 
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -13,7 +15,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.momonong.pixelreceipt.data.ingestion.ImageStore
 
-internal enum class MobilePage { Inbox, Detail, Settings, Review, Ledger, LedgerDetail, Help, Spending }
+internal enum class MobilePage { Inbox, Detail, Settings, Review, Ledger, LedgerDetail, Help, Spending, Manual, InsightEditor, Prices }
 internal data class MobileUiState(
     val ready: Boolean = true,
     val batches: List<MobileBatch> = emptyList(),
@@ -39,6 +41,7 @@ internal data class MobileUiState(
     val duplicateShare: DuplicateShareReminder? = null,
     val appUpdate: AppUpdateState = AppUpdateState(),
     val spending: SpendingUiState = SpendingUiState(),
+    val insight: InsightUiState = InsightUiState(),
 ) {
     val batch: MobileBatch? get() = batches.firstOrNull { it.id == selectedId }
 }
@@ -82,12 +85,24 @@ internal class MobileActions(
     val spendingRange: (java.time.LocalDate, java.time.LocalDate) -> Unit = { _, _ -> },
     val spendingSelect: (SpendingSelection) -> Unit = {},
     val moreSpending: () -> Unit = {},
+    val insightQuery: (InsightQuery) -> Unit = {},
+    val refreshInsights: () -> Unit = {},
+    val moreInsights: () -> Unit = {},
+    val manual: () -> Unit = {},
+    val editInsight: (String, Boolean, Boolean) -> Unit = { _, _, _ -> },
+    val saveInsightMetadata: (com.google.gson.JsonObject) -> Unit = {},
+    val submitManual: (String) -> Unit = {},
+    val retryInsightWrite: () -> Unit = {},
+    val prices: (String?) -> Unit = {},
+    val recoverInsightPending: () -> Unit = {},
 )
 
 @Composable
 fun MobileScreen(viewModel: MobileViewModel) {
     MobileSystemBars()
     val update by viewModel.appUpdate.collectAsStateWithLifecycle()
+    val insight by viewModel.insightState.collectAsStateWithLifecycle()
+    val price by viewModel.priceController.state.collectAsStateWithLifecycle()
     val spending by viewModel.spendingState.collectAsStateWithLifecycle()
     val persisted by viewModel.state.collectAsStateWithLifecycle()
     val selected by viewModel.selected.collectAsStateWithLifecycle()
@@ -114,7 +129,7 @@ fun MobileScreen(viewModel: MobileViewModel) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(20), viewModel::picked)
     val state = MobileUiState(persisted != null, persisted?.batches.orEmpty(), selected,
         if (settings) MobilePage.Settings else MobilePage.valueOf(destination),
-        signedIn, busy, message, engines, writable, edits, reviewer, persisted?.ledgerJson, persisted?.ledgerUpdatedAt, selectedLedger, savingReview, reviewEdits.keys, persisted?.ledgerDetailsJson, persisted?.mutations.orEmpty(), persisted?.overviewJson, persisted?.accountingStale == true, persisted?.accountingError, duplicate, update, spending)
+        signedIn, busy, message, engines, writable, edits, reviewer, persisted?.ledgerJson, persisted?.ledgerUpdatedAt, selectedLedger, savingReview, reviewEdits.keys, persisted?.ledgerDetailsJson, persisted?.mutations.orEmpty(), persisted?.overviewJson, persisted?.accountingStale == true, persisted?.accountingError, duplicate, update, spending, insight)
     val actions = MobileActions(
         checkAppUpdate = viewModel::checkAppUpdate, downloadAppUpdate = viewModel::downloadAppUpdate,
         installAppUpdate = viewModel::installAppUpdate, cancelAppUpdate = viewModel::cancelAppUpdate,
@@ -128,9 +143,19 @@ fun MobileScreen(viewModel: MobileViewModel) {
         compareReview = viewModel::compareReview, resolveReview = viewModel::resolveReview, deleteBatch = viewModel::deleteBatch, voidEntry = viewModel::voidEntry, updateItemNames = viewModel::updateItemNames,
         spending = viewModel::spending, refreshSpending = viewModel::refreshSpending, spendingPeriod = viewModel::spendingPeriod,
         spendingRange = viewModel::spendingRange, spendingSelect = viewModel::selectSpending, moreSpending = viewModel::moreSpending,
+        insightQuery = viewModel::insightQuery, refreshInsights = viewModel::refreshInsights, moreInsights = viewModel::moreInsights,
+        manual = viewModel::manual, editInsight = viewModel::editInsight, saveInsightMetadata = viewModel::saveInsightMetadata,
+        submitManual = viewModel::submitManual, retryInsightWrite = viewModel.insightController::retryWrite, prices = viewModel::prices, recoverInsightPending = viewModel::recoverInsightPending,
         cancelDuplicate = viewModel::cancelDuplicateShare, openDuplicate = viewModel::openDuplicateShare, sendSeparateDuplicate = viewModel::sendSeparateDuplicate,
     )
-    MobileContent(state, viewModel.images, actions)
+    if (state.page == MobilePage.Prices) {
+        androidx.activity.compose.BackHandler { viewModel.back() }
+        androidx.compose.material3.MaterialTheme(colorScheme = androidx.compose.material3.lightColorScheme(primary = MobileTeal, onPrimary = androidx.compose.ui.graphics.Color.White, background = MobileGround, surface = androidx.compose.ui.graphics.Color.White, onSurface = MobileInk), typography = MobileTypography) {
+            androidx.compose.material3.Surface(color = MobileGround, modifier = androidx.compose.ui.Modifier.fillMaxSize().safeDrawingPadding()) {
+                MobilePriceScreen(price, viewModel.priceController, viewModel::openLedger, viewModel::back)
+            }
+        }
+    } else MobileContent(state, viewModel.images, actions)
 }
 
 @Composable

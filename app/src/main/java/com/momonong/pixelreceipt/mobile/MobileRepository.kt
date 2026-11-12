@@ -21,6 +21,9 @@ class MobileRepository(
     private val api: MobileApi,
     private val spendingCacheFile: MobileSpendingCacheFile? = null,
 ) : MobileUpdateSource {
+    internal fun nativeApi(): MobileApi = api
+    internal fun nativeToken(): String? = vault.read()
+    internal fun nativeUnauthorized(expected: String): Boolean = vault.clearIfMatching(expected)
     internal suspend fun spendingRead(path: String): String = withContext(Dispatchers.IO) {
         require(allowedSpendingRequest(path))
         authenticated { api.spending(it, path) }

@@ -35,6 +35,17 @@ interface MobileApi {
     suspend fun voidLedger(token: String, id: String, attempt: ReceiptMutation): String = throw UnsupportedOperationException()
     suspend fun overview(token: String): String = throw UnsupportedOperationException()
     suspend fun spending(token: String, path: String): String = throw UnsupportedOperationException()
+    suspend fun ledgerScope(token: String): String = throw UnsupportedOperationException()
+    suspend fun insights(token: String, path: String): String = throw UnsupportedOperationException()
+    suspend fun insightMetadata(token: String, id: String, ledger: Boolean): String = throw UnsupportedOperationException()
+    suspend fun saveInsightMetadata(token: String, id: String, ledger: Boolean, body: String, key: String): String = throw UnsupportedOperationException()
+    suspend fun createManualEntry(token: String, body: String, key: String): String = throw UnsupportedOperationException()
+    suspend fun analysisOperation(token: String, key: String): String = throw UnsupportedOperationException()
+    suspend fun products(token: String, query: String = "", offset: Int = 0): String = throw UnsupportedOperationException()
+    suspend fun createProduct(token: String, body: String, key: String): String = throw UnsupportedOperationException()
+    suspend fun priceReview(token: String, id: String): String = throw UnsupportedOperationException()
+    suspend fun savePriceReview(token: String, id: String, body: String, key: String): String = throw UnsupportedOperationException()
+    suspend fun productPrices(token: String, id: String, offset: Int = 0): String = throw UnsupportedOperationException()
     suspend fun appRelease(token: String): AppRelease = throw UnsupportedOperationException()
     suspend fun downloadAppUpdate(token: String, release: AppRelease, file: File, progress: (Long) -> Unit): Unit = throw UnsupportedOperationException()
 }
@@ -99,7 +110,7 @@ internal class HttpsMobileTransport(private val connectionFactory: (URL) -> Http
                     }
                     val body = http.inputStream.use { input ->
                         val output = java.io.ByteArrayOutputStream()
-                        val responseLimit = if (request.path.startsWith("v1/intakes") || request.path.startsWith("v1/drafts") || request.path.startsWith("v1/ledger") || request.path.startsWith("v1/spending?") || request.path.startsWith("v2/drafts")) 16 * 1024 * 1024 else 64 * 1024
+                        val responseLimit = if (request.path.startsWith("v1/intakes") || request.path.startsWith("v1/drafts") || request.path.startsWith("v1/ledger") || request.path.startsWith("v1/spending?") || request.path.startsWith("v1/insights") || request.path.startsWith("v1/products") || request.path.startsWith("v1/analysis-operations/") || request.path.startsWith("v2/drafts")) 16 * 1024 * 1024 else 64 * 1024
                         val buffer = ByteArray(16 * 1024)
                         while (true) {
                             val n = input.read(buffer)
@@ -191,6 +202,53 @@ class HttpsMobileApi internal constructor(private val transport: MobileTransport
         require(allowedSpendingRequest(path))
         return transport.call(MobileRequest(path, token = token))
     }
+    override suspend fun ledgerScope(token: String): String {
+        val value = objectJson(transport.call(MobileRequest("v1/session", token = token)))
+        return value["ledger_id"].asString.also { require(validUuid(it)) }
+    }
+    override suspend fun insights(token: String, path: String): String {
+        require(allowedMobileRequest(path, "GET") && path.startsWith("v1/insights"))
+        return transport.call(MobileRequest(path, token = token))
+    }
+    override suspend fun insightMetadata(token: String, id: String, ledger: Boolean): String {
+        require(validUuid(id))
+        return transport.call(MobileRequest("v1/${if (ledger) "ledger" else "drafts"}/$id/insights", token = token))
+    }
+    override suspend fun saveInsightMetadata(token: String, id: String, ledger: Boolean, body: String, key: String): String {
+        require(validUuid(id) && validUuid(key))
+        return transport.call(MobileRequest("v1/${if (ledger) "ledger" else "drafts"}/$id/insights", "PUT", token, json = body, idempotencyKey = key))
+    }
+    override suspend fun createManualEntry(token: String, body: String, key: String): String {
+        require(validUuid(key))
+        return transport.call(MobileRequest("v1/manual-entries", "POST", token, json = body, idempotencyKey = key))
+    }
+    override suspend fun analysisOperation(token: String, key: String): String {
+        require(validUuid(key))
+        return transport.call(MobileRequest("v1/analysis-operations/$key", token = token)).also {
+            require(objectJson(it)["operation_id"].asString == key)
+        }
+    }
+    override suspend fun products(token: String, query: String, offset: Int): String {
+        require(query.length <= 500 && query.none(Char::isISOControl) && offset in 0..100_000)
+        val encoded = java.net.URLEncoder.encode(query, Charsets.UTF_8.name())
+        return transport.call(MobileRequest("v1/products?query=$encoded&limit=20&offset=$offset", token = token))
+    }
+    override suspend fun createProduct(token: String, body: String, key: String): String {
+        require(validUuid(key))
+        return transport.call(MobileRequest("v1/products", "POST", token, json = body, idempotencyKey = key))
+    }
+    override suspend fun priceReview(token: String, id: String): String {
+        require(validUuid(id))
+        return transport.call(MobileRequest("v1/ledger/$id/price-review", token = token))
+    }
+    override suspend fun savePriceReview(token: String, id: String, body: String, key: String): String {
+        require(validUuid(id) && validUuid(key))
+        return transport.call(MobileRequest("v1/ledger/$id/price-review", "PUT", token, json = body, idempotencyKey = key))
+    }
+    override suspend fun productPrices(token: String, id: String, offset: Int): String {
+        require(validUuid(id) && offset in 0..100_000)
+        return transport.call(MobileRequest("v1/products/$id/prices?limit=20&offset=$offset", token = token))
+    }
     override suspend fun overview(token: String): String = transport.call(MobileRequest("v1/overview", token = token)).also { overviewObject(it) }
     override suspend fun appRelease(token: String): AppRelease = parseAppRelease(transport.call(MobileRequest("v1/mobile/release", token = token)))
     override suspend fun downloadAppUpdate(token: String, release: AppRelease, file: File, progress: (Long) -> Unit) = apkDownload.download(token, release, file, progress)
@@ -222,11 +280,12 @@ class HttpsMobileApi internal constructor(private val transport: MobileTransport
 internal fun allowedMobileRequest(path: String, method: String): Boolean {
     val uuid = "[0-9a-fA-F-]{36}"
     return when (method) {
-        "GET" -> allowedSpendingRequest(path) || path in setOf("v1/recognition", "v1/overview", "v1/mobile/release") || path.matches(Regex("v1/(intakes|drafts|ledger)/$uuid")) ||
+        "GET" -> allowedSpendingRequest(path) || allowedAnalyticsRead(path) || path in setOf("v1/recognition", "v1/overview", "v1/mobile/release", "v1/session") || path.matches(Regex("v1/(intakes|drafts|ledger)/$uuid")) ||
+            path.matches(Regex("v1/(drafts|ledger)/$uuid/insights")) || path.matches(Regex("v1/analysis-operations/$uuid")) || path.matches(Regex("v1/ledger/$uuid/price-review")) ||
             path.matches(Regex("v1/ledger\\?limit=20&offset=(0|[1-9][0-9]{0,5})"))
-        "POST" -> path in setOf("v1/mobile/logout", "v2/mobile/login", "v2/mobile/logout", "v1/evidence", "v1/intakes") ||
+        "POST" -> path in setOf("v1/mobile/logout", "v2/mobile/login", "v2/mobile/logout", "v1/evidence", "v1/intakes", "v1/manual-entries", "v1/products") ||
             path.matches(Regex("v2/drafts/$uuid/confirm")) || path.matches(Regex("v1/(intakes|drafts)/$uuid/delete")) || path.matches(Regex("v1/ledger/$uuid/(void|item-names)"))
-        "PUT" -> path.matches(Regex("v2/drafts/$uuid/review"))
+        "PUT" -> path.matches(Regex("v2/drafts/$uuid/review")) || path.matches(Regex("v1/(drafts|ledger)/$uuid/insights")) || path.matches(Regex("v1/ledger/$uuid/price-review"))
         else -> false
     }
 }

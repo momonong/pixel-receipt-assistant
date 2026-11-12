@@ -147,7 +147,12 @@ def test_prepare_requests_both_in_existing_payload_and_keeps_roles(store, body):
     prompt = payload["input"]["messages"][0]["content"][0]["text"]
     schema, context = prompt.split("Schema: ", 1)[1].split("\nInput context: ", 1)
     document = json.loads(schema)
-    assert set(document["properties"]) == {"candidate", "note_intents", "unresolved_note_quotes"}
+    assert set(document["properties"]) == {
+        "candidate",
+        "note_intents",
+        "unresolved_note_quotes",
+        "analysis_context",
+    }
     assert json.loads(context)["images"] == [{"position": 1, "role": "receipt", "notes": "第一張"}]
     assert json.loads(context)["user_notes"] == NOTE
     assert json.loads(journal.raw(record["id"])["config_snapshot"])["prompt_version"] == NEW_PROMPT

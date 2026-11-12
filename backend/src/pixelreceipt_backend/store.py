@@ -25,7 +25,7 @@ from .ledger_models import (
 from .models import LONG_MAX, Candidate, CreateDraft, DeleteDraft, ReviewDraft
 from .note_review import build_note_review
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 INTAKE_DELETE_JOURNAL_SCHEMA = "pixelreceipt-delete-intake-journal-1"
 MAX_STORED_BYTES = 1024 * 1024 * 1024
 
@@ -124,8 +124,12 @@ class Store:
             if version == 3:
                 self._migrate_v3(connection)
                 version = 4
+            if version == 4:
+                self._migrate_v4(connection)
+                version = 5
             if version != SCHEMA_VERSION:
                 raise RuntimeError(f"unsupported database version {version}; migration required")
+            self.ledger_id(connection)
         self.database.chmod(0o600)
 
     @staticmethod
@@ -309,6 +313,66 @@ class Store:
             "PRAGMA user_version = 4",
         ):
             connection.execute(statement)
+
+    @staticmethod
+    def _migrate_v4(connection):
+        expected = {
+            "evidence",
+            "drafts",
+            "reviews",
+            "ledger",
+            "ledger_events",
+            "mutations",
+            "sessions",
+            "products",
+            "price_reviews",
+            "price_review_history",
+            "device_sessions",
+            "intakes",
+        }
+        actual = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+        if actual != expected or connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+            raise RuntimeError("invalid v4 schema; migration refused")
+        if connection.execute("PRAGMA foreign_key_check").fetchall():
+            raise RuntimeError("invalid v4 foreign keys; migration refused")
+        for statement in (
+            """CREATE TABLE ledger_metadata (
+                key TEXT PRIMARY KEY, value TEXT NOT NULL)""",
+            """CREATE TABLE insight_annotations (
+                draft_id TEXT PRIMARY KEY REFERENCES drafts(id), revision INTEGER NOT NULL,
+                document TEXT NOT NULL, sources TEXT NOT NULL, updated_at TEXT NOT NULL)""",
+            """CREATE TABLE insight_history (
+                draft_id TEXT NOT NULL REFERENCES drafts(id), revision INTEGER NOT NULL,
+                document TEXT NOT NULL, sources TEXT NOT NULL, created_at TEXT NOT NULL,
+                actor TEXT NOT NULL, PRIMARY KEY(draft_id, revision))""",
+            "PRAGMA user_version = 5",
+        ):
+            connection.execute(statement)
+        connection.execute(
+            "INSERT INTO ledger_metadata VALUES ('ledger_id', ?)", (str(uuid.uuid4()),)
+        )
+
+    def ledger_id(self, connection=None) -> str:
+        """Read the database's non-secret identity; never derive it from credentials."""
+        if connection is None:
+            with self.connection() as current:
+                return self.ledger_id(current)
+        try:
+            row = connection.execute(
+                "SELECT value FROM ledger_metadata WHERE key='ledger_id'"
+            ).fetchone()
+            value = row["value"] if row else None
+            if value is None or str(uuid.UUID(value)) != value:
+                raise ValueError("invalid stable ledger identity")
+        except (ValueError, TypeError, sqlite3.OperationalError) as error:
+            # Missing identity is corruption, never an invitation to silently re-scope writes.
+            raise StoreError(503, "ledger_identity_invalid") from error
+        return value
 
     @contextmanager
     def connection(self, *, write=False):

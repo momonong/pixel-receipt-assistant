@@ -227,6 +227,7 @@ class Auth:
         principal = self.reviewer(request)
         return {
             "role": principal.role,
+            "ledger_id": self.store.ledger_id(),
             "auth_method": principal.auth_method,
             "csrf_token": principal.csrf_token,
             "expires_at": datetime.fromtimestamp(principal.expires_at, UTC).isoformat()

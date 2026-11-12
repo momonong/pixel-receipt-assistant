@@ -1,0 +1,518 @@
+{
+  "entries": [
+    {
+      "id": "1227cd32-8020-4bec-8271-c7e799948565",
+      "draft_id": "26b81ef9-a3bd-43cd-9c5f-b6e165dc19a0",
+      "revision": 1,
+      "status": "active",
+      "snapshot": {
+        "calculation": {
+          "adjustment_shares": [],
+          "advance_yuan": 30,
+          "allocated_total_yuan": 30,
+          "basis_sha256": "808cf94f4662575e59a550eeda649263edd0a1983c07e68fcc564bd304163a2f",
+          "blockers": [],
+          "computed_total_yuan": 30,
+          "difference_yuan": 0,
+          "expenses_ready": true,
+          "gift_yuan": 0,
+          "line_shares": [
+            {
+              "advance_yuan": 30,
+              "gift_yuan": 0,
+              "item_position": 0,
+              "self_yuan": 0
+            }
+          ],
+          "personal_yuan": 0,
+          "printed_total_yuan": 30,
+          "ready": true,
+          "reconciliation_difference_yuan": 0,
+          "reconciliation_status": "balanced",
+          "ruleset": "pixelreceipt-central-ledger-2",
+          "self_yuan": 0,
+          "tolerance_yuan": 1
+        },
+        "candidate": {
+          "adjustments": [],
+          "amount_unit": "TWD_YUAN",
+          "currency": "TWD",
+          "items": [
+            {
+              "brand": null,
+              "content_quantity": null,
+              "printed_line_total_yuan": 30,
+              "printed_unit_price_yuan": 30,
+              "quantity": 1,
+              "raw_name": "合成品項",
+              "specification": null
+            }
+          ],
+          "merchant": "合成商店（非真實）",
+          "printed_total_yuan": 30,
+          "receipt_date": "2026-11-12",
+          "schema": "pixelreceipt-central-candidate-1"
+        },
+        "created_at": "2026-11-12T14:35:40.020266+00:00",
+        "evidence": [],
+        "id": "26b81ef9-a3bd-43cd-9c5f-b6e165dc19a0",
+        "ledger_id": "1227cd32-8020-4bec-8271-c7e799948565",
+        "original_candidate": {
+          "adjustments": [],
+          "amount_unit": "TWD_YUAN",
+          "currency": "TWD",
+          "items": [
+            {
+              "brand": null,
+              "content_quantity": null,
+              "printed_line_total_yuan": 30,
+              "printed_unit_price_yuan": 30,
+              "quantity": 1,
+              "raw_name": "合成品項",
+              "specification": null
+            }
+          ],
+          "merchant": "合成商店（非真實）",
+          "printed_total_yuan": 30,
+          "receipt_date": "2026-11-12",
+          "schema": "pixelreceipt-central-candidate-1"
+        },
+        "review_document": {
+          "adjustment_decisions": [],
+          "assembly_status": "complete_by_user",
+          "line_decisions": [
+            {
+              "amounts_yuan": null,
+              "item_position": 0,
+              "method": "whole_line",
+              "quantities": null,
+              "whole_purpose": "advance"
+            }
+          ],
+          "schema": "pixelreceipt-central-review-2",
+          "tolerance_acknowledgement": "none"
+        },
+        "revision": 3,
+        "source": {
+          "kind": "manual",
+          "label": "手動記帳",
+          "model": null,
+          "provider": null
+        },
+        "status": "confirmed",
+        "updated_at": "2026-11-12T14:35:40.020266+00:00"
+      },
+      "display_item_names": [
+        "合成品項"
+      ],
+      "missing_item_name_count": 0,
+      "confirmed_at": "2026-11-12T14:35:40.020266+00:00",
+      "confirmed_by": "reviewer",
+      "events": [
+        {
+          "revision": 1,
+          "action": "confirmed",
+          "actor": "reviewer",
+          "reason": null,
+          "created_at": "2026-11-12T14:35:40.020266+00:00"
+        }
+      ],
+      "merchant_key": "ee1e2e0ae6b07428c6dd7ec5faa706e7531c51f97af0a7e6c8a5d1a882d4b1dd",
+      "insights": {
+        "draft_id": "26b81ef9-a3bd-43cd-9c5f-b6e165dc19a0",
+        "ledger_id": "1227cd32-8020-4bec-8271-c7e799948565",
+        "revision": 1,
+        "document": {
+          "address": "合成地址（非真實）",
+          "branch": "合成東區店",
+          "brand": "合成品牌",
+          "channel": "in_store",
+          "city": "臺南市",
+          "date_source": "user",
+          "district": "東區",
+          "items": [
+            {
+              "category": "food",
+              "item_position": 0,
+              "meal": "dinner",
+              "meal_group": "合成同餐",
+              "subcategory": null
+            }
+          ],
+          "transaction_time": "18:30"
+        },
+        "sources": {
+          "address": "user",
+          "branch": "user",
+          "brand": "user",
+          "channel": "user",
+          "city": "user",
+          "date_source": "user",
+          "district": "user",
+          "items": [
+            {
+              "category": "user",
+              "item_position": 0,
+              "meal": "user",
+              "meal_group": "user",
+              "subcategory": "user"
+            }
+          ],
+          "transaction_time": "user"
+        },
+        "updated_at": "2026-11-12T14:35:40.020503+00:00"
+      },
+      "pending_price": true,
+      "matched_personal_yuan": 0
+    },
+    {
+      "id": "75f94425-8924-4288-8200-a9eba66523b5",
+      "draft_id": "2a59ae69-5626-42ec-8740-0816a73e107e",
+      "revision": 1,
+      "status": "active",
+      "snapshot": {
+        "calculation": {
+          "adjustment_shares": [],
+          "advance_yuan": 0,
+          "allocated_total_yuan": 20,
+          "basis_sha256": "063cd581457a3877466dfd4f645276d7514ab03733187752751cd9f751a5efdd",
+          "blockers": [],
+          "computed_total_yuan": 20,
+          "difference_yuan": 0,
+          "expenses_ready": true,
+          "gift_yuan": 0,
+          "line_shares": [
+            {
+              "advance_yuan": 0,
+              "gift_yuan": 0,
+              "item_position": 0,
+              "self_yuan": 20
+            }
+          ],
+          "personal_yuan": 20,
+          "printed_total_yuan": 20,
+          "ready": true,
+          "reconciliation_difference_yuan": 0,
+          "reconciliation_status": "balanced",
+          "ruleset": "pixelreceipt-central-ledger-2",
+          "self_yuan": 20,
+          "tolerance_yuan": 1
+        },
+        "candidate": {
+          "adjustments": [],
+          "amount_unit": "TWD_YUAN",
+          "currency": "TWD",
+          "items": [
+            {
+              "brand": null,
+              "content_quantity": null,
+              "printed_line_total_yuan": 20,
+              "printed_unit_price_yuan": 20,
+              "quantity": 1,
+              "raw_name": "合成品項",
+              "specification": null
+            }
+          ],
+          "merchant": "合成商店（非真實）",
+          "printed_total_yuan": 20,
+          "receipt_date": "2026-11-12",
+          "schema": "pixelreceipt-central-candidate-1"
+        },
+        "created_at": "2026-11-12T14:35:40.001149+00:00",
+        "evidence": [],
+        "id": "2a59ae69-5626-42ec-8740-0816a73e107e",
+        "ledger_id": "75f94425-8924-4288-8200-a9eba66523b5",
+        "original_candidate": {
+          "adjustments": [],
+          "amount_unit": "TWD_YUAN",
+          "currency": "TWD",
+          "items": [
+            {
+              "brand": null,
+              "content_quantity": null,
+              "printed_line_total_yuan": 20,
+              "printed_unit_price_yuan": 20,
+              "quantity": 1,
+              "raw_name": "合成品項",
+              "specification": null
+            }
+          ],
+          "merchant": "合成商店（非真實）",
+          "printed_total_yuan": 20,
+          "receipt_date": "2026-11-12",
+          "schema": "pixelreceipt-central-candidate-1"
+        },
+        "review_document": {
+          "adjustment_decisions": [],
+          "assembly_status": "complete_by_user",
+          "line_decisions": [
+            {
+              "amounts_yuan": null,
+              "item_position": 0,
+              "method": "whole_line",
+              "quantities": null,
+              "whole_purpose": "self"
+            }
+          ],
+          "schema": "pixelreceipt-central-review-2",
+          "tolerance_acknowledgement": "none"
+        },
+        "revision": 3,
+        "source": {
+          "kind": "manual",
+          "label": "手動記帳",
+          "model": null,
+          "provider": null
+        },
+        "status": "confirmed",
+        "updated_at": "2026-11-12T14:35:40.001149+00:00"
+      },
+      "display_item_names": [
+        "合成品項"
+      ],
+      "missing_item_name_count": 0,
+      "confirmed_at": "2026-11-12T14:35:40.001149+00:00",
+      "confirmed_by": "reviewer",
+      "events": [
+        {
+          "revision": 1,
+          "action": "confirmed",
+          "actor": "reviewer",
+          "reason": null,
+          "created_at": "2026-11-12T14:35:40.001149+00:00"
+        }
+      ],
+      "merchant_key": "ee1e2e0ae6b07428c6dd7ec5faa706e7531c51f97af0a7e6c8a5d1a882d4b1dd",
+      "insights": {
+        "draft_id": "2a59ae69-5626-42ec-8740-0816a73e107e",
+        "ledger_id": "75f94425-8924-4288-8200-a9eba66523b5",
+        "revision": 1,
+        "document": {
+          "address": "合成地址（非真實）",
+          "branch": "合成東區店",
+          "brand": "合成品牌",
+          "channel": "in_store",
+          "city": "臺南市",
+          "date_source": "user",
+          "district": "東區",
+          "items": [
+            {
+              "category": "food",
+              "item_position": 0,
+              "meal": "dinner",
+              "meal_group": "合成同餐",
+              "subcategory": null
+            }
+          ],
+          "transaction_time": "18:30"
+        },
+        "sources": {
+          "address": "user",
+          "branch": "user",
+          "brand": "user",
+          "channel": "user",
+          "city": "user",
+          "date_source": "user",
+          "district": "user",
+          "items": [
+            {
+              "category": "user",
+              "item_position": 0,
+              "meal": "user",
+              "meal_group": "user",
+              "subcategory": "user"
+            }
+          ],
+          "transaction_time": "user"
+        },
+        "updated_at": "2026-11-12T14:35:40.001405+00:00"
+      },
+      "pending_price": true,
+      "matched_personal_yuan": 20
+    },
+    {
+      "id": "c4b958c3-8162-48fd-987c-7f4173d0f447",
+      "draft_id": "aca157aa-baa8-4250-a552-4457315befeb",
+      "revision": 1,
+      "status": "active",
+      "snapshot": {
+        "calculation": {
+          "adjustment_shares": [],
+          "advance_yuan": 0,
+          "allocated_total_yuan": 100,
+          "basis_sha256": "5c3e99e68f37a11246677d9467bb4f7b4f740573a66b1b019b74d04d02a8dc37",
+          "blockers": [],
+          "computed_total_yuan": 100,
+          "difference_yuan": 0,
+          "expenses_ready": true,
+          "gift_yuan": 0,
+          "line_shares": [
+            {
+              "advance_yuan": 0,
+              "gift_yuan": 0,
+              "item_position": 0,
+              "self_yuan": 100
+            }
+          ],
+          "personal_yuan": 100,
+          "printed_total_yuan": 100,
+          "ready": true,
+          "reconciliation_difference_yuan": 0,
+          "reconciliation_status": "balanced",
+          "ruleset": "pixelreceipt-central-ledger-2",
+          "self_yuan": 100,
+          "tolerance_yuan": 1
+        },
+        "candidate": {
+          "adjustments": [],
+          "amount_unit": "TWD_YUAN",
+          "currency": "TWD",
+          "items": [
+            {
+              "brand": null,
+              "content_quantity": null,
+              "printed_line_total_yuan": 100,
+              "printed_unit_price_yuan": 100,
+              "quantity": 1,
+              "raw_name": "合成品項",
+              "specification": null
+            }
+          ],
+          "merchant": "合成商店（非真實）",
+          "printed_total_yuan": 100,
+          "receipt_date": "2026-11-12",
+          "schema": "pixelreceipt-central-candidate-1"
+        },
+        "created_at": "2026-11-12T14:35:39.990746+00:00",
+        "evidence": [],
+        "id": "aca157aa-baa8-4250-a552-4457315befeb",
+        "ledger_id": "c4b958c3-8162-48fd-987c-7f4173d0f447",
+        "original_candidate": {
+          "adjustments": [],
+          "amount_unit": "TWD_YUAN",
+          "currency": "TWD",
+          "items": [
+            {
+              "brand": null,
+              "content_quantity": null,
+              "printed_line_total_yuan": 100,
+              "printed_unit_price_yuan": 100,
+              "quantity": 1,
+              "raw_name": "合成品項",
+              "specification": null
+            }
+          ],
+          "merchant": "合成商店（非真實）",
+          "printed_total_yuan": 100,
+          "receipt_date": "2026-11-12",
+          "schema": "pixelreceipt-central-candidate-1"
+        },
+        "review_document": {
+          "adjustment_decisions": [],
+          "assembly_status": "complete_by_user",
+          "line_decisions": [
+            {
+              "amounts_yuan": null,
+              "item_position": 0,
+              "method": "whole_line",
+              "quantities": null,
+              "whole_purpose": "self"
+            }
+          ],
+          "schema": "pixelreceipt-central-review-2",
+          "tolerance_acknowledgement": "none"
+        },
+        "revision": 3,
+        "source": {
+          "kind": "manual",
+          "label": "手動記帳",
+          "model": null,
+          "provider": null
+        },
+        "status": "confirmed",
+        "updated_at": "2026-11-12T14:35:39.990746+00:00"
+      },
+      "display_item_names": [
+        "合成品項"
+      ],
+      "missing_item_name_count": 0,
+      "confirmed_at": "2026-11-12T14:35:39.990746+00:00",
+      "confirmed_by": "reviewer",
+      "events": [
+        {
+          "revision": 1,
+          "action": "confirmed",
+          "actor": "reviewer",
+          "reason": null,
+          "created_at": "2026-11-12T14:35:39.990746+00:00"
+        }
+      ],
+      "merchant_key": "ee1e2e0ae6b07428c6dd7ec5faa706e7531c51f97af0a7e6c8a5d1a882d4b1dd",
+      "insights": {
+        "draft_id": "aca157aa-baa8-4250-a552-4457315befeb",
+        "ledger_id": "c4b958c3-8162-48fd-987c-7f4173d0f447",
+        "revision": 1,
+        "document": {
+          "address": "合成地址（非真實）",
+          "branch": "合成東區店",
+          "brand": "合成品牌",
+          "channel": "in_store",
+          "city": "臺南市",
+          "date_source": "user",
+          "district": "東區",
+          "items": [
+            {
+              "category": "food",
+              "item_position": 0,
+              "meal": "dinner",
+              "meal_group": "合成同餐",
+              "subcategory": null
+            }
+          ],
+          "transaction_time": "18:30"
+        },
+        "sources": {
+          "address": "user",
+          "branch": "user",
+          "brand": "user",
+          "channel": "user",
+          "city": "user",
+          "date_source": "user",
+          "district": "user",
+          "items": [
+            {
+              "category": "user",
+              "item_position": 0,
+              "meal": "user",
+              "meal_group": "user",
+              "subcategory": "user"
+            }
+          ],
+          "transaction_time": "user"
+        },
+        "updated_at": "2026-11-12T14:35:39.991064+00:00"
+      },
+      "pending_price": true,
+      "matched_personal_yuan": 100
+    }
+  ],
+  "total_count": 3,
+  "limit": 20,
+  "offset": 0,
+  "filters": {
+    "date_from": "2026-11-01",
+    "date_to": "2026-11-12",
+    "compare_from": "2026-10-01",
+    "compare_to": "2026-10-12",
+    "category": "food",
+    "meal": "dinner",
+    "brand_key": null,
+    "branch_key": null,
+    "city_key": "f966bb8472fb72add991ad0cd01852632140fd195ea06e4c98132c0894a3b0d4",
+    "district_key": null,
+    "channel": null,
+    "day_type": null,
+    "bucket": "auto",
+    "undated_only": false
+  }
+}

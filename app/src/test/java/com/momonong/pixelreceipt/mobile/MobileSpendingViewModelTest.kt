@@ -30,23 +30,21 @@ class MobileSpendingViewModelTest {
     private val calls = CopyOnWriteArrayList<String>()
     private val models = ViewModelStore()
     private fun fixture(name: String) = javaClass.getResource("/$name")!!.readText()
-    private val saved get() = SavedStateHandle(mapOf("mobileSpendingPeriod" to "Custom", "mobileSpendingFrom" to "2026-11-01", "mobileSpendingTo" to "2026-11-12"))
+    private val saved get() = SavedStateHandle(mapOf("mobileInsightQuery" to InsightQuery(java.time.LocalDate.parse("2026-11-01"),java.time.LocalDate.parse("2026-11-12")).filters().toString()))
     @Before fun setup() {
         root = File(app.cacheDir, UUID.randomUUID().toString()).apply { mkdirs() }
         store = MobileStore(File(root, "receipts")); store.load()
         val api = object : MobileApi by FakeMobileApi() {
-            override suspend fun spending(token: String, path: String): String {
+            override suspend fun ledgerScope(token: String) = "7a11bd13-6cf2-4f2f-8d86-4db17417aa1d"
+            override suspend fun insights(token:String,path:String):String {
                 calls += path
-                return if (path.startsWith("v1/spending?")) jsonObject(fixture("spending-dashboard-synthetic.json")).apply { add("comparison", com.google.gson.JsonNull.INSTANCE) }.toString()
-                else jsonObject(fixture("spending-dashboard-ledger-synthetic.json")).apply {
-                    val key = path.substringAfter("merchant_key=", "").takeIf { it.isNotEmpty() }
-                    val all = array("entries"); val filtered = com.google.gson.JsonArray()
-                    all.forEach { if (key == null || it.asJsonObject.text("merchant_key") == key) filtered.add(it) }
-                    add("entries", filtered); addProperty("total_count", filtered.size())
-                    if (key != null) addProperty("merchant_key", key)
-                }.toString()
+                val query=path.substringAfter('?').split('&').associate{it.substringBefore('=') to it.substringAfter('=')}
+                val q=insightQueryFromJson(com.google.gson.JsonObject().apply{query.filterKeys{it !in setOf("limit","offset")}.forEach{(k,v)->if(k=="undated_only")addProperty(k,v.toBoolean())else addProperty(k,v)}}.toString())
+                if(!path.startsWith("v1/insights/entries"))return insightFixture(q)
+                val entries=jsonObject(fixture("insights-unknown-entries-http-synthetic.json")).array("entries")
+                return com.google.gson.JsonObject().apply{add("entries",entries);addProperty("total_count",1);addProperty("limit",20);addProperty("offset",0);add("filters",q.filters())}.toString()
             }
-            override suspend fun ledgerDetail(token: String, id: String): String = jsonObject(fixture("spending-dashboard-ledger-synthetic.json")).array("entries").first { it.asJsonObject.text("id") == id }.toString()
+            override suspend fun ledgerDetail(token: String, id: String): String = jsonObject(fixture("insights-unknown-entries-http-synthetic.json")).array("entries").first { it.asJsonObject.text("id") == id }.toString()
         }
         repo = MobileRepository(store, ImageStore(File(root, "images")), MemoryVault().apply { save("prm_fixture") }, api, MobileSpendingCacheFile(File(root, "analysis")))
     }
@@ -59,31 +57,48 @@ class MobileSpendingViewModelTest {
     }
     @Test fun nativeNavigationKeepsThePeriodAndShopThroughDetailsAndRecreation() {
         val handle = saved; val model = vm(handle)
-        model.spending(); await { model.spendingState.value.entriesJson != null }
+        model.spending(); await { model.insightState.value.entries.isNotEmpty() }
         assertEquals(MobilePage.Spending.name, model.destination.value)
-        assertEquals(1349L, model.spendingState.value.report!!.summary.personalYuan)
-        val shop = model.spendingState.value.report!!.merchants.first { it.name == "日常生鮮" }
-        model.selectSpending(SpendingSelection(merchantKey = shop.key))
-        await { model.spendingState.value.entriesJson?.let { jsonObject(it).text("merchant_key") == shop.key } == true }
-        val entry = jsonObject(model.spendingState.value.entriesJson!!).array("entries")[0].asJsonObject.text("id")
+        assertEquals(300L, model.insightState.value.report!!.summary.getValue("personal_yuan"))
+        val city = model.insightState.value.report!!.groups.getValue("cities").first().key
+        model.insightQuery(model.insightState.value.query.copy(cityKey=city,meal="not_applicable"))
+        await { model.insightState.value.entries.isNotEmpty() && model.insightState.value.query.cityKey==city }
+        val entry = model.insightState.value.entries.first().text("id")
         model.openLedger(entry); await { model.busy.value == null }
         model.back(); assertEquals(MobilePage.Spending.name, model.destination.value)
-        assertEquals(shop.key, model.spendingState.value.selection.merchantKey)
+        assertEquals(city, model.insightState.value.query.cityKey)
         val restored = vm(SavedStateHandle(handle.keys().associateWith { handle.get<Any?>(it) }))
-        await { restored.spendingState.value.entriesJson != null }
-        assertEquals(SpendingPeriod.Custom, restored.spendingState.value.period)
-        assertEquals(shop.key, restored.spendingState.value.selection.merchantKey)
-        assertTrue(calls.all { it.startsWith("v1/spending?") || it.startsWith("v1/ledger?") })
+        await { restored.insightState.value.entries.isNotEmpty() }
+        assertEquals(java.time.LocalDate.parse("2026-11-01"), restored.insightState.value.query.dateFrom)
+        assertEquals(city, restored.insightState.value.query.cityKey)
+        assertEquals("not_applicable", restored.insightState.value.query.meal)
+        assertTrue(calls.all { it.startsWith("v1/insights?") || it.startsWith("v1/insights/entries?") })
+    }
+    @Test fun nestedPriceSourceMetadataReturnsToOriginalAnalysisAfterRecreation() {
+        val handle=saved;val model=vm(handle)
+        model.spending();await{model.insightState.value.entries.isNotEmpty()&&!model.insightState.value.loading}
+        val query=model.insightState.value.query.copy(meal="not_applicable",cityKey=model.insightState.value.report!!.groups.getValue("cities").first().key)
+        model.insightQuery(query);await{model.insightState.value.entries.isNotEmpty()&&!model.insightState.value.loading}
+        model.prices(null);assertEquals(MobilePage.Prices.name,model.destination.value)
+        val ledger=model.insightState.value.entries.first().text("id")
+        model.openLedger(ledger);await{model.busy.value==null}
+        model.editInsight(ledger,true,false);model.back();assertEquals(MobilePage.LedgerDetail.name,model.destination.value)
+        model.back();assertEquals(MobilePage.Prices.name,model.destination.value)
+        models.clear()
+        val restored=vm(SavedStateHandle(handle.keys().associateWith{handle.get<Any?>(it)}))
+        restored.back()
+        assertEquals("Metadata return must not overwrite price page's original destination",MobilePage.Spending.name,restored.destination.value)
+        assertEquals(query,restored.insightState.value.query)
     }
     @Test fun formalLedgerChangesInvalidateAnalysisButEditingReceiptNotesDoesNot() {
-        val model = vm(saved); model.spending(); await { model.spendingState.value.entriesJson != null && !model.spendingState.value.loading }
-        val summaryReads = calls.count { it.startsWith("v1/spending?") }
+        val model = vm(saved); model.spending(); await { model.insightState.value.entries.isNotEmpty() && !model.insightState.value.loading }
+        val summaryReads = calls.count { it.startsWith("v1/insights?") }
         store.create(UUID.randomUUID().toString(), "只改說明")
-        shadowOf(Looper.getMainLooper()).idle(); assertEquals(summaryReads, calls.count { it.startsWith("v1/spending?") })
-        val entry = jsonObject(fixture("spending-dashboard-ledger-synthetic.json")).array("entries")[0].toString()
+        shadowOf(Looper.getMainLooper()).idle(); assertEquals(summaryReads, calls.count { it.startsWith("v1/insights?") })
+        val entry = jsonObject(fixture("insights-unknown-entries-http-synthetic.json")).array("entries")[0].toString()
         store.cacheEntry(entry)
-        await { calls.count { it.startsWith("v1/spending?") } > summaryReads && !model.spendingState.value.loading }
+        await { calls.count { it.startsWith("v1/insights?") } > summaryReads && !model.insightState.value.loading }
         model.logout(); await { !model.signedIn.value }
-        assertNull(model.spendingState.value.report)
+        assertNull(model.insightState.value.report)
     }
 }

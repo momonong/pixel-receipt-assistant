@@ -17,6 +17,8 @@ from .advance_suggestion import suggest_advance
 from .analysis_store import AnalysisStore
 from .auth import Auth, Principal
 from .evidence import MAX_UPLOAD_BYTES, SUPPORTED_MEDIA, InvalidEvidence
+from .insight_api import register_insight_api
+from .insights_api import register_insights_api
 from .inspection import InspectionUnavailable, inspect_evidence_isolated
 from .intake_models import CreateIntake, DeleteIntake
 from .intake_store import IntakeStore
@@ -397,7 +399,10 @@ def create_app(
 
     @api.put("/v1/ledger/{ledger_id}/price-review", dependencies=[Depends(auth.reviewer)])
     async def review_prices(ledger_id: str, request: Request):
-        return analysis.review_prices(ledger_id, await parse_request(request, ReviewPrices))
+        key = request.headers.get("idempotency-key")
+        if key is not None and not KEY_PATTERN.fullmatch(key):
+            raise HTTPException(422, "valid_idempotency_key_required")
+        return analysis.review_prices(ledger_id, await parse_request(request, ReviewPrices), key)
 
     @api.get("/v1/ledger/{ledger_id}/price-review/history")
     def price_history(ledger_id: str):
@@ -516,6 +521,8 @@ def create_app(
     def session(request: Request):
         return auth.session_response(request)
 
+    register_insight_api(api, store, auth, parse_request, KEY_PATTERN)
+    register_insights_api(api, store)
     app.include_router(api)
 
     @app.get("/auth/login")

@@ -98,6 +98,7 @@ internal fun MobileReviewScreen(state: MobileUiState, images: ImageStore, action
     var preview by rememberSaveable(batch.id) { mutableStateOf<String?>(null) }
     fun change(block: (JsonObject) -> Unit) = actions.editReview(batch.id, block)
     LazyColumn(modifier.testTag("native-review"), state = list, contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { OutlinedButton(onClick = { batch.draftId?.let { actions.editInsight(it, false, batch.draftStatus == "voided") } }, enabled = batch.draftId != null && state.signedIn, modifier = Modifier.heightIn(min = 48.dp).testTag("review-insight-edit")) { Text("分析標籤（選填）") } }
         item(key = "receipt") {
             ReviewCard {
                 if (batch.ledgerId != null) StatusTag(if (batch.ledgerStatus == "voided") "已作廢" else "已完成", problem = batch.ledgerStatus == "voided")
