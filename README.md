@@ -1,10 +1,12 @@
 # PixelReceipt
 
-PixelReceipt **0.5.5／code 12** 是原生 Android 收件與記帳 App：
+PixelReceipt **0.6.0／code 13** 是原生 Android 收件與記帳 App：
 
 **分享照片與說明 → 中央辨識 → App 內核對與修正 → 一次確認入帳 → 查看已完成帳目。**
 
 未指定用途的品項預設自己用；代買、送人或分攤可逐項調整，既有設定會保留。中央帳本是正式紀錄，本機保存原圖與待同步草稿。AI 只提供候選，最終金額與分攤由確定性整數規則計算；草稿保存不等於入帳。
+
+0.6.0 新增：收據狀態獨立配色、預設一般收據與篩選；App 內新增支出分析，可切換期間、點趨勢或店家查看帳目，適配一般手機與折疊展開。實付、個人支出、代買及折扣的口徑分開呈現。設計與驗證界線見 [0.6.0 發行說明](docs/RELEASE_v0.6.0.md)。
 
 0.5.5 加入設定內的版本檢查、下載進度與 Android 更新安裝，不需開網站；首次安裝此版後可使用。詳見 [0.5.5 發行說明](docs/RELEASE_v0.5.5.md)。
 
@@ -55,7 +57,9 @@ uv sync --locked
 uv run --locked pytest -q
 ```
 
-0.5.5 的 Android 410 tests、嚴格 lint 與 APK 建置通過；App 內更新範圍與實機限制見 [發行說明](docs/RELEASE_v0.5.5.md)。
+0.6.0 的 Android 453 tests、嚴格 lint 與 APK 建置通過，後端 422 tests、Ruff／format 與 Web 3 個測試檔通過；這是工程證據；正式部署與手機接受另核對。
+
+歷史上 0.5.5 的 Android 410 tests、嚴格 lint 與 APK 建置通過；App 內更新範圍與實機限制見 [發行說明](docs/RELEASE_v0.5.5.md)。
 
 前版 0.5.4 的 Android 390 tests、嚴格 lint 與未簽 APK 建置通過；後端 388 tests、網頁 47 tests 與 Ruff 通過，範圍見 [發行說明](docs/RELEASE_v0.5.4.md)。主機／合成測試涵蓋原生 Compose、實際後端 DTO 契約及 320dp／放大字級；不代表手機更新、真實辨識品質或真人帳務接受。
 

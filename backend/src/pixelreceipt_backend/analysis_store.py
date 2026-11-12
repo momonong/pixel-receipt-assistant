@@ -8,6 +8,7 @@ from fractions import Fraction
 from .models import LONG_MAX, Candidate
 from .pricing import InvalidPriceReview, price_lines
 from .pricing_models import CreateProduct, PriceDocument, ReviewPrices
+from .spending import merchant_identity, spending_projection
 from .store import Store, StoreError, canonical, timestamp
 
 
@@ -170,7 +171,17 @@ class AnalysisStore:
                 ]
             }
 
-    def _filtered_ledger(self, connection, *, q=None, date_from=None, date_to=None, status=None):
+    def _filtered_ledger(
+        self,
+        connection,
+        *,
+        q=None,
+        date_from=None,
+        date_to=None,
+        status=None,
+        merchant_key=None,
+        undated_only=False,
+    ):
         # Complete-scope filters run before pagination. Search is literal, never SQL or globbing.
         search = q.casefold() if q is not None else None
         rows = connection.execute("SELECT id FROM ledger ORDER BY confirmed_at DESC, id")
@@ -178,6 +189,11 @@ class AnalysisStore:
             entry = self.store._ledger(connection, row["id"])
             candidate = entry["snapshot"]["candidate"]
             receipt_date = candidate["receipt_date"]
+            entry["merchant_key"], _ = merchant_identity(candidate["merchant"])
+            if merchant_key is not None and entry["merchant_key"] != merchant_key.lower():
+                continue
+            if undated_only and receipt_date is not None:
+                continue
             if status is not None and entry["status"] != status:
                 continue
             if date_from is not None and (receipt_date is None or receipt_date < date_from):
@@ -195,11 +211,26 @@ class AnalysisStore:
             yield entry
 
     def list_ledger(
-        self, limit, offset, *, q=None, date_from=None, date_to=None, status=None
+        self,
+        limit,
+        offset,
+        *,
+        q=None,
+        date_from=None,
+        date_to=None,
+        status=None,
+        merchant_key=None,
+        undated_only=False,
     ) -> dict:
         with self.store.connection() as connection:
             entries = self._filtered_ledger(
-                connection, q=q, date_from=date_from, date_to=date_to, status=status
+                connection,
+                q=q,
+                date_from=date_from,
+                date_to=date_to,
+                status=status,
+                merchant_key=merchant_key,
+                undated_only=undated_only,
             )
             page = []
             count = 0
@@ -216,7 +247,16 @@ class AnalysisStore:
                 "date_from": date_from,
                 "date_to": date_to,
                 "status": status,
+                "merchant_key": merchant_key,
+                "undated_only": undated_only,
             }
+
+    def spending(self, **params) -> dict:
+        # Materialize active entries once inside one SQLite read transaction. Main and
+        # comparison scopes, names, dates and void state share the same snapshot.
+        with self.store.connection() as connection:
+            entries = list(self._filtered_ledger(connection, status="active"))
+            return spending_projection(entries, **params)
 
     def overview(self, date_from=None, date_to=None) -> dict:
         keys = (

@@ -1,0 +1,109 @@
+{
+  "scope": "active_confirmed_ledger",
+  "currency": "TWD",
+  "amount_unit": "TWD_YUAN",
+  "date_from": "2026-11-01",
+  "date_to": "2026-11-12",
+  "bucket": "day",
+  "generated_at": "2026-11-12T07:07:25.736933+00:00",
+  "summary": {
+    "printed_total_yuan": 1409,
+    "allocated_total_yuan": 1409,
+    "self_yuan": 1099,
+    "gift_yuan": 250,
+    "advance_yuan": 60,
+    "personal_yuan": 1349,
+    "difference_yuan": 0,
+    "explicit_discount_yuan": 50,
+    "receipt_count": 7,
+    "missing_item_name_count": 0,
+    "receipts_missing_item_names": 0
+  },
+  "comparison": {
+    "date_from": "2026-10-01",
+    "date_to": "2026-10-12",
+    "personal_yuan": 1100,
+    "receipt_count": 1,
+    "delta_personal_yuan": 249
+  },
+  "series": [
+    {
+      "date_from": "2026-11-01",
+      "date_to": "2026-11-01",
+      "label": "2026-11-01",
+      "personal_yuan": 85,
+      "receipt_count": 1
+    },
+    {
+      "date_from": "2026-11-03",
+      "date_to": "2026-11-03",
+      "label": "2026-11-03",
+      "personal_yuan": 420,
+      "receipt_count": 1
+    },
+    {
+      "date_from": "2026-11-05",
+      "date_to": "2026-11-05",
+      "label": "2026-11-05",
+      "personal_yuan": 160,
+      "receipt_count": 1
+    },
+    {
+      "date_from": "2026-11-08",
+      "date_to": "2026-11-08",
+      "label": "2026-11-08",
+      "personal_yuan": 250,
+      "receipt_count": 1
+    },
+    {
+      "date_from": "2026-11-10",
+      "date_to": "2026-11-10",
+      "label": "2026-11-10",
+      "personal_yuan": 140,
+      "receipt_count": 1
+    },
+    {
+      "date_from": "2026-11-11",
+      "date_to": "2026-11-11",
+      "label": "2026-11-11",
+      "personal_yuan": 199,
+      "receipt_count": 1
+    },
+    {
+      "date_from": "2026-11-12",
+      "date_to": "2026-11-12",
+      "label": "2026-11-12",
+      "personal_yuan": 95,
+      "receipt_count": 1
+    }
+  ],
+  "merchants": [
+    {
+      "key": "b04ef7b9ff6532ec454e21ebecc0aaf20754ac3648eb2888959b82bd368188e4",
+      "name": "日常生鮮",
+      "personal_yuan": 619,
+      "receipt_count": 2
+    },
+    {
+      "key": "f9bd8ccfb045cfb991626ebe8c140210a6062123c0424ff05afdd208e22cda34",
+      "name": "午間食堂",
+      "personal_yuan": 300,
+      "receipt_count": 2
+    },
+    {
+      "key": "c2ac2dd6735b07fd0fd3a16d54a974d17d57fba30ca1507f469da96786854d18",
+      "name": "日用選物",
+      "personal_yuan": 250,
+      "receipt_count": 1
+    },
+    {
+      "key": "4fe9889865469651eb945eea99d1092c7326bf1e875868dc3d6f936ac8a13119",
+      "name": "巷口早餐",
+      "personal_yuan": 180,
+      "receipt_count": 2
+    }
+  ],
+  "undated_receipt_count": 0,
+  "undated_personal_yuan": 0,
+  "excluded_undated_receipt_count": 0
+}

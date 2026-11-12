@@ -34,6 +34,7 @@ interface MobileApi {
     suspend fun updateItemNames(token: String, id: String, attempt: ReceiptMutation): String = throw UnsupportedOperationException()
     suspend fun voidLedger(token: String, id: String, attempt: ReceiptMutation): String = throw UnsupportedOperationException()
     suspend fun overview(token: String): String = throw UnsupportedOperationException()
+    suspend fun spending(token: String, path: String): String = throw UnsupportedOperationException()
     suspend fun appRelease(token: String): AppRelease = throw UnsupportedOperationException()
     suspend fun downloadAppUpdate(token: String, release: AppRelease, file: File, progress: (Long) -> Unit): Unit = throw UnsupportedOperationException()
 }
@@ -98,7 +99,7 @@ internal class HttpsMobileTransport(private val connectionFactory: (URL) -> Http
                     }
                     val body = http.inputStream.use { input ->
                         val output = java.io.ByteArrayOutputStream()
-                        val responseLimit = if (request.path.startsWith("v1/intakes") || request.path.startsWith("v1/drafts") || request.path.startsWith("v1/ledger") || request.path.startsWith("v2/drafts")) 16 * 1024 * 1024 else 64 * 1024
+                        val responseLimit = if (request.path.startsWith("v1/intakes") || request.path.startsWith("v1/drafts") || request.path.startsWith("v1/ledger") || request.path.startsWith("v1/spending?") || request.path.startsWith("v2/drafts")) 16 * 1024 * 1024 else 64 * 1024
                         val buffer = ByteArray(16 * 1024)
                         while (true) {
                             val n = input.read(buffer)
@@ -186,6 +187,10 @@ class HttpsMobileApi internal constructor(private val transport: MobileTransport
         require(attempt.kind == "ledger_names" && attempt.targetId == id); validateMutation(attempt)
         return transport.call(MobileRequest("v1/ledger/$id/item-names", "POST", token, json = attempt.body, idempotencyKey = attempt.key)).also { check(ledgerNamesObject(it).text("id") == id) }
     }
+    override suspend fun spending(token: String, path: String): String {
+        require(allowedSpendingRequest(path))
+        return transport.call(MobileRequest(path, token = token))
+    }
     override suspend fun overview(token: String): String = transport.call(MobileRequest("v1/overview", token = token)).also { overviewObject(it) }
     override suspend fun appRelease(token: String): AppRelease = parseAppRelease(transport.call(MobileRequest("v1/mobile/release", token = token)))
     override suspend fun downloadAppUpdate(token: String, release: AppRelease, file: File, progress: (Long) -> Unit) = apkDownload.download(token, release, file, progress)
@@ -198,6 +203,10 @@ class HttpsMobileApi internal constructor(private val transport: MobileTransport
         val summary = JsonObject().apply {
             addProperty("id", id); addProperty("status", status)
             add("draft_id", json["draft_id"] ?: com.google.gson.JsonNull.INSTANCE)
+            json["polling_finished"]?.let { value ->
+                check(value.isJsonPrimitive && value.asJsonPrimitive.isBoolean)
+                addProperty("polling_finished", value.asBoolean)
+            }
             listOf("job_key", "error_code", "created_at", "updated_at").forEach { name ->
                 json[name]?.takeUnless { it.isJsonNull }?.asString?.takeIf { it.length <= 256 }?.let { addProperty(name, it) }
             }
@@ -213,7 +222,7 @@ class HttpsMobileApi internal constructor(private val transport: MobileTransport
 internal fun allowedMobileRequest(path: String, method: String): Boolean {
     val uuid = "[0-9a-fA-F-]{36}"
     return when (method) {
-        "GET" -> path in setOf("v1/recognition", "v1/overview", "v1/mobile/release") || path.matches(Regex("v1/(intakes|drafts|ledger)/$uuid")) ||
+        "GET" -> allowedSpendingRequest(path) || path in setOf("v1/recognition", "v1/overview", "v1/mobile/release") || path.matches(Regex("v1/(intakes|drafts|ledger)/$uuid")) ||
             path.matches(Regex("v1/ledger\\?limit=20&offset=(0|[1-9][0-9]{0,5})"))
         "POST" -> path in setOf("v1/mobile/logout", "v2/mobile/login", "v2/mobile/logout", "v1/evidence", "v1/intakes") ||
             path.matches(Regex("v2/drafts/$uuid/confirm")) || path.matches(Regex("v1/(intakes|drafts)/$uuid/delete")) || path.matches(Regex("v1/ledger/$uuid/(void|item-names)"))

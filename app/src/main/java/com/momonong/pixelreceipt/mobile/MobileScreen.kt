@@ -13,7 +13,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.momonong.pixelreceipt.data.ingestion.ImageStore
 
-internal enum class MobilePage { Inbox, Detail, Settings, Review, Ledger, LedgerDetail, Help }
+internal enum class MobilePage { Inbox, Detail, Settings, Review, Ledger, LedgerDetail, Help, Spending }
 internal data class MobileUiState(
     val ready: Boolean = true,
     val batches: List<MobileBatch> = emptyList(),
@@ -38,6 +38,7 @@ internal data class MobileUiState(
     val accountingError: String? = null,
     val duplicateShare: DuplicateShareReminder? = null,
     val appUpdate: AppUpdateState = AppUpdateState(),
+    val spending: SpendingUiState = SpendingUiState(),
 ) {
     val batch: MobileBatch? get() = batches.firstOrNull { it.id == selectedId }
 }
@@ -75,12 +76,19 @@ internal class MobileActions(
     val cancelDuplicate: (DuplicateShareReminder) -> Unit = {},
     val openDuplicate: (DuplicateShareReminder, String) -> Unit = { _, _ -> },
     val sendSeparateDuplicate: (DuplicateShareReminder) -> Unit = {},
+    val spending: () -> Unit = {},
+    val refreshSpending: () -> Unit = {},
+    val spendingPeriod: (SpendingPeriod) -> Unit = {},
+    val spendingRange: (java.time.LocalDate, java.time.LocalDate) -> Unit = { _, _ -> },
+    val spendingSelect: (SpendingSelection) -> Unit = {},
+    val moreSpending: () -> Unit = {},
 )
 
 @Composable
 fun MobileScreen(viewModel: MobileViewModel) {
     MobileSystemBars()
     val update by viewModel.appUpdate.collectAsStateWithLifecycle()
+    val spending by viewModel.spendingState.collectAsStateWithLifecycle()
     val persisted by viewModel.state.collectAsStateWithLifecycle()
     val selected by viewModel.selected.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -106,7 +114,7 @@ fun MobileScreen(viewModel: MobileViewModel) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(20), viewModel::picked)
     val state = MobileUiState(persisted != null, persisted?.batches.orEmpty(), selected,
         if (settings) MobilePage.Settings else MobilePage.valueOf(destination),
-        signedIn, busy, message, engines, writable, edits, reviewer, persisted?.ledgerJson, persisted?.ledgerUpdatedAt, selectedLedger, savingReview, reviewEdits.keys, persisted?.ledgerDetailsJson, persisted?.mutations.orEmpty(), persisted?.overviewJson, persisted?.accountingStale == true, persisted?.accountingError, duplicate, update)
+        signedIn, busy, message, engines, writable, edits, reviewer, persisted?.ledgerJson, persisted?.ledgerUpdatedAt, selectedLedger, savingReview, reviewEdits.keys, persisted?.ledgerDetailsJson, persisted?.mutations.orEmpty(), persisted?.overviewJson, persisted?.accountingStale == true, persisted?.accountingError, duplicate, update, spending)
     val actions = MobileActions(
         checkAppUpdate = viewModel::checkAppUpdate, downloadAppUpdate = viewModel::downloadAppUpdate,
         installAppUpdate = viewModel::installAppUpdate, cancelAppUpdate = viewModel::cancelAppUpdate,
@@ -118,6 +126,8 @@ fun MobileScreen(viewModel: MobileViewModel) {
         ledgerDetail = viewModel::openLedger, refreshLedger = viewModel::refreshLedger,
         editReview = viewModel::editReview, saveReview = viewModel::saveReview, confirmReview = viewModel::confirmReview,
         compareReview = viewModel::compareReview, resolveReview = viewModel::resolveReview, deleteBatch = viewModel::deleteBatch, voidEntry = viewModel::voidEntry, updateItemNames = viewModel::updateItemNames,
+        spending = viewModel::spending, refreshSpending = viewModel::refreshSpending, spendingPeriod = viewModel::spendingPeriod,
+        spendingRange = viewModel::spendingRange, spendingSelect = viewModel::selectSpending, moreSpending = viewModel::moreSpending,
         cancelDuplicate = viewModel::cancelDuplicateShare, openDuplicate = viewModel::openDuplicateShare, sendSeparateDuplicate = viewModel::sendSeparateDuplicate,
     )
     MobileContent(state, viewModel.images, actions)

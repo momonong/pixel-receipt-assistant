@@ -19,6 +19,7 @@ class ReceiptApplication : Application() {
             ImageStore(File(root, "images")),
             com.momonong.pixelreceipt.mobile.KeystoreTokenVault(root),
             com.momonong.pixelreceipt.mobile.HttpsMobileApi(),
+            com.momonong.pixelreceipt.mobile.MobileSpendingCacheFile(File(cacheDir, "spending-analysis")),
         )
     }
     val database by lazy { ReceiptDatabase.open(this) }

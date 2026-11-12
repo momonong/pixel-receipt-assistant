@@ -124,3 +124,23 @@ repo 根目錄另跑 `python3 -m unittest discover -s scripts/tests -v`；真實
 本次後端 **313 tests 通過**，Ruff 靜態／格式檢查與 Dashboard **39 tests** 通過。Android 同版整合驗證由原生發行 gate 核對；既有 0.5.0 的 304 tests 證據不代表此版手機已更新。公開 scripts 測試 **32 passed／1 historical migration skipped**；該歷史案例需要隔離的舊 v3 runtime 與外部凍結 v4 source，不屬於一般 current-runtime 測試。私有主機部署工具測試不列為公開 release gate。
 
 測試使用合成 bytes／文字與隔離資料庫，不能代替真實辨識品質、正式資料還原演練或真人帳務接受。ASUS 後端與0.5.0認證 APK 下載已部署，手機更新與人工接受待驗；當前公開範圍見 [發行說明](../docs/RELEASE_v0.5.0.md)。
+
+## 支出分析（原生唯讀儀表板）
+
+`GET /v1/spending?date_from=2026-10-01&date_to=2026-10-31&compare_from=2026-09-01&compare_to=2026-09-30&bucket=auto`
+沿用讀者／reviewer 認證，回覆完整 active confirmed ledger 的 `summary`、`comparison`、
+`series`、`merchants` 與未填日期筆數；金額為 TWD 整數元，與 `/v1/overview` 相同定義。
+主摘要及比較在單一 SQLite 讀取快照完成，不受帳本列表的 limit／offset 影響。
+日期包含邊界，比較日期必須成對。`bucket=auto|day|month|year`；auto 在包含邊界的期間
+最多 90 日用 day，其後最多 120 曆月用 month，更長用 year。桶的理論範圍最多 1000，
+超出回 422 `spending_bucket_limit_exceeded`；只回有帳目的桶，不填虛構日期或空桶。
+全部期間的缺日期帳目仍計入 summary／merchants，另外回報 `undated_receipt_count`、
+`undated_personal_yuan`；期間篩選排除的缺日期筆數是 `excluded_undated_receipt_count`。
+
+點選店家使用 `GET /v1/ledger?status=active&merchant_key=<64位hex>&limit=20&offset=0`；
+缺日期明細用 `GET /v1/ledger?status=active&undated_only=true`。
+兩種篩選皆在分頁前執行，可與 q／status 組合；undated_only 與日期界限衝突回 422。
+merchant key 為空值／原始店名 canonical JSON 的 SHA-256，空白店名與 null 合為 null；
+其餘名稱保留大小寫、空格與分店差異，不以搜尋字串推測身份。列表 entry 的
+`merchant_key` 是回傳註記，不改確認 snapshot、歷史或 DB schema。
+詳細定義見 [價格與支出契約](../docs/PRICE_ANALYSIS_CONTRACT.md)。
