@@ -18,9 +18,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.momonong.pixelreceipt.R
 import com.momonong.pixelreceipt.data.ingestion.ImageStore
 import com.momonong.pixelreceipt.feature.inbox.EvidencePhoto
 import java.text.SimpleDateFormat
@@ -69,7 +71,7 @@ internal fun MobileContent(state: MobileUiState, images: ImageStore, actions: Mo
                         TopAppBar(title = {
                             if (state.page == MobilePage.Inbox) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 ReceiptMark()
-                                Text("PixelReceipt", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             } else Text(when (state.page) {
                                 MobilePage.Settings -> "設定"
                                 MobilePage.Review -> "核對收據"

@@ -11,11 +11,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.momonong.pixelreceipt.BuildConfig
+import com.momonong.pixelreceipt.R
 
 @Composable
 internal fun MobileSettings(state: MobileUiState, password: String, changePassword: (String) -> Unit, actions: MobileActions, modifier: Modifier) {
@@ -81,7 +83,7 @@ internal fun MobileSettings(state: MobileUiState, password: String, changePasswo
                 TextButton(onClick = actions.legacy, enabled = state.busy == null, contentPadding = PaddingValues(0.dp), modifier = Modifier.heightIn(min = 48.dp).testTag("legacy-ledger-entry")) { Text("開啟此 App 的本機帳本 ›") }
             }
         }
-        item { Text("PixelReceipt 收件匣 ${BuildConfig.VERSION_NAME} · 核對、入帳與帳本", style = MaterialTheme.typography.bodySmall, color = MobileMuted) }
+        item { Text("${stringResource(R.string.app_name)} ${BuildConfig.VERSION_NAME} · 核對、入帳與帳本", style = MaterialTheme.typography.bodySmall, color = MobileMuted) }
     }
 }
 
