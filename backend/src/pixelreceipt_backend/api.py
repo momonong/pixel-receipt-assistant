@@ -336,10 +336,21 @@ def create_app(
         date_from: Annotated[str | None, Query(max_length=10)] = None,
         date_to: Annotated[str | None, Query(max_length=10)] = None,
         status: Literal["active", "voided"] | None = None,
+        merchant_key: Annotated[str | None, Query(pattern=r"^[0-9a-fA-F]{64}$")] = None,
+        undated_only: bool = False,
     ):
         check_dates(date_from, date_to)
+        if undated_only and (date_from is not None or date_to is not None):
+            raise HTTPException(422, "undated_only_date_conflict")
         return analysis.list_ledger(
-            limit, offset, q=q, date_from=date_from, date_to=date_to, status=status
+            limit,
+            offset,
+            q=q,
+            date_from=date_from,
+            date_to=date_to,
+            status=status,
+            merchant_key=merchant_key,
+            undated_only=undated_only,
         )
 
     @api.get("/v1/ledger/{ledger_id}")
@@ -402,6 +413,26 @@ def create_app(
     ):
         check_dates(date_from, date_to)
         return analysis.product_prices(product_id, limit, offset, date_from, date_to)
+
+    @api.get("/v1/spending")
+    def spending(
+        date_from: Annotated[str | None, Query(max_length=10)] = None,
+        date_to: Annotated[str | None, Query(max_length=10)] = None,
+        compare_from: Annotated[str | None, Query(max_length=10)] = None,
+        compare_to: Annotated[str | None, Query(max_length=10)] = None,
+        bucket: Literal["auto", "day", "month", "year"] = "auto",
+    ):
+        check_dates(date_from, date_to)
+        check_dates(compare_from, compare_to)
+        if (compare_from is None) != (compare_to is None):
+            raise HTTPException(422, "comparison_dates_required")
+        return analysis.spending(
+            date_from=date_from,
+            date_to=date_to,
+            compare_from=compare_from,
+            compare_to=compare_to,
+            bucket=bucket,
+        )
 
     @api.get("/v1/overview")
     def overview(

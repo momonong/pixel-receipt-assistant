@@ -19,7 +19,17 @@ class MobileRepository(
     val images: ImageStore,
     private val vault: TokenVault,
     private val api: MobileApi,
+    private val spendingCacheFile: MobileSpendingCacheFile? = null,
 ) : MobileUpdateSource {
+    internal suspend fun spendingRead(path: String): String = withContext(Dispatchers.IO) {
+        require(allowedSpendingRequest(path))
+        authenticated { api.spending(it, path) }
+    }
+    internal fun cachedSpending(): MobileSpendingCache? = spendingCacheFile?.read()
+    internal suspend fun cacheSpending(value: MobileSpendingCache, expectedMarker: String, stillCurrent: () -> Boolean): Boolean = withContext(Dispatchers.IO) {
+        if (value.marker != expectedMarker) false
+        else spendingCacheFile?.write(value, { spendingMarker(store.load()) }, stillCurrent) ?: false
+    }
     private val operation = Mutex()
     override suspend fun appRelease(): AppRelease = withContext(Dispatchers.IO) { authenticated { api.appRelease(it) } }
     override suspend fun downloadAppUpdate(release: AppRelease, file: File, progress: (Long) -> Unit): Unit = withContext(Dispatchers.IO) { authenticated { api.downloadAppUpdate(it, release, file, progress) } }

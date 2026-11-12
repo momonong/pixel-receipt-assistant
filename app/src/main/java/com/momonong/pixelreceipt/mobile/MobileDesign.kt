@@ -60,25 +60,13 @@ internal fun ReceiptMark(modifier: Modifier = Modifier, color: Color = MobileTea
     }
 }
 
-internal fun mobileStatus(batch: MobileBatch): String = when {
-    batch.deleted -> "已刪除"
-    !batch.importComplete -> "待補照片"
-    batch.ledgerStatus == "voided" || batch.draftStatus == "voided" -> "已作廢"
-    batch.ledgerStatus == "active" || batch.draftStatus == "confirmed" -> "已完成"
-    batch.status == "succeeded" -> if (batch.purpose == "reference") "成果待查看" else "待核對"
-    batch.status in setOf("queued", "preparing", "submitting", "processing") -> "中央處理中"
-    batch.status == "unknown" -> "結果待查詢"
-    batch.status == "failed" -> "辨識未完成"
-    batch.status == "unavailable" -> "來源未就緒"
-    batch.frozen != null -> "等待同步"
-    else -> "尚未送出"
-}
+internal fun mobileStatus(batch: MobileBatch): String = receiptStatus(batch).label
 
 internal fun mobileNextStep(batch: MobileBatch): String = when {
     batch.deleted -> "返回收件匣"
-    !batch.importComplete -> "補齊照片"
     batch.ledgerStatus == "voided" || batch.draftStatus == "voided" -> "查看作廢紀錄"
     batch.ledgerStatus == "active" || batch.draftStatus == "confirmed" -> "查看已完成帳目"
+    !batch.importComplete -> "補齊照片"
     batch.status == "succeeded" -> if (batch.purpose == "reference") "查看參考成果" else "前往帳本核對"
     batch.intakeId != null -> "查詢原工作進度"
     batch.frozen != null -> "繼續同步原請求"

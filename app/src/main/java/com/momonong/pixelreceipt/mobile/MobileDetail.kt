@@ -66,7 +66,7 @@ internal fun MobileDetail(state: MobileUiState, images: ImageStore, actions: Mob
                 Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("這批原圖", style = MaterialTheme.typography.titleSmall)
-                        StatusTag(mobileStatus(batch), problem = !batch.importComplete || batch.status in setOf("failed", "unknown", "unavailable"))
+                        StatusTag(receiptStatus(batch, state.mutations).label, problem = !batch.importComplete || batch.status in setOf("failed", "unknown", "unavailable"))
                     }
                     if (batch.images.isNotEmpty()) {
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {

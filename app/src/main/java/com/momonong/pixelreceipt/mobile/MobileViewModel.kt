@@ -10,6 +10,11 @@ import com.momonong.pixelreceipt.data.ingestion.ImportInput
 import com.momonong.pixelreceipt.data.ingestion.openSharedImage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
@@ -63,6 +68,31 @@ class MobileViewModel @JvmOverloads constructor(
     private val appUpdater = MobileUpdateController(viewModelScope, repository, AndroidMobileUpdateHost(application), com.momonong.pixelreceipt.BuildConfig.VERSION_CODE) {
         signedInMutable.value = false; reviewerMutable.value = false
     }
+    private val spendingSaved = MobileSpendingSavedState(saved)
+    private val spendingController = MobileSpendingController(viewModelScope, object : MobileSpendingSource {
+        override fun marker() = spendingMarker(repository.store.state.value ?: error("Receipt state not loaded"))
+        override fun cached() = repository.cachedSpending()
+        override suspend fun report(query: SpendingQuery) = repository.spendingRead(query.summaryPath())
+        override suspend fun entries(query: SpendingQuery, selection: SpendingSelection, offset: Int) = repository.spendingRead(query.ledgerPath(selection, offset))
+        override suspend fun saveCache(value: MobileSpendingCache, expectedMarker: String, stillCurrent: () -> Boolean) = repository.cacheSpending(value, expectedMarker, stillCurrent)
+    }, spendingSaved.period, spendingSaved.query, spendingSaved.selection, spendingSaved::save) {
+        signedInMutable.value = false; reviewerMutable.value = false
+    }
+    internal val spendingState = spendingController.state
+    internal fun spending() {
+        duplicateMutable.value = null; saved["mobileSettings"] = false; saved["mobileDestination"] = MobilePage.Spending.name
+        if (signedIn.value) activateSpending()
+    }
+    internal fun refreshSpending() { if (signedIn.value) activateSpending(force = true) else openSettings(true) }
+    private fun activateSpending(force: Boolean = false) {
+        val current = spendingState.value
+        if (current.period != SpendingPeriod.Custom && current.query != SpendingQuery.forPeriod(current.period)) spendingController.show(current.period)
+        else if (force) spendingController.refresh() else spendingController.ensureLoaded()
+    }
+    internal fun spendingPeriod(period: SpendingPeriod) { if (signedIn.value) spendingController.show(period) }
+    internal fun spendingRange(from: java.time.LocalDate, to: java.time.LocalDate) { if (signedIn.value) spendingController.custom(from, to) }
+    internal fun selectSpending(selection: SpendingSelection) { if (signedIn.value) spendingController.select(selection) }
+    internal fun moreSpending() { if (signedIn.value) spendingController.loadMore() }
     internal val appUpdate = appUpdater.state
     fun checkAppUpdate() = appUpdater.check()
     fun downloadAppUpdate() = appUpdater.download()
@@ -71,8 +101,27 @@ class MobileViewModel @JvmOverloads constructor(
 
     init {
         viewModelScope.launch {
-            try { signedInMutable.value = repository.initialize(); reviewerMutable.value = repository.reviewerSession() }
+            try {
+                signedInMutable.value = repository.initialize(); reviewerMutable.value = repository.reviewerSession()
+                if (signedIn.value) {
+                    withContext(Dispatchers.IO) { spendingController.restore() }
+                    if (destination.value == MobilePage.Spending.name) spendingController.ensureLoaded()
+                }
+            }
             catch (error: Exception) { if (error is CancellationException) throw error; messageMutable.value = mobileError(error) }
+        }
+    }
+    // Receipt edits and photo imports do not invalidate a derived financial report.
+    private var observedSpendingMarker: String? = null
+    init {
+        viewModelScope.launch {
+            repository.store.state.filterNotNull().map { spendingMarker(it) }.distinctUntilChanged().collect { marker ->
+                val prior = observedSpendingMarker; observedSpendingMarker = marker
+                if (prior != null && prior != marker) {
+                    spendingController.invalidate()
+                    if (signedIn.value && destination.value == MobilePage.Spending.name && !settings.value) spendingController.ensureLoaded()
+                }
+            }
         }
     }
     fun openLegacy(open: Boolean) { duplicateMutable.value = null; legacyMutable.value = open }
@@ -89,6 +138,7 @@ class MobileViewModel @JvmOverloads constructor(
             MobilePage.LedgerDetail.name -> saved["mobileDestination"] = saved.get<String>("mobileLedgerReturn") ?: MobilePage.Ledger.name
             else -> select(null)
         }
+        if (!settings.value && destination.value == MobilePage.Spending.name && signedIn.value) spendingController.ensureLoaded()
     }
     fun help() { duplicateMutable.value = null; saved["mobileHelpReturn"] = destination.value; saved["mobileDestination"] = MobilePage.Help.name }
     fun ledger() { duplicateMutable.value = null; saved["mobileSettings"] = false; saved["mobileDestination"] = MobilePage.Ledger.name; refreshLedger() }
@@ -123,6 +173,7 @@ class MobileViewModel @JvmOverloads constructor(
         val now = System.currentTimeMillis()
         if (!signedIn.value || busy.value != null || now - refreshedAt < 30_000) return
         refreshedAt = now
+        if (destination.value == MobilePage.Spending.name && !settings.value) activateSpending(force = true)
         online("正在更新已保存狀態…") {
             val batches = repository.store.state.value?.batches.orEmpty().filter { it.intakeId != null && !it.deleted }
             val chosen = if (batches.isEmpty()) emptyList() else List(minOf(8, batches.size)) { batches[(refreshCursor + it) % batches.size] }
@@ -255,15 +306,16 @@ class MobileViewModel @JvmOverloads constructor(
         }
     }
     fun login(password: String) = online("正在登入…") {
-        appUpdater.sessionChanged()
+        appUpdater.sessionChanged(); spendingController.sessionChanged()
         repository.login(password)
         signedInMutable.value = true
         reviewerMutable.value = repository.reviewerSession()
         messageMutable.value = "已登入，可在 App 內核對與入帳。"
         enginesMutable.value = repository.availability()
+        if (destination.value == MobilePage.Spending.name) spendingController.ensureLoaded()
     }
     fun logout() = online("正在登出…") {
-        appUpdater.sessionChanged()
+        appUpdater.sessionChanged(); spendingController.sessionChanged()
         try {
             val revoked = repository.logout()
             messageMutable.value = if (revoked) "已登出；照片與待傳資料保留。" else "已清除本機登入；中央撤銷尚未確認，請在網頁的裝置管理撤銷此裝置。"

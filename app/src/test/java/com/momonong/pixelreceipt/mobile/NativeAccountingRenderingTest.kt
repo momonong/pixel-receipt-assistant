@@ -190,6 +190,11 @@ class NativeAccountingRenderingTest {
         ui.runOnIdle { current.value = current.value.copy(page = MobilePage.Detail) }
         ui.onNodeWithText("查看已完成帳目").assertIsDisplayed()
         ui.runOnIdle { current.value = current.value.copy(batches = listOf(active.copy(draftStatus = "voided", ledgerStatus = "voided")), page = MobilePage.Inbox) }
+        ui.onNodeWithTag("mobile-batch-${active.id}").assertDoesNotExist()
+        ui.onNodeWithTag("receipt-filter-open").performClick()
+        ui.onNodeWithTag("receipt-filter-list").performScrollToNode(hasTestTag("receipt-filter-status-voided"))
+        ui.onNodeWithTag("receipt-filter-status-voided").performClick()
+        ui.onNodeWithTag("receipt-filter-apply").performClick()
         ui.onNodeWithText("已作廢").assertIsDisplayed(); capture("native-inbox-voided-390")
         ui.runOnIdle { current.value = current.value.copy(page = MobilePage.Detail) }
         ui.onNodeWithText("查看作廢紀錄").assertIsDisplayed()

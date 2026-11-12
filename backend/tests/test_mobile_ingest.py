@@ -563,6 +563,8 @@ def test_v3_to_v4_preserves_rows_and_future_version_refuses(store, body):
         (9, "0.5.2"),
         (10, "0.5.3"),
         (11, "0.5.4"),
+        (12, "0.5.5"),
+        (13, "0.6.0"),
     ],
 )
 def test_mobile_release_authenticated_fixed_metadata_streaming_integrity(

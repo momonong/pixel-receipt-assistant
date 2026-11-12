@@ -49,3 +49,42 @@
 - 3 元按同額兩列分配為 2／1，重算一致；0 元基準需要明確指定。
 - 作廢後從摘要與比較退出，仍能查看原帳本與核對歷史。
 - 超大整數、日期篩選、分頁與字串輸入不得造成錯算、靜默截斷或注入。
+
+## 原生支出分析 API
+
+`GET /v1/spending` 是已認證的唯讀投影，不建立價格註記、不改帳本、不調用推論。
+`scope=active_confirmed_ledger`、`currency=TWD`、`amount_unit=TWD_YUAN`。
+`summary` 包含 overview 既有七種計算金額及 `explicit_discount_yuan`、`receipt_count`、
+`missing_item_name_count`、`receipts_missing_item_names`；不含 overview 的 scope／日期 metadata。
+個人支出為 self + gift，代買已經排除；明列折扣只呈現原定義，內含折扣不再次扣款。
+所有金額保持整數，不傳浮點百分比；摘要或比較超出 Long.MAX_VALUE 明確回
+422 `summary_amount_out_of_range`，不截斷或近似。缺品名依目前帳本顯示名稱統計。
+
+參數 `date_from/date_to` 可各自省略；`compare_from/compare_to` 必須成對，皆為有效
+YYYY-MM-DD，包含起訖日；無效或反向日期回 422 `invalid_date_range`，缺比較一端回
+422 `comparison_dates_required`。回覆 `comparison=null` 或
+`{date_from,date_to,personal_yuan,receipt_count,delta_personal_yuan}`，差額是主期間減比較期間。
+比較與主摘要、作廢狀態、品名都在單一 SQLite read transaction 內讀取同一份完整 active
+帳本；沒有基期支出時仍回已知的零元與筆數，不造百分比。
+
+`bucket=auto|day|month|year`：有明確日期界限就以界限計算，省略的一端以所選帳目最早／晚
+日期定界。auto 在包含邊界最多 90 日選 day；較長但最多 120 曆月選 month；超過選 year。
+沒有已知日期且未指定期間時選 day 並回空 series。理論桶數最多 1000（即使資料稀疏也驗證），
+超出回 422 `spending_bucket_limit_exceeded`。`series` 按時間排序，元素
+`{date_from,date_to,label,personal_yuan,receipt_count}`，起訖裁至查詢界限；label 分別為
+YYYY-MM-DD／YYYY-MM／YYYY，只傳有帳目的桶。前端依真實時間定位，不能把相隔數月的
+兩桶畫為相鄰日期。全部期間缺日期帳目計入摘要與店家，但不虛構 series 日期；以
+`undated_receipt_count/undated_personal_yuan` 表達。期間篩選排除的 active 缺日期筆數是
+`excluded_undated_receipt_count`。
+
+`merchants` 按個人支出由高到低、同額依 key 排序，元素
+`{key,name,personal_yuan,receipt_count}`。name 為原始店名或 null；None、空字串及純空白
+標準化為 null，其餘原文精確保留。key 計算為 UTF-8 canonical JSON 的 SHA-256
+（ensure_ascii=false、sort_keys=true、separators=(',', ':')）；這是穩定識別，非憑證。
+例如 null 的 JSON bytes 為 `null`，名稱字串保留 JSON 引號，不能與同名字面的字串混淆。
+
+`GET /v1/ledger` 新增 `merchant_key`（64 位 hex，大小寫均接受）與 `undated_only`；
+先套用 q、status、日期及上述精確篩選才分頁；不存在的有效 key 回空頁。undated_only=true
+與任一日期界限一起使用回 422 `undated_only_date_conflict`。分析明細固定 status=active。
+列表每個 entry 增加 merchant_key 作為 representation，不修改 snapshot、事件、schema。
+本次沒有 migration、價格重算、帳本寫入或正式資料操作。

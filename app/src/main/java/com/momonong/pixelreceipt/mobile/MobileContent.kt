@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,11 +39,20 @@ internal fun MobileContent(state: MobileUiState, images: ImageStore, actions: Mo
         outline = Color(0xFF7C918B), outlineVariant = MobileRule, error = Color(0xFF963C36),
     )
     val inboxScroll = rememberLazyListState()
+    var receiptFilterKey by rememberSaveable { mutableStateOf("normal") }
+    var appliedFilterKey by remember { mutableStateOf(receiptFilterKey) }
+    LaunchedEffect(receiptFilterKey) {
+        if (appliedFilterKey != receiptFilterKey) {
+            appliedFilterKey = receiptFilterKey
+            inboxScroll.scrollToItem(0)
+        }
+    }
     val detailScroll = rememberLazyListState()
     val reviewScroll = rememberLazyListState()
     val ledgerScroll = rememberLazyListState()
     val ledgerDetailScroll = rememberLazyListState()
     val helpScroll = rememberLazyListState()
+    val spendingScroll = rememberLazyListState()
     LaunchedEffect(state.selectedId) { detailScroll.scrollToItem(0) }
     var password by remember { mutableStateOf("") }
     DisposableEffect(state.page) { onDispose { password = "" } }
@@ -59,18 +69,19 @@ internal fun MobileContent(state: MobileUiState, images: ImageStore, actions: Mo
                         TopAppBar(title = {
                             if (state.page == MobilePage.Inbox) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 ReceiptMark()
-                                Text("PixelReceipt", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                Text("PixelReceipt", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             } else Text(when (state.page) {
                                 MobilePage.Settings -> "設定"
                                 MobilePage.Review -> "核對收據"
                                 MobilePage.Ledger -> "帳本"
                                 MobilePage.LedgerDetail -> "帳目明細"
                                 MobilePage.Help -> "使用說明"
+                                MobilePage.Spending -> "支出分析"
                                 else -> if (state.batch?.editable == true) "照片與說明" else "收件進度"
                             },
                                 style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }, navigationIcon = {
-                            if (state.page != MobilePage.Inbox) TextButton(onClick = actions.back, modifier = Modifier.heightIn(min = 48.dp).testTag("mobile-back")) { Text("‹ 返回") }
+                            if (state.page !in setOf(MobilePage.Inbox, MobilePage.Spending)) TextButton(onClick = actions.back, modifier = Modifier.heightIn(min = 48.dp).testTag("mobile-back")) { Text("‹ 返回") }
                         }, actions = {
                             if (state.page != MobilePage.Help) TextButton(onClick = actions.help, modifier = Modifier.heightIn(min = 48.dp).testTag("mobile-help")) { Text("說明") }
                             if (state.page != MobilePage.Settings) TextButton(onClick = actions.settings, modifier = Modifier.heightIn(min = 48.dp).testTag("mobile-settings")) { Text("設定") }
@@ -81,15 +92,16 @@ internal fun MobileContent(state: MobileUiState, images: ImageStore, actions: Mo
             ) { padding ->
                 Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
                     // At 390: 20 + 350 + 20. At 840: 20 + 800 + 20; a shared edge for each screen.
-                    val width = Modifier.widthIn(max = 840.dp).fillMaxSize()
+                    val width = Modifier.widthIn(max = if (state.page == MobilePage.Spending) 1200.dp else 840.dp).fillMaxSize()
                     when (state.page) {
-                        MobilePage.Inbox -> MobileInbox(state, images, actions, width, inboxScroll)
+                        MobilePage.Inbox -> MobileInbox(state, images, actions, width, inboxScroll, restoreReceiptFilter(receiptFilterKey)) { receiptFilterKey = it.key }
                         MobilePage.Detail -> MobileDetail(state, images, actions, width, detailScroll)
                         MobilePage.Settings -> MobileSettings(state, password, { password = it }, actions, width)
                         MobilePage.Review -> MobileReviewScreen(state, images, actions, width, reviewScroll)
                         MobilePage.Ledger -> MobileLedger(state, actions, width, ledgerScroll)
                         MobilePage.LedgerDetail -> MobileLedgerDetail(state, images, actions, width, ledgerDetailScroll)
                         MobilePage.Help -> MobileHelp(width, helpScroll)
+                        MobilePage.Spending -> MobileSpendingScreen(state, actions, width, spendingScroll)
                     }
                 }
             }
@@ -99,7 +111,7 @@ internal fun MobileContent(state: MobileUiState, images: ImageStore, actions: Mo
 
 @Composable
 private fun MobilePrimaryBar(state: MobileUiState, password: String, login: (String) -> Unit, actions: MobileActions, compactInput: Boolean) {
-    if (state.page in setOf(MobilePage.Review, MobilePage.Ledger, MobilePage.LedgerDetail, MobilePage.Help)) {
+    if (state.page in setOf(MobilePage.Review, MobilePage.Ledger, MobilePage.LedgerDetail, MobilePage.Help, MobilePage.Spending)) {
         NativePrimaryBar(state, actions, compactInput)
         return
     }
@@ -108,6 +120,7 @@ private fun MobilePrimaryBar(state: MobileUiState, password: String, login: (Str
     val pending = state.mutations.lastOrNull { it.batchId == batch?.id && it.phase == "pending" }?.takeIf { state.page == MobilePage.Detail }
     // Completing an import is a picker action, so submission validation must not trap the user.
     val hint = batch?.takeIf { state.page == MobilePage.Detail && it.editable && it.importComplete }?.let(::validationHint)
+    val formal = batch?.ledgerId != null || batch?.draftStatus in setOf("confirmed", "voided") || batch?.ledgerStatus in setOf("active", "voided")
     val localUnavailable = batch?.engine == "local" && batch.intakeId == null && state.engines["local"]?.available != true
     val label = when {
         state.busy != null -> state.busy
@@ -117,8 +130,8 @@ private fun MobilePrimaryBar(state: MobileUiState, password: String, login: (Str
         edit != null -> if (edit.error != null) "重試儲存目前編輯" else "正在保存編輯…"
         state.page == MobilePage.Settings -> if (state.signedIn && state.reviewer) "返回收件" else "登入此裝置"
         state.page == MobilePage.Inbox || batch == null -> "新增收件・選照片"
+        formal -> if (batch.ledgerId == null) "讀取正式帳目" else if (batch.ledgerStatus == "voided") "查看作廢紀錄" else "查看已完成帳目"
         !batch.importComplete -> "補齊照片"
-        batch.ledgerId != null -> if (batch.ledgerStatus == "voided") "查看作廢紀錄" else "查看已完成帳目"
         batch.intakeId != null && batch.status == "succeeded" -> if (batch.draftId != null) "前往帳本核對" else "開啟中央帳本"
         !state.signedIn -> if (batch.intakeId != null) "登入後更新進度" else "登入後送出"
         batch.intakeId != null -> "更新進度"
@@ -141,8 +154,8 @@ private fun MobilePrimaryBar(state: MobileUiState, password: String, login: (Str
                     state.page == MobilePage.Inbox -> "一批照片，一筆收件；由你核對後入帳。"
                     batch?.deleted == true -> "收據已刪除，原圖與歷史資料保留。"
                     pending != null -> "${pending.resultLabel}結果尚未確認；將查詢原 ID，沿用原請求。"
+                    formal -> if (batch?.ledgerStatus == "voided" || batch?.draftStatus == "voided") "中央已作廢，原入帳內容保留。" else "中央已確認入帳，可查看品項與用途。"
                     batch?.importComplete == false -> "請重新選取完整批次，保留已匯入原圖。"
-                    batch?.ledgerId != null -> if (batch.ledgerStatus == "voided") "中央已作廢，原入帳內容保留。" else "中央已確認入帳，可查看品項與用途。"
                     batch?.intakeId != null && batch.status == "succeeded" -> "在 App 內核對金額與用途，再確認入帳。"
                     batch?.frozen != null -> "中央已確認原圖 ${batch.uploadedHashes.size} / ${batch.images.size} 張"
                     else -> "送出原圖與說明；送出後鎖定本批內容。"
@@ -155,8 +168,8 @@ private fun MobilePrimaryBar(state: MobileUiState, password: String, login: (Str
                         pending != null -> actions.retryReceiptMutation(pending)
                         state.page == MobilePage.Settings -> if (state.signedIn && state.reviewer) actions.back() else login(password)
                         state.page == MobilePage.Inbox || batch == null -> actions.pick(null)
+                        formal -> if (batch.ledgerId != null) actions.ledgerDetail(batch.ledgerId) else actions.dashboard(batch.draftId)
                         !batch.importComplete -> actions.pick(batch.id)
-                        batch.ledgerId != null -> actions.ledgerDetail(batch.ledgerId)
                         batch.intakeId != null && batch.status == "succeeded" -> actions.dashboard(batch.draftId)
                         !state.signedIn || localUnavailable -> actions.settings()
                         else -> actions.sync(batch.id)
@@ -174,15 +187,28 @@ private fun MobilePrimaryBar(state: MobileUiState, password: String, login: (Str
 }
 
 @Composable
-private fun MobileInbox(state: MobileUiState, images: ImageStore, actions: MobileActions, modifier: Modifier, list: LazyListState) {
+private fun MobileInbox(state: MobileUiState, images: ImageStore, actions: MobileActions, modifier: Modifier, list: LazyListState, filter: ReceiptFilter, setFilter: (ReceiptFilter) -> Unit) {
+    var filterOpen by remember { mutableStateOf(false) }
+    val statuses = state.batches.associate { it.id to receiptStatus(it, state.mutations) }
+    val visible = state.batches.filter { filter.includes(statuses.getValue(it.id)) }
+    val attention = statuses.values.count { it.attention }
+    if (filterOpen) ReceiptFilterSheet(filter, statuses.values.toList(), { filterOpen = false }) { setFilter(it); filterOpen = false }
+
     LazyColumn(modifier.testTag("mobile-inbox"), state = list, contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp, top = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Column(Modifier.padding(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("收件匣", style = MaterialTheme.typography.headlineMedium)
+                Text("收據管理", style = MaterialTheme.typography.headlineMedium)
                 FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("中央收件匣 · ${state.batches.count { !it.deleted }} 筆收件", style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
+                    Text("顯示 ${visible.size} / ${state.batches.size} 筆", style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
                     Text(if (state.signedIn) "裝置已登入" else "尚未登入", style = MaterialTheme.typography.bodySmall, color = MobileMuted)
                 }
+            }
+        }
+        item {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                OutlinedButton(onClick = { filterOpen = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("receipt-filter-open")) { Text("${filter.label} ▾") }
+                if (filter.key != "normal") TextButton(onClick = { setFilter(ReceiptFilter()) }, modifier = Modifier.heightIn(min = 48.dp).testTag("receipt-filter-reset")) { Text("重設") }
+                if (attention > 0) TextButton(onClick = { setFilter(ReceiptFilter("attention")) }, modifier = Modifier.heightIn(min = 48.dp).testTag("receipt-attention")) { Text("$attention 筆需要處理") }
             }
         }
         state.message?.let { item { MobileNotice(it) } }
@@ -195,25 +221,25 @@ private fun MobileInbox(state: MobileUiState, images: ImageStore, actions: Mobil
                 }
             }
         }
-        if (state.ready && state.batches.none { !it.deleted }) item {
+        if (state.ready && visible.isEmpty()) item {
             Surface(color = Color.White, shape = RoundedCornerShape(20.dp)) {
                 Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     ReceiptMark(Modifier.size(44.dp).padding(bottom = 2.dp))
-                    Text("把這筆消費帶回帳本", style = MaterialTheme.typography.headlineSmall)
-                    Text("收據、價標與促銷，放在同一批。補上代買等說明，讓核對時有原圖可循。", color = MobileMuted, style = MaterialTheme.typography.bodyLarge)
+                    Text(if (state.batches.isEmpty()) "把這筆消費帶回帳本" else "這個範圍沒有收據", style = MaterialTheme.typography.headlineSmall)
+                    Text(if (state.batches.isEmpty()) "收據、價標與促銷，放在同一批。補上代買等說明，讓核對時有原圖可循。" else "可以切換篩選查看其他收據；照片與紀錄都保留。", color = MobileMuted, style = MaterialTheme.typography.bodyLarge)
                     HorizontalDivider(color = MobileRule)
                     Text("選照片 → 補說明 → 送出辨識", style = MaterialTheme.typography.labelLarge, color = MobileTealInk)
                     Text("也能從相簿分享過來。完成辨識後，直接在 App 內核對並確認入帳。", style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
                 }
             }
         }
-        items(state.batches.filter { !it.deleted }, key = { it.id }) { batch ->
+        items(visible, key = { it.id }) { batch ->
             Surface(shape = RoundedCornerShape(20.dp), color = Color.White, modifier = Modifier.fillMaxWidth()
                 .clickable { actions.select(batch.id) }.testTag("mobile-batch-${batch.id}")) {
                 Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     ReceiptThumb(batch.images.firstOrNull(), images, Modifier.width(76.dp).height(106.dp))
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        StatusTag(state.mutations.lastOrNull { it.batchId == batch.id && it.phase == "pending" }?.let { "${it.resultLabel}結果待確認" } ?: mobileStatus(batch), problem = batch.status in setOf("failed", "unknown", "unavailable") || !batch.importComplete)
+                        StatusTag(statuses.getValue(batch.id).label)
                         Text(batchTitle(batch), style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text("${batch.images.size} 張照片 · ${SimpleDateFormat("M/d HH:mm", Locale.TAIWAN).format(Date(batch.createdAt))}", style = MaterialTheme.typography.bodySmall, color = MobileMuted)
                         Text(mobileNextStep(batch), style = MaterialTheme.typography.labelLarge, color = MobileTealInk)
@@ -233,9 +259,9 @@ internal fun ReceiptThumb(image: MobileImage?, images: ImageStore, modifier: Mod
     }
 }
 @Composable internal fun StatusTag(text: String, problem: Boolean = false) {
-    Surface(color = if (problem) MobileWarningSoft else MobileTealSoft, shape = RoundedCornerShape(6.dp)) {
-        Text(text, Modifier.padding(horizontal = 9.dp, vertical = 4.dp), style = MaterialTheme.typography.labelMedium,
-            color = if (problem) MobileWarning else MobileTealInk)
+    val colors = receiptTagColors(text) ?: if (problem) ReceiptColors(MobileWarning, MobileWarningSoft) else ReceiptColors(MobileTealInk, MobileTealSoft)
+    Surface(color = colors.background, shape = RoundedCornerShape(6.dp)) {
+        Text(text, Modifier.padding(horizontal = 9.dp, vertical = 4.dp), style = MaterialTheme.typography.labelMedium, color = colors.ink)
     }
 }
 @Composable internal fun MobileNotice(text: String) {

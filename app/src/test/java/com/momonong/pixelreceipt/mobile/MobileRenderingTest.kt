@@ -102,7 +102,7 @@ class MobileRenderingTest {
     }
     @Test fun inboxRendersProductionCompose() {
         render(MobileUiState(batches = listOf(sample), signedIn = true), "inbox-390")
-        ui.onNodeWithText("中央收件匣", substring = true).assertExists()
+        ui.onNodeWithText("收據管理").assertExists()
         ui.onNodeWithText("尚未送出").assertExists()
     }
     @Test fun emptyInboxKeepsOneVisiblePrimaryAction() {
@@ -117,6 +117,10 @@ class MobileRenderingTest {
         }
         val batches = listOf(editable) + serverBatches
         render(MobileUiState(batches = batches, signedIn = true), "inbox-mixed-390")
+        batches.filter { !receiptStatus(it).normal }.forEach { batch -> ui.onNodeWithTag("mobile-batch-${batch.id}").assertDoesNotExist() }
+        ui.onNodeWithTag("receipt-filter-open").performClick()
+        ui.onNodeWithTag("receipt-filter-all").performClick()
+        ui.onNodeWithTag("receipt-filter-apply").performClick()
         batches.forEach { batch ->
             ui.onNodeWithTag("mobile-inbox").performScrollToNode(hasTestTag("mobile-batch-${batch.id}"))
             ui.onNodeWithTag("mobile-batch-${batch.id}").assertIsDisplayed()

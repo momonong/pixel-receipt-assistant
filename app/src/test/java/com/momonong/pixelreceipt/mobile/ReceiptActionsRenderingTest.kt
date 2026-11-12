@@ -161,6 +161,7 @@ class ReceiptActionsRenderingTest {
         val pending = ReceiptMutation("ledger_void", id, batch.id, UUID.randomUUID().toString(), """{"expected_revision":1,"reason":"未註明"}""")
         var voids = 0; var deletes = 0
         mount({ state(MobilePage.Detail).copy(batches = listOf(completed), mutations = listOf(pending)) }, MobileActions(voidEntry = { target, _ -> assertEquals(id, target); voids++ }, deleteBatch = { _, _ -> deletes++ }))
+        ui.onNodeWithText("作廢結果待確認").assertIsDisplayed()
         ui.onNodeWithText("查詢作廢結果").assertIsDisplayed().performClick()
         assertEquals(1, voids); assertEquals(0, deletes)
         capture("receipt-pending-void-detail-390")

@@ -13,13 +13,22 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun MobileNavigation(state: MobileUiState, actions: MobileActions) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-        listOf(Triple("收件匣", MobilePage.Inbox) { actions.select(null) }, Triple("帳本", MobilePage.Ledger, actions.ledger), Triple("使用說明", MobilePage.Help, actions.help)).forEach { (label, page, action) ->
-            TextButton(onClick = action, modifier = Modifier.weight(1f).heightIn(min = 48.dp), contentPadding = PaddingValues(horizontal = 8.dp), colors = ButtonDefaults.textButtonColors(contentColor = if (state.page == page) MobileTeal else MobileMuted)) { Text(label) }
+        listOf(Triple("收據", MobilePage.Inbox) { actions.select(null) }, Triple("帳本", MobilePage.Ledger, actions.ledger), Triple("分析", MobilePage.Spending, actions.spending), Triple("說明", MobilePage.Help, actions.help)).forEach { (label, page, action) ->
+            TextButton(onClick = action, modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("mobile-navigation-${page.name}"), contentPadding = PaddingValues(horizontal = 8.dp), colors = ButtonDefaults.textButtonColors(contentColor = if (state.page == page) MobileTeal else MobileMuted)) { Text(label) }
         }
     }
 }
 @Composable
 internal fun NativePrimaryBar(state: MobileUiState, actions: MobileActions, compact: Boolean) {
+    if (state.page == MobilePage.Spending) {
+        Surface(color = Color.White) {
+            Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
+                HorizontalDivider(color = MobileRule)
+                MobileNavigation(state, actions)
+            }
+        }
+        return
+    }
     val batch = state.batch; val review = batch?.review
     val pending = state.mutations.lastOrNull { it.batchId == batch?.id && it.phase == "pending" }
     val blockers = review?.let(::reviewBlockers).orEmpty().filter { it.text("code") != "receipt_completeness_unconfirmed" }
