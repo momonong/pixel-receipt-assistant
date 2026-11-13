@@ -41,6 +41,45 @@ class MobileUpdateFlowTest {
             try { updateInstallIntent(context,outside); fail() } catch (_: IllegalArgumentException) { } finally { outside.delete() }
         } finally { file.delete() }
     }
+    @Test fun startupCleansAnInstalledCacheWithoutAnyNetworkOrUpdateButton() = runBlocking {
+        val dir=Files.createTempDirectory("installed-cache-startup").toFile()
+        val cache=File(dir,"cache").apply{mkdirs()}
+        val apk=File(cache,"app-updates/update.apk").apply{parentFile!!.mkdirs();writeText("synthetic installed APK")}
+        val identity=UpdateApkIdentity("com.momonong.pixelreceipt.mobile",16,"0.7.2",setOf("a".repeat(64)))
+        val base=UpdateHostFixture(dir);val source=UpdateSourceFixture(release)
+        val host=object:MobileUpdateHost by base {
+            override fun cleanupInstalledUpdate()=cleanupInstalledUpdateApk(cache,identity){identity}
+        }
+        val scope=CoroutineScope(SupervisorJob()+Dispatchers.Unconfined)
+        try {
+            val update=MobileUpdateController(scope,source,host,16)
+            update.awaitIdle()
+            assertFalse(apk.exists());assertEquals(0,source.checks);assertEquals(0,base.installs)
+            assertEquals(AppUpdatePhase.Idle,update.state.value.phase)
+        }finally{scope.cancel();dir.deleteRecursively()}
+    }
+    @Test fun foregroundRetriesDeferredCleanupWithoutAffectingTheUpdateFlow() = runBlocking {
+        val dir=Files.createTempDirectory("installed-cache-retry").toFile()
+        val cache=File(dir,"cache").apply{mkdirs()}
+        val apk=File(cache,"app-updates/update.apk").apply{parentFile!!.mkdirs();writeText("synthetic installed APK")}
+        val identity=UpdateApkIdentity("com.momonong.pixelreceipt.mobile",16,"0.7.2",setOf("a".repeat(64)))
+        var unavailable=true
+        val base=UpdateHostFixture(dir);val source=UpdateSourceFixture(release)
+        val host=object:MobileUpdateHost by base {
+            override fun cleanupInstalledUpdate()=cleanupInstalledUpdateApk(cache,identity){
+                if(unavailable)throw java.io.IOException("synthetic transient inspection failure")
+                identity
+            }
+        }
+        val scope=CoroutineScope(SupervisorJob()+Dispatchers.Unconfined)
+        try {
+            val update=MobileUpdateController(scope,source,host,16)
+            update.awaitIdle();assertTrue(apk.isFile)
+            unavailable=false;update.resumed();update.awaitIdle()
+            assertFalse(apk.exists());assertEquals(0,source.checks)
+            assertEquals(AppUpdatePhase.Idle,update.state.value.phase)
+        }finally{scope.cancel();dir.deleteRecursively()}
+    }
     @Test fun manualCheckDownloadPermissionReturnAndInstallNeverClaimsSuccess() = runBlocking {
         val dir=Files.createTempDirectory("update-flow").toFile();val host=UpdateHostFixture(dir);val source=UpdateSourceFixture(release)
         val scope=CoroutineScope(SupervisorJob()+Dispatchers.Unconfined)

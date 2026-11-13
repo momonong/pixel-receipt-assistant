@@ -7,10 +7,12 @@ import android.content.pm.PackageManager
 import androidx.core.net.toUri
 import android.os.Build
 import android.provider.Settings
+import android.util.Log
 import androidx.core.content.FileProvider
 import androidx.core.content.pm.PackageInfoCompat
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.CancellationException
 
 class AppUpdateFileProvider : FileProvider()
 
@@ -33,6 +35,7 @@ internal interface MobileUpdateHost {
     fun verify(release: AppRelease)
     fun permission()
     fun install(release: AppRelease)
+    fun cleanupInstalledUpdate(): UpdateCacheCleanupResult = UpdateCacheCleanupResult.Unchanged
 }
 
 internal class AndroidMobileUpdateHost(private val context: Context) : MobileUpdateHost {
@@ -60,4 +63,18 @@ internal class AndroidMobileUpdateHost(private val context: Context) : MobileUpd
         context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, "package:${context.packageName}".toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
     override fun install(release: AppRelease) { context.startActivity(updateInstallIntent(context,file(release))) }
+    @Suppress("DEPRECATION")
+    override fun cleanupInstalledUpdate(): UpdateCacheCleanupResult {
+        val result = try {
+            val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
+            val pm = context.packageManager
+            val installed = identity(pm.getPackageInfo(context.packageName, flags))
+            cleanupInstalledUpdateApk(context.cacheDir, installed) { file -> pm.getPackageArchiveInfo(file.absolutePath, flags)?.let(::identity) }
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            UpdateCacheCleanupResult.Deferred
+        }
+        if (result == UpdateCacheCleanupResult.Deferred) Log.w("PixelReceiptUpdate", "APK cache cleanup deferred until the next foreground check.")
+        return result
+    }
 }

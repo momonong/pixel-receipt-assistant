@@ -38,7 +38,7 @@ internal data class InsightQuery(
     companion object { fun month(today:LocalDate=LocalDate.now()):InsightQuery {val old=today.minusMonths(1);return InsightQuery(today.withDayOfMonth(1),today,old.withDayOfMonth(1),old)} }
 }
 internal data class InsightGroup(val key:String,val label:String?,val personal:Long,val receipts:Long,val items:Long,val meals:Long?=null,val average:String?=null,val from:LocalDate?=null,val to:LocalDate?=null)
-internal data class InsightReport(val query:InsightQuery,val summary:Map<String,Long>,val comparisonDelta:Long?,val groups:Map<String,List<InsightGroup>>,val coverage:Map<String,Long>,val series:List<InsightGroup>)
+internal data class InsightReport(val query:InsightQuery,val summary:Map<String,Long>,val comparisonDelta:Long?,val groups:Map<String,List<InsightGroup>>,val coverage:Map<String,Long>,val series:List<InsightGroup>,val bucket:String="day")
 internal fun insightLong(value:JsonElement?,signed:Boolean=false):Long {
     require(value?.isJsonPrimitive==true && value.asJsonPrimitive.isNumber)
     require(value.asString.matches(Regex(if(signed)"0|-?[1-9][0-9]*" else "0|[1-9][0-9]*")))
@@ -82,7 +82,7 @@ internal fun parseInsightReport(raw:String,query:InsightQuery):InsightReport {
         insightLong(it["delta_personal_yuan"],true).also{difference->require(Math.subtractExact(summary.getValue("personal_yuan"),previous)==difference)}
     }
     require(Math.addExact(series.fold(0L){sum,g->Math.addExact(sum,g.personal)},coverage.getValue("undated_personal_yuan"))==summary.getValue("personal_yuan"))
-    return InsightReport(query,summary,delta,groups,coverage,series)
+    return InsightReport(query,summary,delta,groups,coverage,series,value.text("bucket"))
 }
 internal fun defaultInsightDocument():JsonObject=JsonObject().apply {
     listOf("brand","branch","address","city","district","transaction_time").forEach{add(it,JsonNull.INSTANCE)}

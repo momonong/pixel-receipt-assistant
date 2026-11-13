@@ -52,7 +52,7 @@ internal fun MobileSettings(state: MobileUiState, password: String, changePasswo
             }
         }
         item {
-            SettingsSection("App 更新", "直接在這裡下載新版。") { MobileUpdateContent(state, actions) }
+            SettingsSection("App 更新", "直接下載新版，安裝後自動清理更新包。") { MobileUpdateContent(state, actions) }
         }
         item {
             SettingsSection("辨識來源", "可用狀態由中央帳本回報。") {
