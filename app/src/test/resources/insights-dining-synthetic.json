@@ -1,0 +1,412 @@
+{
+  "scope": "active_confirmed_ledger",
+  "currency": "TWD",
+  "amount_unit": "TWD_YUAN",
+  "filters": {
+    "date_from": "2026-11-01",
+    "date_to": "2026-11-12",
+    "compare_from": null,
+    "compare_to": null,
+    "category": "food",
+    "meal": null,
+    "brand_key": null,
+    "branch_key": null,
+    "city_key": null,
+    "district_key": null,
+    "merchant_key": null,
+    "channel": null,
+    "day_type": null,
+    "bucket": "auto",
+    "undated_only": false
+  },
+  "generated_at": "2026-11-13T02:10:18.551575+00:00",
+  "bucket": "day",
+  "summary": {
+    "personal_yuan": 1265,
+    "self_yuan": 965,
+    "gift_yuan": 300,
+    "advance_yuan": 90,
+    "receipt_count": 8,
+    "item_count": 9,
+    "explicit_discount_yuan": 0,
+    "missing_item_name_count": 0
+  },
+  "comparison": null,
+  "series": [
+    {
+      "date_from": "2026-11-01",
+      "date_to": "2026-11-01",
+      "label": "2026-11-01",
+      "personal_yuan": 65,
+      "receipt_count": 1
+    },
+    {
+      "date_from": "2026-11-02",
+      "date_to": "2026-11-02",
+      "label": "2026-11-02",
+      "personal_yuan": 110,
+      "receipt_count": 1
+    },
+    {
+      "date_from": "2026-11-04",
+      "date_to": "2026-11-04",
+      "label": "2026-11-04",
+      "personal_yuan": 240,
+      "receipt_count": 1
+    },
+    {
+      "date_from": "2026-11-08",
+      "date_to": "2026-11-08",
+      "label": "2026-11-08",
+      "personal_yuan": 380,
+      "receipt_count": 3
+    },
+    {
+      "date_from": "2026-11-10",
+      "date_to": "2026-11-10",
+      "label": "2026-11-10",
+      "personal_yuan": 170,
+      "receipt_count": 1
+    },
+    {
+      "date_from": "2026-11-12",
+      "date_to": "2026-11-12",
+      "label": "2026-11-12",
+      "personal_yuan": 300,
+      "receipt_count": 1
+    }
+  ],
+  "groups": {
+    "categories": [
+      {
+        "key": "food",
+        "label": "食",
+        "personal_yuan": 1265,
+        "receipt_count": 8,
+        "item_count": 9,
+        "average_yuan": {
+          "numerator": 1265,
+          "denominator": 8
+        }
+      }
+    ],
+    "subcategories": [
+      {
+        "key": "29697f6eabe21a78beebf5ec81234c5794fcbf6232b66738db397d8a47913b87",
+        "label": "食／未細分",
+        "personal_yuan": 1265,
+        "receipt_count": 8,
+        "item_count": 9,
+        "average_yuan": {
+          "numerator": 1265,
+          "denominator": 8
+        }
+      }
+    ],
+    "meals": [
+      {
+        "key": "dinner",
+        "label": "晚餐",
+        "personal_yuan": 720,
+        "receipt_count": 3,
+        "item_count": 4,
+        "average_yuan": {
+          "numerator": 720,
+          "denominator": 3
+        },
+        "meal_count": 3
+      },
+      {
+        "key": "lunch",
+        "label": "午餐",
+        "personal_yuan": 410,
+        "receipt_count": 3,
+        "item_count": 3,
+        "average_yuan": {
+          "numerator": 410,
+          "denominator": 3
+        },
+        "meal_count": 3
+      },
+      {
+        "key": "breakfast",
+        "label": "早餐",
+        "personal_yuan": 135,
+        "receipt_count": 2,
+        "item_count": 2,
+        "average_yuan": {
+          "numerator": 135,
+          "denominator": 2
+        },
+        "meal_count": 2
+      }
+    ],
+    "brands": [
+      {
+        "key": "526f62c1567b82da91b63ff706055fcf00aa330ed84917d308ebfcaaa099b8f0",
+        "label": "合成家常麵館",
+        "personal_yuan": 720,
+        "receipt_count": 3,
+        "item_count": 4,
+        "average_yuan": {
+          "numerator": 720,
+          "denominator": 3
+        }
+      },
+      {
+        "key": "23a42d0b401606a846c28e12787b7ae640340c8326d9ba3d2af5fe7464a33ce5",
+        "label": "合成街角便當",
+        "personal_yuan": 410,
+        "receipt_count": 3,
+        "item_count": 3,
+        "average_yuan": {
+          "numerator": 410,
+          "denominator": 3
+        }
+      },
+      {
+        "key": "0fed5271bd5896c451a9155f62dd07dcd45f17d3d9eadb625e5f35ced87da953",
+        "label": "合成巷口早餐",
+        "personal_yuan": 70,
+        "receipt_count": 1,
+        "item_count": 1,
+        "average_yuan": {
+          "numerator": 70,
+          "denominator": 1
+        }
+      },
+      {
+        "key": "c1f659f351c9dfa2da1ab60d00b6b6e6fc35b7b5fc03d9ce460cd1ae0e37964d",
+        "label": "合成綜合商店",
+        "personal_yuan": 65,
+        "receipt_count": 1,
+        "item_count": 1,
+        "average_yuan": {
+          "numerator": 65,
+          "denominator": 1
+        }
+      }
+    ],
+    "branches": [
+      {
+        "key": "6d5c82be138b353d4778ce1f76c48ff4ffbb40a44a0250205a8c4d9d2e7791f2",
+        "label": "合成家常麵館 合成臺南市店",
+        "personal_yuan": 720,
+        "receipt_count": 3,
+        "item_count": 4,
+        "average_yuan": {
+          "numerator": 720,
+          "denominator": 3
+        }
+      },
+      {
+        "key": "3903135de75b0dedfbf76affebf508ddeef48bb0a6a640f2f853e4fae0d70d4e",
+        "label": "合成街角便當 合成臺南市店",
+        "personal_yuan": 410,
+        "receipt_count": 3,
+        "item_count": 3,
+        "average_yuan": {
+          "numerator": 410,
+          "denominator": 3
+        }
+      },
+      {
+        "key": "e3875f4f87e59500de817540ed973a3b0378209db127b19a203a220bb4e22ae9",
+        "label": "合成巷口早餐 合成臺北市店",
+        "personal_yuan": 70,
+        "receipt_count": 1,
+        "item_count": 1,
+        "average_yuan": {
+          "numerator": 70,
+          "denominator": 1
+        }
+      },
+      {
+        "key": "23ac6091ad4eeb4524f8c15005294f0da28992a0af9685a2cc118145f1210189",
+        "label": "合成綜合商店 合成臺南市店",
+        "personal_yuan": 65,
+        "receipt_count": 1,
+        "item_count": 1,
+        "average_yuan": {
+          "numerator": 65,
+          "denominator": 1
+        }
+      }
+    ],
+    "cities": [
+      {
+        "key": "f966bb8472fb72add991ad0cd01852632140fd195ea06e4c98132c0894a3b0d4",
+        "label": "臺南市",
+        "personal_yuan": 1195,
+        "receipt_count": 7,
+        "item_count": 8,
+        "average_yuan": {
+          "numerator": 1195,
+          "denominator": 7
+        }
+      },
+      {
+        "key": "4bd6d1f9942615fa1ebe7831779cd17a39fe701e744d7f76ae54983df9d47f82",
+        "label": "臺北市",
+        "personal_yuan": 70,
+        "receipt_count": 1,
+        "item_count": 1,
+        "average_yuan": {
+          "numerator": 70,
+          "denominator": 1
+        }
+      }
+    ],
+    "districts": [
+      {
+        "key": "eacc1b82a05a26a43686340a98957d325787231263d6bb602b0bdf0fc2992408",
+        "label": "臺南市 東區",
+        "personal_yuan": 1195,
+        "receipt_count": 7,
+        "item_count": 8,
+        "average_yuan": {
+          "numerator": 1195,
+          "denominator": 7
+        }
+      },
+      {
+        "key": "ef6c9469d7b6c5074df28a5d45f9bcbdfaa00f215a113bae920b72cc99d1af4e",
+        "label": "臺北市 東區",
+        "personal_yuan": 70,
+        "receipt_count": 1,
+        "item_count": 1,
+        "average_yuan": {
+          "numerator": 70,
+          "denominator": 1
+        }
+      }
+    ],
+    "merchants": [
+      {
+        "key": "b8214abb5065496175a9f3f69ba8d0db141388ac740c1cf71ed614ae8f5d6760",
+        "label": "合成示例・家常麵館",
+        "personal_yuan": 720,
+        "receipt_count": 3,
+        "item_count": 4,
+        "average_yuan": {
+          "numerator": 720,
+          "denominator": 3
+        }
+      },
+      {
+        "key": "4c725845571d28fc4845cacf44576f8840ce46577b28d8e530808743bf9646cb",
+        "label": "合成示例・街角便當",
+        "personal_yuan": 410,
+        "receipt_count": 3,
+        "item_count": 3,
+        "average_yuan": {
+          "numerator": 410,
+          "denominator": 3
+        }
+      },
+      {
+        "key": "939647badbc16ece8744ae024fd552c57169e1c62a29227427a8e7181e8a1aa5",
+        "label": "合成示例・巷口早餐",
+        "personal_yuan": 70,
+        "receipt_count": 1,
+        "item_count": 1,
+        "average_yuan": {
+          "numerator": 70,
+          "denominator": 1
+        }
+      },
+      {
+        "key": "c8abc0c4ece063b0b7d060a30da86cce8b8ddc8a95014d7f5b3467e9394971bd",
+        "label": "合成示例・綜合商店",
+        "personal_yuan": 65,
+        "receipt_count": 1,
+        "item_count": 1,
+        "average_yuan": {
+          "numerator": 65,
+          "denominator": 1
+        }
+      }
+    ],
+    "weekdays": [
+      {
+        "key": "6",
+        "label": "週日",
+        "personal_yuan": 445,
+        "receipt_count": 4,
+        "item_count": 4,
+        "average_yuan": {
+          "numerator": 445,
+          "denominator": 4
+        }
+      },
+      {
+        "key": "3",
+        "label": "週四",
+        "personal_yuan": 300,
+        "receipt_count": 1,
+        "item_count": 1,
+        "average_yuan": {
+          "numerator": 300,
+          "denominator": 1
+        }
+      },
+      {
+        "key": "2",
+        "label": "週三",
+        "personal_yuan": 240,
+        "receipt_count": 1,
+        "item_count": 2,
+        "average_yuan": {
+          "numerator": 240,
+          "denominator": 1
+        }
+      },
+      {
+        "key": "1",
+        "label": "週二",
+        "personal_yuan": 170,
+        "receipt_count": 1,
+        "item_count": 1,
+        "average_yuan": {
+          "numerator": 170,
+          "denominator": 1
+        }
+      },
+      {
+        "key": "0",
+        "label": "週一",
+        "personal_yuan": 110,
+        "receipt_count": 1,
+        "item_count": 1,
+        "average_yuan": {
+          "numerator": 110,
+          "denominator": 1
+        }
+      }
+    ],
+    "times": [
+      {
+        "key": "evening",
+        "label": "晚上",
+        "personal_yuan": 1265,
+        "receipt_count": 8,
+        "item_count": 9,
+        "average_yuan": {
+          "numerator": 1265,
+          "denominator": 8
+        }
+      }
+    ]
+  },
+  "coverage": {
+    "uncategorized_personal_yuan": 0,
+    "unknown_city_personal_yuan": 0,
+    "unknown_meal_personal_yuan": 0,
+    "undated_receipt_count": 0,
+    "undated_personal_yuan": 0,
+    "estimated_date_receipt_count": 0,
+    "pending_price_receipt_count": 0,
+    "unallocated_personal_yuan": 0
+  },
+  "discount_scope": "matched_receipts_including_advances"
+}

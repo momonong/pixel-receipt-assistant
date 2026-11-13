@@ -23,6 +23,12 @@ internal class MobileUpdateController(
     val state=mutable.asStateFlow()
     private val generation=AtomicLong()
     private var job:Job?=null
+    private var cleanupJob:Job?=null
+    init { cleanupInstalledApk() }
+    private fun cleanupInstalledApk() {
+        if (cleanupJob?.isActive == true || job?.isActive == true) return
+        cleanupJob=scope.launch { withContext(Dispatchers.IO) { host.cleanupInstalledUpdate() } }
+    }
     private fun start(action: suspend (Long) -> Unit) {
         if (job?.isActive == true) return
         val attempt=generation.incrementAndGet()
@@ -83,11 +89,14 @@ internal class MobileUpdateController(
     fun sessionChanged() {
         generation.incrementAndGet();job?.cancel();mutable.value=AppUpdateState()
     }
-    fun resumed() { if (state.value.phase==AppUpdatePhase.Ready) mutable.update { it.copy(canInstall=host.canInstall()) } }
+    fun resumed() {
+        if (state.value.phase==AppUpdatePhase.Ready) mutable.update { it.copy(canInstall=host.canInstall()) }
+        cleanupInstalledApk()
+    }
     fun cancel() {
         if (state.value.phase !in setOf(AppUpdatePhase.Downloading,AppUpdatePhase.Checking,AppUpdatePhase.Verifying)) return
         generation.incrementAndGet();job?.cancel()
         mutable.update { it.copy(phase=if(it.release==null)AppUpdatePhase.Idle else AppUpdatePhase.Available,downloaded=0,message="已取消更新，原本的 App 與收據資料保留。") }
     }
-    internal suspend fun awaitIdle() { job?.join() }
+    internal suspend fun awaitIdle() { job?.join();cleanupJob?.join() }
 }

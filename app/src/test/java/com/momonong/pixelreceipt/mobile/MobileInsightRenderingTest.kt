@@ -57,19 +57,22 @@ class MobileInsightRenderingTest {
         val bitmap=ui.onRoot().captureToImage().asAndroidBitmap()
         file.outputStream().use{assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG,100,it))}
     }
-    @Test fun categoriesAndUnknownCoverageAreVisible(){render();ui.onNodeWithText("個人支出").assertExists();ui.onNodeWithTag("insight-list").performScrollToNode(hasText("未分類"));ui.onNodeWithText("未分類").assertIsDisplayed();capture("insights-categories-390");ui.onNodeWithTag("insight-list").performScrollToNode(hasTestTag("insight-filter-open"));ui.onNodeWithTag("insight-filter-open").performClick();ui.onAllNodesWithText("餐別").onFirst().assertExists();capture("insights-filter-390")}
+    @Test fun categoriesAndUnknownCoverageAreVisible(){render();ui.onNodeWithText("個人支出").assertExists();ui.onNodeWithTag("insight-list").performScrollToNode(hasTestTag("insight-slice-unknown"));ui.onNodeWithTag("insight-slice-unknown").assertIsDisplayed();capture("insights-categories-390");ui.onNodeWithTag("insight-list").performScrollToNode(hasTestTag("insight-filter-open"));ui.onNodeWithTag("insight-filter-open").performClick();ui.onAllNodesWithText("餐別").onFirst().assertExists();capture("insights-filter-390")}
     @Test fun primaryAnalysisShowsCategoryAndKeepsCoverageCollapsed() {
         render()
-        ui.onNodeWithTag("insight-dimension-selector").assertIsDisplayed()
+        ui.onNodeWithTag("insight-list").performScrollToNode(hasTestTag("insight-composition-card"))
+        ui.onNodeWithTag("insight-composition-chart").assertIsDisplayed()
         capture("insights-overview-390")
-        ui.onNodeWithText("未分類").assertIsDisplayed()
+        ui.onNodeWithTag("insight-slice-unknown").assertIsDisplayed()
+        ui.onNodeWithTag("insight-list").performScrollToNode(hasTestTag("insight-coverage-expand"))
         ui.onNodeWithTag("insight-coverage-expand").assertIsDisplayed()
         ui.onNodeWithText("縣市待補：NT$ 300").assertDoesNotExist()
         ui.onNodeWithTag("insight-coverage-expand").performClick()
         ui.onNodeWithText("縣市待補：NT$ 300").assertExists()
         ui.onNodeWithTag("insight-coverage-expand").performClick()
+        ui.onNodeWithTag("insight-list").performScrollToNode(hasTestTag("insight-dimension-selector"))
         ui.onNodeWithTag("insight-dimension-selector").performClick()
-        listOf("生活分類","細分類","餐別","品牌","分店","縣市","地區","消費時間","週間分布","時段","支出歸屬","折扣").forEach{ui.onNodeWithText(it,useUnmergedTree=true).assertExists()}
+        listOf("生活分類","細分類","餐別","品牌","分店","縣市","地區","消費時間","週間分布","時段","支出歸屬","折扣").forEach{ui.onNode(hasText(it) and hasAnyAncestor(isPopup()),useUnmergedTree=true).assertExists()}
         capture("insight-dimension-menu-390")
     }
     @Test fun merchantAndFullMonthRowsDrillIntoTheirExactScope() {
@@ -81,12 +84,13 @@ class MobileInsightRenderingTest {
         }
         val report=parseInsightReport(raw.toString(),q)
         scenario.onActivity{it.setContent{MobileContent(MobileUiState(page=MobilePage.Spending,signedIn=true,insight=InsightUiState(enabled=true,query=q,report=report)),ImageStore(directory),MobileActions(insightQuery={selected=it}))}}
+        ui.onNodeWithTag("insight-list").performScrollToNode(hasTestTag("insight-dimension-selector"))
         ui.onNodeWithTag("insight-dimension-selector").performClick();ui.onNodeWithText("消費時間",useUnmergedTree=true).performScrollTo().performClick()
         ui.onNodeWithTag("insight-list").performScrollToNode(hasText("2026-11"))
         ui.onNodeWithText("2026-11").performClick()
         assertEquals(java.time.LocalDate.parse("2026-11-01"),selected?.dateFrom);assertEquals(java.time.LocalDate.parse("2026-11-30"),selected?.dateTo)
         ui.onNodeWithTag("insight-list").performScrollToNode(hasTestTag("insight-dimension-selector"))
-        ui.onNodeWithTag("insight-dimension-selector").performClick();ui.onNodeWithText("店家",useUnmergedTree=true).performScrollTo().performClick()
+        ui.onNodeWithTag("insight-dimension-selector").performClick();ui.onNode(hasText("店家") and hasAnyAncestor(isPopup()),useUnmergedTree=true).performScrollTo().performClick()
         val merchant=report.groups.getValue("merchants").first()
         ui.onNodeWithTag("insight-list").performScrollToNode(hasText(merchant.label!!))
         ui.onNodeWithText(merchant.label!!).performClick()

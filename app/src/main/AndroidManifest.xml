@@ -15,6 +15,11 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.PixelReceipt"
         android:usesCleartextTraffic="false">
+        <receiver android:name=".mobile.UpdateInstalledReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
         <provider android:name=".mobile.AppUpdateFileProvider"
             android:authorities="${applicationId}.updates" android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_paths" />

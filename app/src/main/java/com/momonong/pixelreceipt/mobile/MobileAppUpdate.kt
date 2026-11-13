@@ -59,8 +59,10 @@ internal fun writeVerifiedUpdate(input: InputStream, target: File, release: AppR
             if (total != release.sizeBytes || hash != release.sha256) throw IOException("更新檔驗證失敗，請重新檢查。")
             output.fd.sync()
         }
-        active()
-        if (!part.renameTo(target)) throw IOException("無法保存更新檔。")
+        synchronized(UpdateApkFiles.lock) {
+            active()
+            if (!part.renameTo(target)) throw IOException("無法保存更新檔。")
+        }
     } finally { part.delete() }
 }
 
