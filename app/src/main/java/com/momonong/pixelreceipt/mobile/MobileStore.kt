@@ -149,8 +149,19 @@ class MobileStore(private val root: File, private val beforeWrite: () -> Unit = 
                 if (reminder != null && reminder.approval != approval) throw DuplicateShareRequired(reminder)
                 if (approval != null && reminder == null) throw DuplicateShareDecisionExpired()
             }
-            old.copy(frozen = if (old.intakeId == null) freezeIntake(old) else old.frozen, message = null)
+            old.copy(frozen = if (old.intakeId == null) freezeIntake(old) else old.frozen,
+                syncRetryable = old.intakeId == null, message = null)
         }
+    }
+    /** The stop button is global; the selected page need not be the request currently sending. */
+    internal fun pauseAutomaticSync() = locked {
+        val state = read()
+        val batches = state.batches.map { batch ->
+            if (batch.syncRetryable && batch.intakeId == null) batch.copy(revision = batch.revision + 1,
+                syncRetryable = false, syncRetryAt = null, message = "自動續傳已暫停；照片與原請求已保留，可按繼續同步。")
+            else batch
+        }
+        if (batches != state.batches) write(state.copy(batches = batches))
     }
     fun cacheLedger(json: String, append: Boolean = false): MobileState = locked {
         val state = read(); val response = jsonObject(json)

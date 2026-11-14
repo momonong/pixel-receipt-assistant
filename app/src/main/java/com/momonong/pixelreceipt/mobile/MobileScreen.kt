@@ -42,9 +42,13 @@ internal data class MobileUiState(
     val appUpdate: AppUpdateState = AppUpdateState(),
     val spending: SpendingUiState = SpendingUiState(),
     val insight: InsightUiState = InsightUiState(),
+    val autoProgress: Boolean = false,
+    val autoProgressPaused: Set<String> = emptySet(),
 ) {
     val batch: MobileBatch? get() = batches.firstOrNull { it.id == selectedId }
 }
+internal fun MobileUiState.tracksProgress(batch: MobileBatch): Boolean = autoProgress && automaticProgressCandidate(batch) &&
+    batch.id !in autoProgressPaused && mutations.none { it.phase == "pending" && it.batchId == batch.id }
 internal class MobileActions(
     val checkAppUpdate: () -> Unit = {},
     val downloadAppUpdate: () -> Unit = {},
@@ -103,6 +107,8 @@ fun MobileScreen(viewModel: MobileViewModel) {
     val update by viewModel.appUpdate.collectAsStateWithLifecycle()
     val insight by viewModel.insightState.collectAsStateWithLifecycle()
     val price by viewModel.priceController.state.collectAsStateWithLifecycle()
+    val autoProgress by viewModel.autoProgress.collectAsStateWithLifecycle()
+    val autoProgressPaused by viewModel.autoProgressPaused.collectAsStateWithLifecycle()
     val spending by viewModel.spendingState.collectAsStateWithLifecycle()
     val persisted by viewModel.state.collectAsStateWithLifecycle()
     val selected by viewModel.selected.collectAsStateWithLifecycle()
@@ -121,15 +127,18 @@ fun MobileScreen(viewModel: MobileViewModel) {
     val reviewEdits by viewModel.reviewEditState.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle, viewModel) {
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) viewModel.foreground() }
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) { Lifecycle.Event.ON_RESUME -> viewModel.foreground(); Lifecycle.Event.ON_PAUSE -> viewModel.background(); else -> Unit }
+        }
         lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
+        onDispose { lifecycle.removeObserver(observer); viewModel.background() }
     }
-    LaunchedEffect(signedIn) { if (signedIn) viewModel.foreground() }
+    LaunchedEffect(signedIn, lifecycle) { if (signedIn && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) viewModel.foreground() }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(20), viewModel::picked)
     val state = MobileUiState(persisted != null, persisted?.batches.orEmpty(), selected,
         if (settings) MobilePage.Settings else MobilePage.valueOf(destination),
-        signedIn, busy, message, engines, writable, edits, reviewer, persisted?.ledgerJson, persisted?.ledgerUpdatedAt, selectedLedger, savingReview, reviewEdits.keys, persisted?.ledgerDetailsJson, persisted?.mutations.orEmpty(), persisted?.overviewJson, persisted?.accountingStale == true, persisted?.accountingError, duplicate, update, spending, insight)
+        signedIn, busy, message, engines, writable, edits, reviewer, persisted?.ledgerJson, persisted?.ledgerUpdatedAt, selectedLedger, savingReview, reviewEdits.keys, persisted?.ledgerDetailsJson, persisted?.mutations.orEmpty(), persisted?.overviewJson, persisted?.accountingStale == true, persisted?.accountingError, duplicate, update, spending, insight,
+        autoProgress = autoProgress && signedIn && writable, autoProgressPaused = autoProgressPaused)
     val actions = MobileActions(
         checkAppUpdate = viewModel::checkAppUpdate, downloadAppUpdate = viewModel::downloadAppUpdate,
         installAppUpdate = viewModel::installAppUpdate, cancelAppUpdate = viewModel::cancelAppUpdate,

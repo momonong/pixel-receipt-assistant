@@ -143,6 +143,7 @@ private fun MobilePrimaryBar(state: MobileUiState, password: String, login: (Str
         !batch.importComplete -> "補齊照片"
         batch.intakeId != null && batch.status == "succeeded" -> if (batch.draftId != null) "前往帳本核對" else "開啟中央帳本"
         !state.signedIn -> if (batch.intakeId != null) "登入後更新進度" else "登入後送出"
+        batch.intakeId != null && state.tracksProgress(batch) -> "返回收件匣"
         batch.intakeId != null -> "更新進度"
         localUnavailable -> "至設定確認辨識來源"
         batch.frozen != null -> "繼續同步這筆收件"
@@ -166,6 +167,7 @@ private fun MobilePrimaryBar(state: MobileUiState, password: String, login: (Str
                     formal -> if (batch?.ledgerStatus == "voided" || batch?.draftStatus == "voided") "中央已作廢，原入帳內容保留。" else "中央已確認入帳，可查看品項與用途。"
                     batch?.importComplete == false -> "請重新選取完整批次，保留已匯入原圖。"
                     batch?.intakeId != null && batch.status == "succeeded" -> "在 App 內核對金額與用途，再確認入帳。"
+                    batch?.intakeId != null && state.tracksProgress(batch) -> "進度會自動更新；可繼續新增其他收據。"
                     batch?.frozen != null -> "中央已確認原圖 ${batch.uploadedHashes.size} / ${batch.images.size} 張"
                     else -> "送出原圖與說明；送出後鎖定本批內容。"
                 }
@@ -181,6 +183,7 @@ private fun MobilePrimaryBar(state: MobileUiState, password: String, login: (Str
                         !batch.importComplete -> actions.pick(batch.id)
                         batch.intakeId != null && batch.status == "succeeded" -> actions.dashboard(batch.draftId)
                         !state.signedIn || localUnavailable -> actions.settings()
+                        batch.intakeId != null && state.tracksProgress(batch) -> actions.select(null)
                         else -> actions.sync(batch.id)
                     }
                 }, enabled = enabled, shape = RoundedCornerShape(10.dp),

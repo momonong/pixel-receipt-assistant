@@ -73,6 +73,32 @@ class MobileRenderingTest {
         scenario = ActivityScenario.launch(Intent(context, ComponentActivity::class.java))
     }
     @After fun cleanup() { if (::scenario.isInitialized) scenario.close(); if (::directory.isInitialized) directory.deleteRecursively() }
+    @Test fun pausedRecognitionExplainsTheReasonAndAutomaticProgress() {
+        val waiting=sample.copy(images=sample.images.take(1), uploadedHashes=sample.images.take(1).map { it.hash },
+            intakeId="11111111-1111-4111-8111-111111111111", status="queued",
+            serverJson="""{"error_code":"broker_admission_waiting","polling_finished":false}""")
+        mount({MobileUiState(batches=listOf(waiting),selectedId=waiting.id,page=MobilePage.Detail,signedIn=true,
+            engines=mapOf("broker" to EngineAvailability(false,"broker_qualification_unavailable")), autoProgress=true)})
+        ui.onAllNodesWithText("等待辨識恢復").onFirst().assertIsDisplayed()
+        ui.onNodeWithText("免費資格待更新",substring=true).assertIsDisplayed()
+        ui.onNodeWithText("進度自動更新中",substring=true).assertIsDisplayed()
+        capture("auto-progress-paused-390")
+    }
+    @Test fun legacyFrozenSendDoesNotPretendAutomaticRetryIsRunning() {
+        val frozen=sample.copy(frozen=freezeIntake(sample))
+        mount({MobileUiState(batches=listOf(frozen),selectedId=frozen.id,page=MobilePage.Detail,signedIn=true,autoProgress=true)})
+        ui.onNodeWithText("進度自動更新中",substring=true).assertDoesNotExist()
+        ui.onNodeWithTag("mobile-primary").assertTextEquals("繼續同步這筆收件").assertIsDisplayed()
+    }
+    @Test @Config(qualifiers="w320dp-h740dp-mdpi") fun pausedRecognitionRemainsReadableWithLargeText() {
+        val waiting=sample.copy(images=sample.images.take(1),intakeId="11111111-1111-4111-8111-111111111111",status="queued",
+            serverJson="""{"error_code":"broker_admission_waiting","polling_finished":false}""")
+        mount({MobileUiState(batches=listOf(waiting),selectedId=waiting.id,page=MobilePage.Detail,signedIn=true,
+            engines=mapOf("broker" to EngineAvailability(false,"broker_qualification_unavailable")), autoProgress=true)},fontScale=1.5f)
+        ui.onNodeWithText("免費資格待更新",substring=true).assertIsDisplayed()
+        ui.onNodeWithTag("mobile-primary").assertIsDisplayed().assertIsEnabled()
+        capture("auto-progress-paused-320-font150")
+    }
     private fun mount(state: () -> MobileUiState, actions: MobileActions = MobileActions(), fontScale: Float = 1f, imeInsets: WindowInsets? = null) {
         scenario.onActivity { activity -> activity.setContent {
             PixelReceiptTheme(darkTheme = false, dynamicColor = false) {
