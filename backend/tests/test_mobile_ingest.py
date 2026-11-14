@@ -571,6 +571,7 @@ def test_v3_to_v4_preserves_rows_and_future_version_refuses(store, body):
         (14, "0.7.0"),
         (15, "0.7.1"),
         (16, "0.7.2"),
+        (17, "0.7.3"),
     ],
 )
 def test_mobile_release_authenticated_fixed_metadata_streaming_integrity(
@@ -643,6 +644,7 @@ def test_mobile_release_authenticated_fixed_metadata_streaming_integrity(
         (15, "0.7.0", "com.momonong.pixelreceipt.mobile"),
         (15, "0.7.2", "com.momonong.pixelreceipt.mobile"),
         (16, "0.7.1", "com.momonong.pixelreceipt.mobile"),
+        (17, "0.7.2", "com.momonong.pixelreceipt.mobile"),
         ("4", "0.4.2", "com.momonong.pixelreceipt.mobile"),
         (4, "0.4.2", "com.momonong.pixelreceipt"),
         (4, "0.4.2", "com.unapproved.receipts"),

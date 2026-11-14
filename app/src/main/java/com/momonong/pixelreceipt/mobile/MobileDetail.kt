@@ -36,9 +36,16 @@ internal fun MobileDetail(state: MobileUiState, images: ImageStore, actions: Mob
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
               Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(if (batch.editable) "準備這筆收件" else progressTitle(batch), style = MaterialTheme.typography.headlineSmall)
-                Text(if (batch.editable) "${batch.images.size} 張原圖與補充說明，會一起送交辨識。" else resultExplanation(batch), color = MobileMuted, style = MaterialTheme.typography.bodyMedium)
+                Text(if (batch.editable) "${batch.images.size} 張原圖與補充說明，會一起送交辨識。" else admissionExplanation(batch, state.engines) ?: resultExplanation(batch), color = MobileMuted, style = MaterialTheme.typography.bodyMedium)
               }
               ReceiptActionMenu(batch, null, state, actions)
+            }
+        }
+        if (state.tracksProgress(batch)) item(key = "$itemKey:auto-progress") {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("進度自動更新中", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MobileMuted)
+                TextButton(onClick = { actions.sync(batch.id) }, enabled = state.busy == null,
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("mobile-refresh-progress")) { Text("立即更新") }
             }
         }
         if (state.busy != null) item(key = "$itemKey:busy") {
@@ -217,7 +224,7 @@ private fun IntakeMilestones(batch: MobileBatch) {
     val recognized = batch.status == "succeeded"
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         MilestoneRow("原圖上傳", "中央已確認 ${batch.uploadedHashes.size} / ${batch.images.size} 張", batch.uploadedHashes.size == batch.images.size && batch.images.isNotEmpty())
-        MilestoneRow("中央辨識", if (recognized) "辨識完成" else statusLabel(batch.status), recognized)
+        MilestoneRow("中央辨識", if (recognized) "辨識完成" else if (admissionWaiting(batch)) ReceiptStatus.WaitingSource.label else statusLabel(batch.status), recognized)
         MilestoneRow(if (batch.purpose == "reference") "查看參考成果" else "帳本核對", if (batch.purpose == "reference") "不建立消費帳目" else if (batch.ledgerId != null) "已完成" else "由你確認金額與用途", batch.ledgerId != null)
     }
 }
@@ -237,6 +244,7 @@ private fun progressTitle(batch: MobileBatch): String = when {
     batch.deleted -> "這筆收據已刪除"
     batch.ledgerStatus == "voided" || batch.draftStatus == "voided" -> "這筆帳目已作廢"
     batch.ledgerId != null || batch.draftStatus == "confirmed" -> "這筆消費已完成"
+    admissionWaiting(batch) -> "辨識服務暫停"
     else -> when (batch.status) {
     "succeeded" -> if (batch.purpose == "reference") "參考成果已備妥" else "接下來，核對這筆消費"
     "unknown" -> "先確認原工作的結果"
@@ -254,7 +262,7 @@ private fun resultExplanation(batch: MobileBatch): String = when {
     "succeeded" -> if (batch.purpose == "reference") "參考候選已保存。這批資料不會建立消費帳目。" else "辨識完成，直接在 App 核對品項、金額與用途，再確認入帳。"
     "failed", "unavailable" -> "資料已保留。可更新原工作狀態；不會自動重新辨識或切換來源。"
     "unknown" -> "中央執行結果尚不確定。只查詢原工作，不另建交易。"
-    else -> if (batch.intakeId != null) "中央會持續處理，不需一直開著手機。回來按更新進度即可。" else "原請求內容已鎖定；繼續同步會沿用同一筆請求。"
+    else -> if (batch.intakeId != null) "中央會持續處理，回到 App 會自動更新進度。" else if (batch.syncRetryable) "原請求已保存；連線恢復後會沿同一筆請求自動續傳。" else "原請求內容已鎖定；繼續同步會沿用同一筆請求。"
 }
 
 }

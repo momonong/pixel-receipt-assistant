@@ -42,6 +42,11 @@ data class MobileBatch(
     val ledgerStatus: String? = null,
     val review: MobileReview? = null,
     val deletedAt: Long? = null,
+    // Only a persisted, explicit send intent may resume network writes automatically.
+    // Old records default to false; their original frozen intent remains manually recoverable.
+    val syncRetryable: Boolean = false,
+    val syncRetryAt: Long? = null,
+    val syncFailures: Int = 0,
 ) {
     val deleted: Boolean get() = deletedAt != null || status == "deleted" || draftStatus == "deleted"
     val editable: Boolean get() = !deleted && frozen == null && intakeId == null

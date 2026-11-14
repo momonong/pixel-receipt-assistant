@@ -48,7 +48,6 @@ class MobileViewModel @JvmOverloads constructor(
     val savingReview = savingReviewMutable.asStateFlow()
     private var reviewSave: Job? = null
     private var refreshedAt = 0L
-    private var refreshCursor = 0
     private val legacyMutable = MutableStateFlow(false)
     val legacy = legacyMutable.asStateFlow()
     private val signedInMutable = MutableStateFlow(false)
@@ -64,6 +63,11 @@ class MobileViewModel @JvmOverloads constructor(
     private val commands = MobileCommands(viewModelScope)
     private var network: Job? = null
     private var importing = 0
+    private val automaticProgress = MobileAutoProgress(viewModelScope, repository,
+        { signedIn.value && writable.value && busy.value == null && importing == 0 && !savingReview.value },
+        { selected.value }, { enginesMutable.value = it }, { signedInMutable.value = false; reviewerMutable.value = false })
+    internal val autoProgress = automaticProgress.enabled
+    internal val autoProgressPaused = automaticProgress.paused
     private val acceptedShares = mutableSetOf<String>()
     private val appUpdater = MobileUpdateController(viewModelScope, repository, AndroidMobileUpdateHost(application), com.momonong.pixelreceipt.BuildConfig.VERSION_CODE) {
         signedInMutable.value = false; reviewerMutable.value = false
@@ -223,19 +227,15 @@ class MobileViewModel @JvmOverloads constructor(
     }
     fun foreground() {
         appUpdater.resumed()
+        automaticProgress.resume()
         val now = System.currentTimeMillis()
         if (!signedIn.value || busy.value != null || now - refreshedAt < 30_000) return
         refreshedAt = now
         if (destination.value == MobilePage.Spending.name && !settings.value) activateSpending(force = true)
+        // Receipt progress has one owner and never takes the full-screen busy state.
+        if (destination.value !in setOf(MobilePage.Ledger.name, MobilePage.LedgerDetail.name)) return
         online("正在更新已保存狀態…") {
-            val batches = repository.store.state.value?.batches.orEmpty().filter { it.intakeId != null && !it.deleted }
-            val chosen = if (batches.isEmpty()) emptyList() else List(minOf(8, batches.size)) { batches[(refreshCursor + it) % batches.size] }
-            refreshCursor += chosen.size
-            (listOfNotNull(batches.firstOrNull { it.id == selected.value }) + chosen).distinctBy { it.id }.forEach {
-                val result = repository.sync(it.id)
-                if (destination.value == MobilePage.Review.name && selected.value == it.id && result.ledgerId != null) { showFormalLedger(result); repository.ledgerDetail(result.ledgerId) }
-            }
-            if (destination.value in setOf(MobilePage.Ledger.name, MobilePage.LedgerDetail.name)) repository.ledger(detailId = selectedLedger.value.takeIf { destination.value == MobilePage.LedgerDetail.name })
+            repository.ledger(detailId = selectedLedger.value.takeIf { destination.value == MobilePage.LedgerDetail.name })
         }
     }
     fun editReview(id: String, change: (com.google.gson.JsonObject) -> Unit) {
@@ -359,6 +359,7 @@ class MobileViewModel @JvmOverloads constructor(
         }
     }
     fun login(password: String) = online("正在登入…") {
+        automaticProgress.sessionChanged()
         clearNativeScope(); appUpdater.sessionChanged(); spendingController.sessionChanged(); insightController.accountChanged(); priceController.accountChanged()
         repository.login(password)
         signedInMutable.value = true
@@ -370,6 +371,7 @@ class MobileViewModel @JvmOverloads constructor(
         if (destination.value == MobilePage.Spending.name) insightController.refresh()
     }
     fun logout() = online("正在登出…") {
+        automaticProgress.stop()
         clearNativeScope(); appUpdater.sessionChanged(); spendingController.sessionChanged(); insightController.accountChanged(); priceController.accountChanged()
         try {
             val revoked = repository.logout()
@@ -382,7 +384,7 @@ class MobileViewModel @JvmOverloads constructor(
         }
     }
     fun refreshEngines() = online("正在查詢辨識來源…") { enginesMutable.value = repository.availability() }
-    fun sync(id: String) = syncWithDuplicateDecision(id, null)
+    fun sync(id: String) { automaticProgress.manualRetry(); syncWithDuplicateDecision(id, null) }
     private fun syncWithDuplicateDecision(id: String, approval: DuplicateShareApproval?) = online("正在同步這筆收件…") {
         if (edits.pending(id)) throw MobileFailure("目前編輯尚未保存，請先重試儲存；這次未上傳。")
         val current = repository.store.state.value?.batches?.firstOrNull { it.id == id } ?: throw MobileFailure("找不到這筆本機收件。")
@@ -392,6 +394,11 @@ class MobileViewModel @JvmOverloads constructor(
         }
         catch (_: DuplicateShareDecisionExpired) {
             if (selected.value == id && destination.value == MobilePage.Detail.name) messageMutable.value = "照片或舊收件已變更；請重新按送出確認。"
+        }
+        catch (error: Exception) {
+            if (error is CancellationException) throw error
+            if (retryableSyncFailure(error) && repository.store.batch(id).syncRetryable) messageMutable.value = null
+            else throw error
         }
     }
     internal fun cancelDuplicateShare(reminder: DuplicateShareReminder) {
@@ -440,6 +447,15 @@ class MobileViewModel @JvmOverloads constructor(
             messageMutable.value = "品名已保存；原入帳金額與用途保留。"
         }
     }
-    fun stopNetwork() { network?.cancel() }
-    fun background() { network?.cancel() }
+    fun stopNetwork() {
+        automaticProgress.stop(); network?.cancel()
+        commands.launch {
+            try { repository.pauseAutomaticSync() }
+            catch (error: Exception) {
+                if (error is CancellationException) throw error
+                messageMutable.value = "本次自動同步已停止，但停止設定尚未保存；請先恢復本機儲存空間。"
+            }
+        }
+    }
+    fun background() { automaticProgress.background(); refreshedAt = 0; network?.cancel() }
 }

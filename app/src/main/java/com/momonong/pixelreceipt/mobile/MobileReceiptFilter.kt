@@ -14,6 +14,7 @@ internal enum class ReceiptStatus(
     NeedsReview("review", "待核對", 0xFF7A5310, 0xFFFFF2D5),
     Processing("processing", "中央處理中", 0xFF235BA7, 0xFFE8F0FD),
     WaitingSync("waiting_sync", "等待同步", 0xFF1C687A, 0xFFE4F3F5),
+    WaitingSource("waiting_source", "等待辨識恢復", 0xFF7A4A20, 0xFFF7E9D5, attention = true),
     Draft("draft", "尚未送出", 0xFF425B74, 0xFFECF0F5),
     ReferenceReady("reference", "成果待查看", 0xFF724489, 0xFFF4EAF9),
     MissingPhotos("missing_photos", "待補照片", 0xFF913E18, 0xFFFDEBDD, false, true),
@@ -75,9 +76,24 @@ private fun centralProcessingStatus(batch: MobileBatch, now: Long): ReceiptStatu
     val remote = batch.serverJson?.let { runCatching { jsonObject(it) }.getOrNull() }
     val finished = remote?.get("polling_finished")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isBoolean }?.asBoolean == true
     if (finished) return ReceiptStatus.UnknownResult
+    if (admissionWaiting(batch)) return ReceiptStatus.WaitingSource
     // A photo may sit locally for weeks before submission; only the central creation time is evidence of age.
     val created = remote?.text("created_at")?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
     return if (created != null && created <= now && now - created >= 24L * 60 * 60 * 1000) ReceiptStatus.Delayed else ReceiptStatus.Processing
+}
+
+internal fun admissionWaiting(batch: MobileBatch): Boolean = batch.status == "queued" &&
+    batch.serverJson?.let { runCatching { jsonObject(it).text("error_code") }.getOrNull() } in
+        setOf("broker_admission_waiting", "broker_admission_unavailable", "broker_work_busy")
+
+internal fun admissionExplanation(batch: MobileBatch, engines: Map<String, EngineAvailability>): String? {
+    if (!admissionWaiting(batch)) return null
+    return when (engines[batch.engine]?.reason) {
+        "broker_qualification_unavailable" -> "免費資格待更新。照片與說明已保存，服務恢復後中央會自動繼續。"
+        "broker_capacity_unavailable" -> "目前額度或處理量已滿。照片與說明已保存，中央會自動等候可用額度。"
+        "broker_credential_unavailable", "recognition_configuration_invalid", "recognition_not_configured" -> "辨識服務需要更新設定。照片與說明已保存，設定恢復後中央會自動繼續。"
+        else -> "中央正在等候可用的辨識服務。照片與說明已保存，恢復後會自動繼續。"
+    }
 }
 
 internal fun receiptTagColors(label: String): ReceiptColors? = ReceiptStatus.entries.firstOrNull { it.label == label }?.colors

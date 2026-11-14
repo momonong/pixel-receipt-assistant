@@ -15,6 +15,14 @@ class MobileReceiptFilterTest {
         assertEquals(ReceiptStatus.Voided, receiptStatus(batch("failed", "voided", false), now = now))
         assertEquals(ReceiptStatus.Deleted, receiptStatus(batch("deleted", "active"), now = now))
     }
+    @Test fun pausedUnsentRecognitionHasAnHonestVisibleStatusEvenAfterADay() {
+        val waiting = batch("queued", json="""{"created_at":"2026-11-10T12:00:00+00:00","error_code":"broker_admission_waiting","polling_finished":false}""")
+        val status = receiptStatus(waiting, now=now)
+        assertEquals("等待辨識恢復", status.label)
+        assertTrue(ReceiptFilter().includes(status))
+        assertTrue(ReceiptFilter("attention").includes(status))
+        assertEquals("queued", waiting.status)
+    }
     @Test fun formalOutcomeAlsoControlsTheNextStepAndMissingNamesHasItsOwnColor() {
         assertEquals("查看已完成帳目",mobileNextStep(batch("processing","active",false)))
         assertEquals("查看作廢紀錄",mobileNextStep(batch("failed","voided",false)))

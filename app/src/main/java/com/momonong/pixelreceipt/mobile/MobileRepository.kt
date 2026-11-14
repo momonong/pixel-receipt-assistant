@@ -6,8 +6,10 @@ import com.momonong.pixelreceipt.data.ingestion.readError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -128,22 +130,25 @@ class MobileRepository(
     suspend fun sync(id: String, expectedRevision: Long? = null): MobileBatch = syncWithDuplicateApproval(id, expectedRevision, null)
     internal suspend fun syncWithDuplicateApproval(id: String, expectedRevision: Long?, approval: DuplicateShareApproval?): MobileBatch = withContext(Dispatchers.IO) {
         operation.withLock {
+            var transportFailure = false
+            suspend fun <T> transfer(action: suspend () -> T): T = try { action() }
+                catch (error: Exception) { transportFailure = retryableSyncFailure(error); throw error }
             try {
                 // Disk commit precedes every network write. An uncertain response never changes this key/body.
                 val current = store.batch(id)
                 if (current.deleted && approval == null) return@withLock current
                 val batch = if (current.intakeId != null && approval == null) current else store.freezeForSubmission(id, expectedRevision, approval)
                 val result = authenticated { token ->
-                    if (batch.intakeId != null) api.status(token, batch.intakeId)
+                    if (batch.intakeId != null) transfer { api.status(token, batch.intakeId) }
                     else {
                         batch.images.filter { it.hash !in batch.uploadedHashes }.forEach { image ->
                             currentCoroutineContext().ensureActive()
                             val file = images.file(image.hash)
                             verifyOriginal(file, image)
-                            check(api.upload(token, image, file) == image.hash)
+                            check(transfer { api.upload(token, image, file) } == image.hash)
                             store.update(id) { old -> old.copy(uploadedHashes = (old.uploadedHashes + image.hash).distinct()) }
                         }
-                        api.submit(token, batch.frozen!!)
+                        transfer { api.submit(token, batch.frozen!!) }
                     }
                 }
                 applyIntake(id, result)
@@ -152,13 +157,33 @@ class MobileRepository(
             } catch (expired: DuplicateShareDecisionExpired) {
                 throw expired // A stale choice must not change the newer draft or its editor CAS.
             } catch (cancelled: CancellationException) {
+                if (cancelled is TimeoutCancellationException && currentCoroutineContext().isActive) {
+                    val timeout = java.net.SocketTimeoutException("中央連線逾時")
+                    recordSyncFailure(id, timeout, transportFailure)
+                    throw timeout
+                }
                 withContext(NonCancellable) { runCatching { store.update(id) { it.copy(message = "同步已停止；中央可能已收件。原圖及原請求已保存，下次沿原請求同步。") } } }
                 throw cancelled
             } catch (error: Exception) {
-                runCatching { store.update(id) { it.copy(message = mobileError(error)) } }
+                recordSyncFailure(id, error, transportFailure)
                 throw error
             }
         }
+    }
+    private fun recordSyncFailure(id: String, error: Exception, transportFailure: Boolean) {
+        runCatching { store.update(id) { old ->
+            val retry = old.frozen != null && old.intakeId == null && transportFailure
+            val failures = (old.syncFailures + 1).coerceIn(1, 10)
+            old.copy(syncRetryable = retry, syncFailures = failures,
+                syncRetryAt = if (retry) System.currentTimeMillis() + syncBackoffMillis(failures) else null,
+                message = if (retry) "連線暫時中斷；照片與說明已保留，將沿原請求自動重試。"
+                    else if (!transportFailure && error is java.io.IOException && error !is MobileApiFailure) "本機儲存未完成；已暫停自動續傳，請確認儲存空間後再繼續同步。"
+                    else if (old.intakeId != null && transportFailure) "連線暫時中斷；將自動查詢原工作進度，照片與說明都保留。"
+                    else mobileError(error))
+        } }
+    }
+    internal suspend fun pauseAutomaticSync() = withContext(Dispatchers.IO) {
+        operation.withLock { store.pauseAutomaticSync() }
     }
     suspend fun openReview(id: String): MobileBatch = withContext(Dispatchers.IO) {
         operation.withLock {
@@ -343,7 +368,8 @@ class MobileRepository(
     }
     private fun applyIntake(id: String, result: ServerIntake): MobileBatch = store.update(id) { old ->
         if (old.deleted) old else old.copy(intakeId = result.id, status = result.status, draftId = result.draftId, serverJson = result.rawJson,
-            message = null, draftStatus = if (old.draftStatus == "voided" || old.ledgerStatus == "voided") "voided" else if (old.ledgerId != null && result.ledgerId == null) old.draftStatus else result.draftStatus,
+            message = null, syncRetryable = false, syncRetryAt = null, syncFailures = 0,
+            draftStatus = if (old.draftStatus == "voided" || old.ledgerStatus == "voided") "voided" else if (old.ledgerId != null && result.ledgerId == null) old.draftStatus else result.draftStatus,
             ledgerId = old.ledgerId ?: result.ledgerId, ledgerStatus = if (old.ledgerStatus == "voided") "voided" else result.ledgerStatus ?: old.ledgerStatus,
             deletedAt = if (result.status == "deleted" || result.draftStatus == "deleted") System.currentTimeMillis() else old.deletedAt)
     }
@@ -526,6 +552,15 @@ class MobileRepository(
         if (digest.digest().joinToString("") { "%02x".format(it) } != image.hash) throw MobileFailure("原圖完整性檢查失敗；本次未送出。")
     }
 }
+
+internal fun retryableSyncFailure(error: Exception): Boolean = when (error) {
+    is TimeoutCancellationException -> true
+    is MobileApiFailure -> error.statusCode in setOf(408, 425, 429) || error.statusCode in 500..599
+    is java.io.IOException -> true
+    else -> false
+}
+
+internal fun syncBackoffMillis(failures: Int): Long = when (failures) { 0, 1 -> 10_000; 2 -> 30_000; else -> 60_000 }
 
 internal fun mobileError(error: Exception): String = when (error) {
     is MobileApiFailure -> when (error.statusCode) {
