@@ -62,7 +62,9 @@ class IntakeStore:
             if previous:
                 if previous["content_digest"] != digest:
                     raise StoreError(409, "idempotency_key_content_conflict")
-                return self.value(previous), False
+                from .receipt_agent import group_fields
+
+                return {**self.value(previous), **group_fields(connection, previous["id"])}, False
             snapshot = []
             for entry in request.evidence:
                 row = connection.execute(
@@ -101,7 +103,9 @@ class IntakeStore:
             row = connection.execute(ACCOUNTING_DETAIL + " WHERE i.id=?", (identifier,)).fetchone()
             if row is None:
                 raise StoreError(404, "intake_not_found")
-            return self.value(row)
+            from .receipt_agent import group_fields
+
+            return {**self.value(row), **group_fields(connection, identifier)}
 
     def draft_context(self, draft_id):
         # The FK is application-owned. An untrusted source.label is never a lookup key.
@@ -123,7 +127,7 @@ class IntakeStore:
                     raise ValueError("intake relation does not match immutable evidence")
             except (ValueError, TypeError) as error:
                 raise StoreError(503, "intake_context_invalid") from error
-            return {
+            value = {
                 "draft_id": draft_id,
                 "intake": {
                     "id": row["id"],
@@ -133,11 +137,28 @@ class IntakeStore:
                     "created_at": row["created_at"],
                 },
             }
+            region = connection.execute(
+                """SELECT r.parent_id,r.specification,i.input
+                FROM receipt_regions r JOIN intakes i ON i.id=r.parent_id
+                WHERE r.child_intake_id=?""",
+                (row["id"],),
+            ).fetchone()
+            if region:
+                parent = json.loads(region["input"])
+                value["intake"]["receipt_group"] = {
+                    "parent_id": region["parent_id"],
+                    "original_user_notes": parent["user_notes"],
+                    "original_evidence": parent["evidence"],
+                    **json.loads(region["specification"]),
+                }
+            return value
 
     def list(self, limit, offset):
         # Lists never materialize model payloads or raw outcomes. Each detail is a
         # separate bounded request; a 100-item list cannot allocate 400MiB of results.
         with self.store.connection() as connection:
+            from .receipt_agent import group_fields
+
             return [
                 {
                     "id": row["id"],
@@ -156,11 +177,14 @@ class IntakeStore:
                     "created_at": row["created_at"],
                     "updated_at": row["updated_at"],
                     "polling_finished": bool(row["polling_finished"]),
+                    **group_fields(connection, row["id"]),
                 }
                 for row in connection.execute(
                     f"""SELECT i.id,i.input,i.status,i.error_code,i.job_key,i.draft_id,
                         i.created_at,i.updated_at,i.polling_finished,{ACCOUNTING_COLUMNS}
                         {ACCOUNTING_FROM} WHERE i.status != 'deleted'
+                        AND i.id NOT IN (SELECT child_intake_id FROM receipt_regions)
+                        AND i.id NOT IN (SELECT intake_id FROM receipt_attempts)
                         ORDER BY i.created_at DESC,i.id LIMIT ? OFFSET ?""",
                     (limit, offset),
                 )
@@ -178,6 +202,10 @@ class IntakeStore:
                 raise StoreError(404, "intake_not_found")
             if row["status"] == "deleted":
                 raise StoreError(409, "intake_already_deleted")
+            if connection.execute(
+                "SELECT 1 FROM receipt_groups WHERE intake_id=?", (identifier,)
+            ).fetchone():
+                raise StoreError(409, "multi_receipt_delete_individually")
             if row["draft_id"] is not None:
                 self.store._delete_draft(
                     connection, row["draft_id"], request.expected_draft_revision, request.reason
@@ -194,6 +222,16 @@ class IntakeStore:
                    updated_at=? WHERE id=?""",
                 (timestamp(), identifier),
             )
+            # A repair is internal work for this receipt, never a second receipt.
+            connection.execute(
+                """UPDATE intakes SET status='deleted',polling_finished=1,
+                updated_at=? WHERE id IN (
+                    SELECT intake_id FROM receipt_attempts WHERE owner_id=?)""",
+                (timestamp(), identifier),
+            )
+            from .receipt_agent import refresh_parent
+
+            refresh_parent(connection, identifier)
             value = self.value(
                 connection.execute(ACCOUNTING_DETAIL + " WHERE i.id=?", (identifier,)).fetchone()
             )
@@ -220,7 +258,11 @@ class IntakeStore:
             row = connection.execute("SELECT * FROM intakes WHERE id=?", (identifier,)).fetchone()
             if row is None:
                 raise StoreError(404, "intake_not_found")
-            return dict(row)
+            from .payload_media import restore_payload
+
+            value = dict(row)
+            value["payload"] = restore_payload(self.store, value["payload"])
+            return value
 
     def pending(self):
         now = int(time.time())
@@ -230,6 +272,8 @@ class IntakeStore:
             # safely resume admission. Sent/parked jobs retain their original key.
             row = connection.execute(
                 """SELECT id FROM intakes WHERE next_poll_at<=? AND polling_finished=0
+                   AND id NOT IN (SELECT intake_id FROM receipt_groups)
+                   AND id NOT IN (SELECT owner_id FROM receipt_attempts)
                    AND (status IN ('queued','preparing','submitting','processing','unknown')
                      OR (status='unavailable' AND error_code='broker_route_unavailable'
                        AND monitor_until=0 AND execution_key IS NULL AND result IS NULL))
@@ -257,22 +301,47 @@ class IntakeStore:
             raise ValueError("unsupported intake update")
         fields["updated_at"] = timestamp()
         with self.store.connection(write=True) as connection:
+            if "payload" in fields:
+                from .payload_media import compact_payload
+
+                fields["payload"] = compact_payload(self.store, connection, fields["payload"])
             changed = connection.execute(
                 f"UPDATE intakes SET {','.join(k + '=?' for k in fields)} "
                 "WHERE id=? AND status != 'deleted'",
                 (*fields.values(), identifier),
             ).rowcount
+            from .receipt_agent import refresh_parent
+
+            refresh_parent(connection, identifier)
             return changed == 1
 
     def complete(self, identifier, candidate, result):
         # The deletion check, derived-key draft creation and FK link share one write
         # transaction. A failed link rolls the draft back; a tombstone creates nothing.
         with self.store.connection(write=True) as connection:
+            attempt_id = identifier
+            attempt = connection.execute(
+                "SELECT owner_id FROM receipt_attempts WHERE intake_id=?", (identifier,)
+            ).fetchone()
+            if attempt:
+                identifier = attempt[0]
             row = connection.execute("SELECT * FROM intakes WHERE id=?", (identifier,)).fetchone()
             if row is None:
                 raise StoreError(404, "intake_not_found")
             if row["status"] == "deleted":
                 return
+            if attempt:
+                # Keep both queue journals; the final candidate belongs to the same
+                # logical receipt and its immutable original crop references.
+                connection.execute(
+                    """UPDATE intakes SET status='succeeded',result=?,
+                    error_code=NULL,updated_at=? WHERE id=? AND status!='deleted'""",
+                    (canonical(result), timestamp(), attempt_id),
+                )
+                original_result = json.loads(row["result"])
+                if original_result.get("repair_intake_id") == attempt_id:
+                    original_result = original_result["initial_read"]
+                result = {**result, "initial_read": original_result, "repair_intake_id": attempt_id}
             body = json.loads(row["input"])
             draft_id = None
             if body["purpose"] == "purchase":
@@ -314,3 +383,6 @@ class IntakeStore:
                     identifier,
                 ),
             )
+            from .receipt_agent import refresh_parent
+
+            refresh_parent(connection, identifier)

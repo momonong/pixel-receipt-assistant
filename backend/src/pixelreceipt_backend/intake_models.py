@@ -3,7 +3,7 @@
 import uuid
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, Field, StringConstraints, model_validator
+from pydantic import AfterValidator, Field, StringConstraints, model_serializer, model_validator
 
 from .models import LONG_MAX, Sha256, StrictModel, nonblank
 
@@ -37,6 +37,16 @@ class CreateIntake(StrictModel):
     engine: Literal["broker", "local"]
     user_notes: Annotated[str, StringConstraints(max_length=4000)] | None
     evidence: Annotated[list[IntakeEvidence], Field(min_length=1, max_length=20)]
+    capabilities: Annotated[list[Literal["receipt_groups_v1"]], Field(max_length=1)] = Field(
+        default_factory=list
+    )
+
+    @model_serializer(mode="wrap")
+    def legacy_serialization(self, handler):
+        value = handler(self)
+        if not self.capabilities:
+            value.pop("capabilities", None)
+        return value
 
     @model_validator(mode="after")
     def grouping(self):

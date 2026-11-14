@@ -15,7 +15,7 @@ internal fun duplicateShareReminder(incoming: MobileBatch, batches: List<MobileB
     val receipt = incoming.images.filter { it.role == "receipt" }.map { it.hash }.toSet()
     if (receipt.isEmpty()) return null
     val matches = batches.filter { old ->
-        old.id != incoming.id && old.purpose == "purchase" && old.importComplete && old.importReview?.requiresConfirmation != true &&
+        old.parentBatchId == null && old.id != incoming.id && old.purpose == "purchase" && old.importComplete && old.importReview?.requiresConfirmation != true &&
             old.images.filter { it.role == "receipt" }.map { it.hash }.toSet() == receipt
     }.sortedWith(compareBy<MobileBatch> { old ->
         when {

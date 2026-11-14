@@ -33,6 +33,7 @@ internal fun ReceiptActionMenu(batch: MobileBatch?, entry: JsonObject?, state: M
     val actionLabel = if (ledgerId != null) "作廢帳目" else "刪除收據"
     val blocker = when {
         pending != null -> null
+        batch?.isReceiptGroup == true -> GROUP_DELETE_EXPLANATION
         !state.writable -> "本機尚無法保存操作，請先重試本機儲存。"
         ledgerId != null && (!state.signedIn || !state.reviewer) -> "請先到設定登入，才能作廢中央帳目。"
         batch?.id in state.edits || batch?.id in state.pendingReviewEdits || state.savingReview -> "目前編輯尚未保存，請先完成或重試儲存。"

@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -109,6 +110,39 @@ class BackupTests(unittest.TestCase):
         marker.write_text("preserve")
         self.assertEqual(self.call("snapshot", self.live, self.snapshot)[0], 2)
         self.assertEqual(marker.read_text(), "preserve")
+
+    def test_incremental_snapshot_links_only_verified_backup_blobs(self):
+        backup.snapshot(self.live, self.snapshot)
+        second = self.parent / "second"
+        result = backup.snapshot(self.live, second, previous=self.snapshot)
+        live = self.live / "blobs" / self.sha256
+        first = self.snapshot / "blobs" / self.sha256
+        linked = second / "blobs" / self.sha256
+        self.assertEqual(result["reused_blobs"], 1)
+        self.assertEqual(first.stat().st_ino, linked.stat().st_ino)
+        self.assertNotEqual(live.stat().st_ino, linked.stat().st_ino)
+        self.assertEqual(backup.verify(second)["status"], "snapshot_verified")
+        # Removing one snapshot name cannot break the other snapshot's restore.
+        first.unlink()
+        backup.restore(second, self.restored)
+        self.assertEqual((self.restored / "blobs" / self.sha256).read_bytes(), self.content)
+        self.assertNotEqual((self.restored / "blobs" / self.sha256).stat().st_ino, linked.stat().st_ino)
+
+    def test_corrupt_previous_snapshot_is_rejected_before_new_destination(self):
+        backup.snapshot(self.live, self.snapshot)
+        (self.snapshot / "blobs" / self.sha256).write_bytes(b"damaged")
+        second = self.parent / "second"
+        with self.assertRaises(backup.BackupError):
+            backup.snapshot(self.live, second, previous=self.snapshot)
+        self.assertFalse(second.exists())
+
+    def test_previous_snapshot_with_live_hardlink_is_not_reused(self):
+        backup.snapshot(self.live, self.snapshot)
+        prior = self.snapshot / "blobs" / self.sha256
+        prior.unlink()
+        os.link(self.live / "blobs" / self.sha256, prior)
+        with self.assertRaisesRegex(backup.BackupError, "previous_links_live_evidence"):
+            backup.snapshot(self.live, self.parent / "second", previous=self.snapshot)
 
     def test_v4_snapshot_keeps_jobs_notes_and_hashes_restore_revokes_all_sessions(self):
         self.connection.execute("PRAGMA user_version=4")

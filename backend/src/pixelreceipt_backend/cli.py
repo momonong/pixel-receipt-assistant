@@ -46,10 +46,14 @@ def main():
     parser.add_argument("--public-origin")
     parser.add_argument("--recognition-config", type=Path)
     parser.add_argument("--mobile-release-dir", type=Path)
+    parser.add_argument("--evidence-limit-bytes", type=int, default=1024**3)
+    parser.add_argument("--disk-reserve-bytes", type=int, default=512 * 1024**2)
     parser.add_argument("--insecure-local-cookie", action="store_true")
     args = parser.parse_args()
     if not 1024 <= args.port <= 65535:
         parser.error("port must be 1024..65535")
+    if not 1 <= args.evidence_limit_bytes <= 1024**4 or not 0 <= args.disk_reserve_bytes <= 1024**4:
+        parser.error("invalid storage limit or disk reserve")
     if args.public_origin:
         origin = urlsplit(args.public_origin)
         invalid = (
@@ -95,7 +99,11 @@ def main():
     token = read_token(directory)
     reviewer_token = read_private(directory, "reviewer-token", "PIXELRECEIPT_REVIEWER_TOKEN")
     verifier = read_private(directory, "reviewer-password", "PIXELRECEIPT_REVIEWER_PASSWORD_HASH")
-    store = Store(directory)
+    store = Store(
+        directory,
+        evidence_limit_bytes=args.evidence_limit_bytes,
+        disk_reserve_bytes=args.disk_reserve_bytes,
+    )
     recognition_config, recognition_reason = load_config(args.recognition_config)
     uvicorn.run(
         create_app(

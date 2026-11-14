@@ -52,6 +52,28 @@ internal fun MobileSettings(state: MobileUiState, password: String, changePasswo
             }
         }
         item {
+            SettingsSection("照片空間", "中央保留原圖，手機上的已完成照片可回收。") {
+                val photos = state.photoStorage
+                Text("手機照片 ${photoSize(photos.localBytes)}", style = MaterialTheme.typography.titleSmall)
+                Text("可回收 ${photoSize(photos.reclaimableBytes)}", style = MaterialTheme.typography.bodyMedium)
+                photos.central?.let { central ->
+                    Text("中央原圖 ${photoSize(central.evidenceBytes)} / ${photoSize(central.evidenceLimitBytes)} · ${central.evidenceCount} 張", style = MaterialTheme.typography.bodyMedium)
+                    if (central.warning != "ok") Text(when (central.warning) {
+                        "near_limit" -> "中央照片空間即將用滿，請聯絡維護者擴充。"
+                        "full" -> "中央照片空間已滿，請聯絡維護者擴充。"
+                        else -> "中央磁碟可用空間不足，請聯絡維護者。"
+                    }, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                } ?: Text(if (state.signedIn) "中央空間尚未讀取。" else "登入後可查看中央空間。", color = MobileMuted, style = MaterialTheme.typography.bodyMedium)
+                Text("回收前會逐張核對中央原圖。待送、結果不確定與待確認操作的照片保留；不影響相簿、備註或帳目。回收後需連線才能再次看照片。", style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
+                photos.message?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                if (photos.busy) Text("正在處理照片空間…", style = MaterialTheme.typography.bodyMedium)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = actions.refreshPhotoStorage, enabled = !photos.busy, modifier = Modifier.heightIn(min = 48.dp).testTag("photo-storage-refresh")) { Text("更新空間") }
+                    OutlinedButton(onClick = actions.reclaimPhotos, enabled = state.signedIn && state.writable && state.busy == null && !photos.busy && photos.reclaimableBytes > 0, modifier = Modifier.heightIn(min = 48.dp).testTag("photo-storage-reclaim")) { Text("回收已完成照片") }
+                }
+            }
+        }
+        item {
             SettingsSection("App 更新", "直接下載新版，安裝後自動清理更新包。") { MobileUpdateContent(state, actions) }
         }
         item {
@@ -120,5 +142,15 @@ private fun EngineRow(name: String, detail: String, selected: Boolean, enabled: 
             Text(detail, style = MaterialTheme.typography.bodySmall, color = MobileMuted)
         }
         RadioButton(selected, onClick = null, enabled = enabled)
+    }
+}
+
+@Composable
+internal fun PhotoRecoveryNotice(state: MobileUiState, actions: MobileActions) {
+    state.photoStorage.message?.let { message ->
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(message, style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
+            if (!state.photoStorage.busy) TextButton(onClick = { state.selectedId?.let(actions.recoverPhotos) }, modifier = Modifier.heightIn(min = 48.dp).testTag("photo-recovery-retry")) { Text("重試取回照片") }
+        }
     }
 }

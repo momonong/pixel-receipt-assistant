@@ -527,6 +527,8 @@ def test_v3_to_v4_preserves_rows_and_future_version_refuses(store, body):
     draft, _ = store.create_draft(CreateDraft.model_validate(body), "v3-preserved")
     store.create_session("synthetic-old-session", "old-csrf")
     with store.connection(write=True) as connection:
+        for table in ("receipt_attempts", "receipt_regions", "receipt_groups"):
+            connection.execute(f"DROP TABLE {table}")
         connection.execute("DROP TABLE ledger_metadata")
         connection.execute("DROP TABLE insight_history")
         connection.execute("DROP TABLE insight_annotations")
@@ -540,18 +542,18 @@ def test_v3_to_v4_preserves_rows_and_future_version_refuses(store, body):
     reopened = Store(store.data_dir)
     assert reopened.get_draft(draft["id"]) == draft
     with reopened.connection() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
         assert not connection.execute("PRAGMA foreign_key_check").fetchall()
         assert all(
             [tuple(row) for row in connection.execute(f"SELECT * FROM {table}")] == rows
             for table, rows in before.items()
         )
     with reopened.connection(write=True) as connection:
-        connection.execute("PRAGMA user_version=6")
+        connection.execute("PRAGMA user_version=7")
     with pytest.raises(RuntimeError, match="unsupported database version"):
         Store(store.data_dir)
     with sqlite3.connect(store.database) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
         assert connection.execute("SELECT COUNT(*) FROM drafts").fetchone()[0] == 1
 
 
@@ -572,6 +574,7 @@ def test_v3_to_v4_preserves_rows_and_future_version_refuses(store, body):
         (15, "0.7.1"),
         (16, "0.7.2"),
         (17, "0.7.3"),
+        (18, "0.8.0"),
     ],
 )
 def test_mobile_release_authenticated_fixed_metadata_streaming_integrity(

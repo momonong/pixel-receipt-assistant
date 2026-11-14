@@ -139,6 +139,7 @@ private fun MobilePrimaryBar(state: MobileUiState, password: String, login: (Str
         edit != null -> if (edit.error != null) "重試儲存目前編輯" else "正在保存編輯…"
         state.page == MobilePage.Settings -> if (state.signedIn && state.reviewer) "返回收件" else "登入此裝置"
         state.page == MobilePage.Inbox || batch == null -> "新增收件・選照片"
+        batch.isReceiptGroup -> if (state.signedIn) "更新各張收據狀態" else "登入後更新各張收據"
         formal -> if (batch.ledgerId == null) "讀取正式帳目" else if (batch.ledgerStatus == "voided") "查看作廢紀錄" else "查看已完成帳目"
         !batch.importComplete -> "補齊照片"
         batch.intakeId != null && batch.status == "succeeded" -> if (batch.draftId != null) "前往帳本核對" else "開啟中央帳本"
@@ -164,6 +165,7 @@ private fun MobilePrimaryBar(state: MobileUiState, password: String, login: (Str
                     state.page == MobilePage.Inbox -> "一批照片，一筆收件；由你核對後入帳。"
                     batch?.deleted == true -> "收據已刪除，原圖與歷史資料保留。"
                     pending != null -> "${pending.resultLabel}結果尚未確認；將查詢原 ID，沿用原請求。"
+                    batch?.isReceiptGroup == true -> batch.groupSummary(state.batches, state.mutations).text
                     formal -> if (batch?.ledgerStatus == "voided" || batch?.draftStatus == "voided") "中央已作廢，原入帳內容保留。" else "中央已確認入帳，可查看品項與用途。"
                     batch?.importComplete == false -> "請重新選取完整批次，保留已匯入原圖。"
                     batch?.intakeId != null && batch.status == "succeeded" -> "在 App 內核對金額與用途，再確認入帳。"
@@ -179,6 +181,7 @@ private fun MobilePrimaryBar(state: MobileUiState, password: String, login: (Str
                         pending != null -> actions.retryReceiptMutation(pending)
                         state.page == MobilePage.Settings -> if (state.signedIn && state.reviewer) actions.back() else login(password)
                         state.page == MobilePage.Inbox || batch == null -> actions.pick(null)
+                        batch.isReceiptGroup -> if (state.signedIn) actions.sync(batch.id) else actions.settings()
                         formal -> if (batch.ledgerId != null) actions.ledgerDetail(batch.ledgerId) else actions.dashboard(batch.draftId)
                         !batch.importComplete -> actions.pick(batch.id)
                         batch.intakeId != null && batch.status == "succeeded" -> actions.dashboard(batch.draftId)
@@ -201,8 +204,9 @@ private fun MobilePrimaryBar(state: MobileUiState, password: String, login: (Str
 @Composable
 private fun MobileInbox(state: MobileUiState, images: ImageStore, actions: MobileActions, modifier: Modifier, list: LazyListState, filter: ReceiptFilter, setFilter: (ReceiptFilter) -> Unit) {
     var filterOpen by remember { mutableStateOf(false) }
-    val statuses = state.batches.associate { it.id to receiptStatus(it, state.mutations) }
-    val visible = state.batches.filter { filter.includes(statuses.getValue(it.id)) }
+    val roots = state.batches.filter { it.parentBatchId == null }
+    val statuses = roots.associate { it.id to groupedReceiptStatus(it, state.batches, state.mutations) }
+    val visible = roots.filter { filter.includes(statuses.getValue(it.id)) }
     val attention = statuses.values.count { it.attention }
     if (filterOpen) ReceiptFilterSheet(filter, statuses.values.toList(), { filterOpen = false }) { setFilter(it); filterOpen = false }
 
@@ -211,7 +215,7 @@ private fun MobileInbox(state: MobileUiState, images: ImageStore, actions: Mobil
             Column(Modifier.padding(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("收據管理", style = MaterialTheme.typography.headlineMedium)
                 FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("顯示 ${visible.size} / ${state.batches.size} 筆", style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
+                    Text("顯示 ${visible.size} / ${roots.size} 筆", style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
                     Text(if (state.signedIn) "裝置已登入" else "尚未登入", style = MaterialTheme.typography.bodySmall, color = MobileMuted)
                 }
             }
@@ -237,8 +241,8 @@ private fun MobileInbox(state: MobileUiState, images: ImageStore, actions: Mobil
             Surface(color = Color.White, shape = RoundedCornerShape(20.dp)) {
                 Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     ReceiptMark(Modifier.size(44.dp).padding(bottom = 2.dp))
-                    Text(if (state.batches.isEmpty()) "把這筆消費帶回帳本" else "這個範圍沒有收據", style = MaterialTheme.typography.headlineSmall)
-                    Text(if (state.batches.isEmpty()) "收據、價標與促銷，放在同一批。補上代買等說明，讓核對時有原圖可循。" else "可以切換篩選查看其他收據；照片與紀錄都保留。", color = MobileMuted, style = MaterialTheme.typography.bodyLarge)
+                    Text(if (roots.isEmpty()) "把這筆消費帶回帳本" else "這個範圍沒有收據", style = MaterialTheme.typography.headlineSmall)
+                    Text(if (roots.isEmpty()) "收據、價標與促銷，放在同一批。補上代買等說明，讓核對時有原圖可循。" else "可以切換篩選查看其他收據；照片與紀錄都保留。", color = MobileMuted, style = MaterialTheme.typography.bodyLarge)
                     HorizontalDivider(color = MobileRule)
                     Text("選照片 → 補說明 → 送出辨識", style = MaterialTheme.typography.labelLarge, color = MobileTealInk)
                     Text("也能從相簿分享過來。完成辨識後，直接在 App 內核對並確認入帳。", style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
@@ -254,7 +258,7 @@ private fun MobileInbox(state: MobileUiState, images: ImageStore, actions: Mobil
                         StatusTag(statuses.getValue(batch.id).label)
                         Text(batchTitle(batch), style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text("${batch.images.size} 張照片 · ${SimpleDateFormat("M/d HH:mm", Locale.TAIWAN).format(Date(batch.createdAt))}", style = MaterialTheme.typography.bodySmall, color = MobileMuted)
-                        Text(mobileNextStep(batch), style = MaterialTheme.typography.labelLarge, color = MobileTealInk)
+                        Text(if (batch.isReceiptGroup) batch.groupSummary(state.batches, state.mutations).text else mobileNextStep(batch), style = MaterialTheme.typography.labelLarge, color = MobileTealInk)
                     }
                     ReceiptActionMenu(batch, null, state, actions)
                 }

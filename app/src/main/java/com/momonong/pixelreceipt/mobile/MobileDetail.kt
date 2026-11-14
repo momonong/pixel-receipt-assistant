@@ -32,14 +32,30 @@ internal fun MobileDetail(state: MobileUiState, images: ImageStore, actions: Mob
     var preview by rememberSaveable(batch.id) { mutableStateOf<String?>(null) }
     val itemKey = "batch:${batch.id}"
     LazyColumn(modifier.testTag("mobile-detail"), state = list, contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        if (state.photoStorage.message != null) item { PhotoRecoveryNotice(state, actions) }
         item(key = "$itemKey:header") {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
               Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(if (batch.editable) "準備這筆收件" else progressTitle(batch), style = MaterialTheme.typography.headlineSmall)
-                Text(if (batch.editable) "${batch.images.size} 張原圖與補充說明，會一起送交辨識。" else admissionExplanation(batch, state.engines) ?: resultExplanation(batch), color = MobileMuted, style = MaterialTheme.typography.bodyMedium)
+                Text(if (batch.isReceiptGroup) "逐張核對這批收據" else if (batch.editable) "準備這筆收件" else progressTitle(batch), style = MaterialTheme.typography.headlineSmall)
+                Text(if (batch.isReceiptGroup) batch.groupSummary(state.batches, state.mutations).text else if (batch.editable) "${batch.images.size} 張原圖與補充說明，會一起送交辨識。" else admissionExplanation(batch, state.engines) ?: resultExplanation(batch), color = MobileMuted, style = MaterialTheme.typography.bodyMedium)
               }
               ReceiptActionMenu(batch, null, state, actions)
             }
+        }
+        if (batch.isReceiptGroup) {
+            item(key = "$itemKey:group-heading") {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("各張收據", style = MaterialTheme.typography.titleMedium)
+                    Text("點選收據，在 App 分別核對金額與用途。每張都要自行確認入帳；作廢與刪除另列。", color = MobileMuted, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+            itemsIndexed(batch.receiptChildren(state.batches), key = { _, child -> "receipt:${child.id}" }) { _, child ->
+                GroupedReceiptCard(child, images, state, actions)
+            }
+            item(key = "$itemKey:group-retain") { Text(GROUP_DELETE_EXPLANATION, color = MobileMuted, style = MaterialTheme.typography.bodySmall) }
+        }
+        if (batch.parentBatchId != null) item(key = "$itemKey:parent") {
+            TextButton(onClick = { actions.select(batch.parentBatchId) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("返回整批收據") }
         }
         if (state.tracksProgress(batch)) item(key = "$itemKey:auto-progress") {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -73,7 +89,7 @@ internal fun MobileDetail(state: MobileUiState, images: ImageStore, actions: Mob
                 Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("這批原圖", style = MaterialTheme.typography.titleSmall)
-                        StatusTag(receiptStatus(batch, state.mutations).label, problem = !batch.importComplete || batch.status in setOf("failed", "unknown", "unavailable"))
+                        StatusTag(groupedReceiptStatus(batch, state.batches, state.mutations).label, problem = !batch.importComplete || batch.status in setOf("failed", "unknown", "unavailable"))
                     }
                     if (batch.images.isNotEmpty()) {
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -87,7 +103,7 @@ internal fun MobileDetail(state: MobileUiState, images: ImageStore, actions: Mob
                     } else Text("尚無完整照片，請先補齊原圖。", color = MobileMuted, style = MaterialTheme.typography.bodyMedium)
                     if (!batch.editable) {
                         HorizontalDivider(color = MobileRule)
-                        IntakeMilestones(batch)
+                        if (!batch.isReceiptGroup) IntakeMilestones(batch)
                     } else Text("點照片可放大對照；逐張區可調整成員與順序。", style = MaterialTheme.typography.bodySmall, color = MobileMuted)
                 }
             }

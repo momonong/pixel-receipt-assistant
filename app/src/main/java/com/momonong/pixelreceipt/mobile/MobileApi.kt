@@ -46,6 +46,8 @@ interface MobileApi {
     suspend fun priceReview(token: String, id: String): String = throw UnsupportedOperationException()
     suspend fun savePriceReview(token: String, id: String, body: String, key: String): String = throw UnsupportedOperationException()
     suspend fun productPrices(token: String, id: String, offset: Int = 0): String = throw UnsupportedOperationException()
+    suspend fun photoStorage(token: String): String = throw UnsupportedOperationException()
+    suspend fun downloadPhoto(token: String, image: MobileImage, target: File): Unit = throw UnsupportedOperationException()
     suspend fun appRelease(token: String): AppRelease = throw UnsupportedOperationException()
     suspend fun downloadAppUpdate(token: String, release: AppRelease, file: File, progress: (Long) -> Unit): Unit = throw UnsupportedOperationException()
 }
@@ -130,7 +132,7 @@ internal class HttpsMobileTransport(private val connectionFactory: (URL) -> Http
     }
 }
 
-class HttpsMobileApi internal constructor(private val transport: MobileTransport, private val apkDownload: ApkDownload = HttpsApkDownload()) : MobileApi {
+class HttpsMobileApi internal constructor(private val transport: MobileTransport, private val apkDownload: ApkDownload = HttpsApkDownload(), private val photoDownload: PhotoDownload = HttpsPhotoDownload()) : MobileApi {
     constructor() : this(HttpsMobileTransport())
     override suspend fun login(deviceId: String, password: String): String {
         require(validUuid(deviceId) && password.length in 1..1024)
@@ -250,6 +252,8 @@ class HttpsMobileApi internal constructor(private val transport: MobileTransport
         return transport.call(MobileRequest("v1/products/$id/prices?limit=20&offset=$offset", token = token))
     }
     override suspend fun overview(token: String): String = transport.call(MobileRequest("v1/overview", token = token)).also { overviewObject(it) }
+    override suspend fun photoStorage(token: String): String = transport.call(MobileRequest("v1/storage", token = token)).also { parsePhotoStorage(it) }
+    override suspend fun downloadPhoto(token: String, image: MobileImage, target: File) = photoDownload.download(token, image, target)
     override suspend fun appRelease(token: String): AppRelease = parseAppRelease(transport.call(MobileRequest("v1/mobile/release", token = token)))
     override suspend fun downloadAppUpdate(token: String, release: AppRelease, file: File, progress: (Long) -> Unit) = apkDownload.download(token, release, file, progress)
     private fun objectJson(body: String): JsonObject = JsonParser.parseString(body).asJsonObject
@@ -258,6 +262,7 @@ class HttpsMobileApi internal constructor(private val transport: MobileTransport
         val id = json["id"].asString.also { check(validUuid(it)) }
         val status = json["status"].asString.also { check(it in intakeStatuses) }
         val draft = json["draft_id"]?.takeUnless { it.isJsonNull }?.asString?.also { check(validUuid(it)) }
+        val receipts = parseServerReceipts(json)
         val summary = JsonObject().apply {
             addProperty("id", id); addProperty("status", status)
             add("draft_id", json["draft_id"] ?: com.google.gson.JsonNull.INSTANCE)
@@ -272,7 +277,7 @@ class HttpsMobileApi internal constructor(private val transport: MobileTransport
         val draftStatus = json["draft_status"]?.takeUnless { it.isJsonNull }?.asString?.also { check(it in setOf("needs_review", "confirmed", "voided", "deleted")) }
         val ledgerId = json["ledger_id"]?.takeUnless { it.isJsonNull }?.asString?.also { check(validUuid(it)) }
         val ledgerStatus = json["ledger_status"]?.takeUnless { it.isJsonNull }?.asString?.also { check(it in setOf("active", "voided")) }
-        return ServerIntake(id, status, draft, summary, draftStatus, ledgerId, ledgerStatus)
+        return ServerIntake(id, status, draft, summary, draftStatus, ledgerId, ledgerStatus, receipts)
     }
 }
 
@@ -280,7 +285,7 @@ class HttpsMobileApi internal constructor(private val transport: MobileTransport
 internal fun allowedMobileRequest(path: String, method: String): Boolean {
     val uuid = "[0-9a-fA-F-]{36}"
     return when (method) {
-        "GET" -> allowedSpendingRequest(path) || allowedAnalyticsRead(path) || path in setOf("v1/recognition", "v1/overview", "v1/mobile/release", "v1/session") || path.matches(Regex("v1/(intakes|drafts|ledger)/$uuid")) ||
+        "GET" -> allowedSpendingRequest(path) || allowedAnalyticsRead(path) || path in setOf("v1/recognition", "v1/overview", "v1/mobile/release", "v1/session", "v1/storage") || path.matches(Regex("v1/(intakes|drafts|ledger)/$uuid")) ||
             path.matches(Regex("v1/(drafts|ledger)/$uuid/insights")) || path.matches(Regex("v1/analysis-operations/$uuid")) || path.matches(Regex("v1/ledger/$uuid/price-review")) ||
             path.matches(Regex("v1/ledger\\?limit=20&offset=(0|[1-9][0-9]{0,5})"))
         "POST" -> path in setOf("v1/mobile/logout", "v2/mobile/login", "v2/mobile/logout", "v1/evidence", "v1/intakes", "v1/manual-entries", "v1/products") ||

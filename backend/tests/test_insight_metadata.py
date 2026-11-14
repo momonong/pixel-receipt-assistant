@@ -200,7 +200,14 @@ def test_v4_migration_preserves_legacy_rows_auth_and_blobs(client, body, store, 
     ledger = receipt(client, body)
     store.create_session("synthetic-session", "synthetic-csrf")
     with store.connection(write=True) as connection:
-        for table in ("ledger_metadata", "insight_history", "insight_annotations"):
+        for table in (
+            "receipt_attempts",
+            "receipt_regions",
+            "receipt_groups",
+            "ledger_metadata",
+            "insight_history",
+            "insight_annotations",
+        ):
             connection.execute(f"DROP TABLE IF EXISTS {table}")
         connection.execute("PRAGMA user_version=4")
         tables = [
@@ -212,7 +219,7 @@ def test_v4_migration_preserves_legacy_rows_auth_and_blobs(client, body, store, 
         }
     reopened = Store(store.data_dir)
     with reopened.connection() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
         assert previous == {
             table: [tuple(r) for r in connection.execute(f"SELECT * FROM {table}")]
             for table in tables
@@ -310,9 +317,9 @@ def test_backup_v5_roundtrip_preserves_labels_manual_and_operations(client, stor
                 "insight_history",
             )
         }
-    assert backup.snapshot(store.data_dir, tmp_path / "snapshot")["database_version"] == 5
-    assert backup.verify(tmp_path / "snapshot")["database_version"] == 5
-    assert backup.restore(tmp_path / "snapshot", tmp_path / "restored")["database_version"] == 5
+    assert backup.snapshot(store.data_dir, tmp_path / "snapshot")["database_version"] == 6
+    assert backup.verify(tmp_path / "snapshot")["database_version"] == 6
+    assert backup.restore(tmp_path / "snapshot", tmp_path / "restored")["database_version"] == 6
     reopened = Store(tmp_path / "restored")
     assert reopened.get_ledger(entry["id"]) == entry
     assert reopened.ledger_id() == store.ledger_id()

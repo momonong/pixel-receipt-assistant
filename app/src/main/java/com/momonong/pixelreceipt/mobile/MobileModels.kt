@@ -47,13 +47,18 @@ data class MobileBatch(
     val syncRetryable: Boolean = false,
     val syncRetryAt: Long? = null,
     val syncFailures: Int = 0,
+    // Additive nullable fields keep pre-group state files readable by Gson.
+    val parentBatchId: String? = null,
+    val receiptIds: List<String>? = null,
+    val receiptInfo: MobileReceiptInfo? = null,
 ) {
     val deleted: Boolean get() = deletedAt != null || status == "deleted" || draftStatus == "deleted"
-    val editable: Boolean get() = !deleted && frozen == null && intakeId == null
+    val isReceiptGroup: Boolean get() = !receiptIds.isNullOrEmpty()
+    val editable: Boolean get() = !deleted && parentBatchId == null && frozen == null && intakeId == null
 }
 data class MobileState(val deviceId: String, val batches: List<MobileBatch> = emptyList(), val ledgerJson: String? = null, val ledgerUpdatedAt: Long? = null, val ledgerDetailsJson: String? = null, val ledgerNextOffset: Int? = null, val mutations: List<ReceiptMutation>? = null, val overviewJson: String? = null, val accountingStale: Boolean? = null, val accountingError: String? = null)
 data class EngineAvailability(val available: Boolean, val reason: String?)
-data class ServerIntake(val id: String, val status: String, val draftId: String?, val rawJson: String, val draftStatus: String? = null, val ledgerId: String? = null, val ledgerStatus: String? = null)
+data class ServerIntake(val id: String, val status: String, val draftId: String?, val rawJson: String, val draftStatus: String? = null, val ledgerId: String? = null, val ledgerStatus: String? = null, val receipts: List<ServerReceipt> = emptyList())
 class MobileFailure(val userMessage: String) : Exception(userMessage)
 
 internal fun freezeIntake(batch: MobileBatch): FrozenIntake {
@@ -82,6 +87,7 @@ internal fun validateNewIntake(batch: MobileBatch) {
 
 private fun intakeBody(batch: MobileBatch): String = JsonObject().apply {
         addProperty("schema", "pixelreceipt-mobile-ingest-1")
+        add("capabilities", com.google.gson.JsonArray().apply { add("receipt_groups_v1") })
         addProperty("purpose", batch.purpose)
         addProperty("engine", batch.engine)
         add("user_notes", batch.userNotes.takeIf { it.isNotBlank() }?.let { com.google.gson.JsonPrimitive(it) } ?: JsonNull.INSTANCE)

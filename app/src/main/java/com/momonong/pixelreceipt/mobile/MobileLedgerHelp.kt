@@ -102,11 +102,13 @@ internal fun MobileLedgerDetail(state: MobileUiState, images: ImageStore, action
         return
     }
     val snapshot = entry.getAsJsonObject("snapshot"); val candidate = snapshot.getAsJsonObject("candidate"); val calculation = snapshot.getAsJsonObject("calculation")
+    val photoBatch = state.batches.firstOrNull { it.ledgerId == entry.text("id") }
     val names = ledgerItemNames(entry)
     val namesPending = state.mutations.lastOrNull { it.targetId == entry.text("id") && it.phase == "pending" }
     val namesEditable = entry.text("status") != "voided" && namesPending == null && state.signedIn && state.reviewer && state.writable && state.busy == null
     val document = snapshot["review_document"]?.takeIf { it.isJsonObject }?.asJsonObject
     LazyColumn(modifier.testTag("native-ledger-detail"), state = list, contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (photoBatch != null && state.photoStorage.message != null) item { PhotoRecoveryNotice(state.copy(selectedId = photoBatch.id), actions) }
         item {
             LedgerCard {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
@@ -213,6 +215,7 @@ private fun LedgerItemNamesDialog(entry: com.google.gson.JsonObject, enabled: Bo
 internal fun MobileHelp(modifier: Modifier, list: LazyListState) {
     val entries = listOf(
         "分享一筆交易" to "在相簿選取 1–20 張收據、價標或促銷照片，分享到 PixelReceipt。不同交易分批分享，也能在收件匣選照片。原圖會保存在此裝置。",
+        "管理照片空間" to "設定可查看手機照片與中央原圖用量，手動回收已完成且中央原圖通過核對的手機快取。待送、結果不確定與待確認操作的照片保留；相簿、備註與帳目不受影響。回收後開啟收據會連線取回原圖；離線仍可查看保存的核對內容，連線後按重試取回照片。中央原圖不會因此刪除。",
         "先補整批說明" to "例如：牙膏幫朋友買、第二張是價標。整批與逐圖說明會一起送交辨識；送出前可調整照片角色與順序。",
         "收據篩選" to "收據頁預設一般收據，顯示正常新收件、待核對與已完成。刪除、作廢、缺照片或等待過久的收據仍保留，可從篩選選全部或單一狀態；需要處理可直接點數量。每種狀態有獨立顏色與文字。刪除或作廢結果尚未確認時不會因隱藏而假裝完成。",
         "看懂支出分析" to "點底部分析，先看本期個人支出；本月、上月、今年、全部或自訂日曆可切換範圍。金額怎麼算可看自己用、送人、代買、實付及明列折扣。送人計入個人支出，代買另列，折扣不再扣一次。統計涵蓋整個期間的有效已入帳帳目，沒有包含草稿或作廢。",

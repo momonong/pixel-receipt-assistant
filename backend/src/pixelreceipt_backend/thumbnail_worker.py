@@ -3,6 +3,7 @@
 import base64
 import io
 import json
+import math
 import sys
 
 from .inspection_worker import MAX_INPUT_BYTES, _limits
@@ -86,15 +87,48 @@ def main():
 
         if len(sys.argv) == 2 and sys.argv[1] == "document_pdf":
             return pack_pdf()
-        if len(sys.argv) != 2 or sys.argv[1] not in {"image/png", "image/jpeg", "image/webp"}:
+        if len(sys.argv) != 2:
             return 2
-        content = sys.stdin.buffer.read(MAX_INPUT_BYTES + 1)
-        inspect_evidence(content, sys.argv[1])
+        box = None
+        media_type = sys.argv[1]
+        if media_type == "region_image":
+            value = json.loads(sys.stdin.buffer.read(MAX_INPUT_BYTES * 4 // 3 + 2048))
+            if not isinstance(value, dict) or set(value) != {"data", "media_type", "box"}:
+                return 2
+            box = value["box"]
+            if (
+                not isinstance(box, list)
+                or len(box) != 4
+                or any(type(n) is not int or not 0 <= n <= 1000 for n in box)
+                or box[0] >= box[2]
+                or box[1] >= box[3]
+            ):
+                return 2
+            content = base64.b64decode(value["data"], validate=True)
+            media_type = value["media_type"]
+        else:
+            content = sys.stdin.buffer.read(MAX_INPUT_BYTES + 1)
+        if media_type not in {"image/png", "image/jpeg", "image/webp"}:
+            return 2
+        inspect_evidence(content, media_type)
         with Image.open(io.BytesIO(content)) as image:
-            # Resize while decoding before EXIF/RGB copies, keeping full-size phone
-            # images within the child address-space bound. Originals were decoded above.
-            image.thumbnail((1600, 1600))
-            image = ImageOps.exif_transpose(image).convert("RGB")
+            if box is None:
+                image.thumbnail((1600, 1600))
+                image = ImageOps.exif_transpose(image).convert("RGB")
+            else:
+                # Coordinates use the oriented original, never its lossy thumbnail.
+                # Crop before shrinking, with outward rounding to retain edge text.
+                image = ImageOps.exif_transpose(image)
+                x1, y1, x2, y2 = box
+                image = image.crop(
+                    (
+                        image.width * x1 // 1000,
+                        image.height * y1 // 1000,
+                        math.ceil(image.width * x2 / 1000),
+                        math.ceil(image.height * y2 / 1000),
+                    )
+                ).convert("RGB")
+                image.thumbnail((1600, 1600))
             while True:
                 for quality in (85, 70, 55):
                     stream = io.BytesIO()
