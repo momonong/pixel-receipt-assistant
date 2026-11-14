@@ -10,6 +10,7 @@ import com.momonong.pixelreceipt.data.ingestion.ImportInput
 import com.momonong.pixelreceipt.data.ingestion.openSharedImage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.filterNotNull
@@ -68,6 +69,63 @@ class MobileViewModel @JvmOverloads constructor(
         { selected.value }, { enginesMutable.value = it }, { signedInMutable.value = false; reviewerMutable.value = false })
     internal val autoProgress = automaticProgress.enabled
     internal val autoProgressPaused = automaticProgress.paused
+    private val photoStorageMutable = MutableStateFlow(PhotoStorageState())
+    internal val photoStorage = photoStorageMutable.asStateFlow()
+    private var photoWork: Job? = null
+    private fun cancelPhotoWork() { photoWork?.cancel(); photoWork = null; photoStorageMutable.value = PhotoStorageState(revision = photoStorageMutable.value.revision + 1) }
+    internal fun photoPageChanged(page: MobilePage, id: String?) {
+        cancelPhotoWork()
+        if (page == MobilePage.Settings) refreshPhotoStorage()
+        else if (page in setOf(MobilePage.Detail, MobilePage.Review, MobilePage.LedgerDetail)) id?.let(::recoverPhotos)
+    }
+    internal fun refreshPhotoStorage() {
+        if (photoWork?.isActive == true) return
+        photoWork = viewModelScope.launch {
+            photoStorageMutable.value = photoStorageMutable.value.copy(busy = true, message = null)
+            try {
+                val local = withContext(Dispatchers.IO) { repository.localPhotoStorage() }
+                photoStorageMutable.value = local.copy(busy = true)
+                val central = if (signedIn.value) repository.centralPhotoStorage() else null
+                photoStorageMutable.value = local.copy(central = central)
+            } catch (error: Exception) {
+                if (error is CancellationException && error !is kotlinx.coroutines.TimeoutCancellationException) throw error
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (error is MobileApiFailure && error.statusCode == 401 && repository.nativeToken() == null) { signedInMutable.value = false; reviewerMutable.value = false }
+                photoStorageMutable.value = photoStorageMutable.value.copy(busy = false, message = "中央空間尚未更新；連線後可重試。")
+            }
+        }
+    }
+    internal fun reclaimPhotos() {
+        if (photoWork?.isActive == true || !signedIn.value || !writable.value) return
+        photoWork = viewModelScope.launch {
+            photoStorageMutable.value = photoStorageMutable.value.copy(busy = true, message = "正在核對中央原圖…")
+            try {
+                val bytes = repository.reclaimPhotos()
+                val local = withContext(Dispatchers.IO) { repository.localPhotoStorage() }
+                photoStorageMutable.value = local.copy(central = photoStorageMutable.value.central, message = "已回收 ${photoSize(bytes)}。需要查看時會重新下載。")
+            } catch (error: Exception) {
+                if (error is CancellationException && error !is kotlinx.coroutines.TimeoutCancellationException) throw error
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                photoStorageMutable.value = photoStorageMutable.value.copy(busy = false, message = "回收尚未完成；未通過核對的照片保留。${mobileError(error)}")
+            }
+        }
+    }
+    internal fun recoverPhotos(id: String) {
+        if (photoWork?.isActive == true) return
+        val batch = repository.store.state.value?.batches?.firstOrNull { it.id == id } ?: return
+        if (batch.images.none { !images.file(it.hash).isFile } || batch.intakeId == null) return
+        if (!signedIn.value) { photoStorageMutable.value = photoStorageMutable.value.copy(message = "請登入並連線後取回照片；核對內容仍保留。") ; return }
+        photoWork = viewModelScope.launch {
+            photoStorageMutable.value = photoStorageMutable.value.copy(busy = true, message = "正在取回原圖…")
+            try { repository.recoverPhotos(id); photoStorageMutable.value = photoStorageMutable.value.copy(busy = false, message = null, revision = photoStorageMutable.value.revision + 1) }
+            catch (error: Exception) {
+                if (error is CancellationException && error !is kotlinx.coroutines.TimeoutCancellationException) throw error
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (error is MobileApiFailure && error.statusCode == 401 && repository.nativeToken() == null) { signedInMutable.value = false; reviewerMutable.value = false }
+                photoStorageMutable.value = photoStorageMutable.value.copy(busy = false, message = "照片尚未取回；請確認網路後重試。核對內容與帳目仍保留。")
+            }
+        }
+    }
     private val acceptedShares = mutableSetOf<String>()
     private val appUpdater = MobileUpdateController(viewModelScope, repository, AndroidMobileUpdateHost(application), com.momonong.pixelreceipt.BuildConfig.VERSION_CODE) {
         signedInMutable.value = false; reviewerMutable.value = false
@@ -181,6 +239,15 @@ class MobileViewModel @JvmOverloads constructor(
     fun select(id: String?) { duplicateMutable.value = null; saved["mobileSelected"] = id; saved["mobileSettings"] = false; saved["mobileDestination"] = if (id == null) MobilePage.Inbox.name else MobilePage.Detail.name
         id?.let { current -> if (signedIn.value && repository.store.state.value?.batches?.firstOrNull { it.id == current }?.intakeId != null) refreshBatch(current) }
     }
+    fun openReceipt(id: String) {
+        val child = repository.store.state.value?.batches?.firstOrNull { it.id == id && it.parentBatchId == selected.value } ?: return
+        duplicateMutable.value = null
+        saved["mobileSelected"] = child.id
+        saved["mobileSettings"] = false
+        saved["mobileDestination"] = MobilePage.Detail.name
+        if (!child.deleted && child.draftId != null) openAccounting(child.draftId)
+        else if (signedIn.value && !child.deleted) refreshBatch(id)
+    }
     fun openSettings(open: Boolean) { duplicateMutable.value = null; saved["mobileSettings"] = open }
     fun back() {
         if (destination.value == MobilePage.Prices.name) { priceController.close(); saved["mobileLedger"] = saved.get<String>("mobilePriceReturnLedger") }
@@ -191,7 +258,14 @@ class MobileViewModel @JvmOverloads constructor(
             MobilePage.InsightEditor.name -> saved["mobileDestination"] = saved.get<String>("mobileInsightReturn") ?: MobilePage.Ledger.name
             MobilePage.Prices.name -> saved["mobileDestination"] = saved.get<String>("mobilePriceReturn") ?: MobilePage.Spending.name
             MobilePage.Help.name -> saved["mobileDestination"] = saved.get<String>("mobileHelpReturn") ?: MobilePage.Inbox.name
-            MobilePage.Review.name -> saved["mobileDestination"] = MobilePage.Detail.name
+            MobilePage.Review.name -> {
+                val parent = repository.store.state.value?.batches?.firstOrNull { it.id == selected.value }?.parentBatchId
+                if (parent != null) select(parent) else saved["mobileDestination"] = MobilePage.Detail.name
+            }
+            MobilePage.Detail.name -> {
+                val parent = repository.store.state.value?.batches?.firstOrNull { it.id == selected.value }?.parentBatchId
+                select(parent)
+            }
             MobilePage.LedgerDetail.name -> saved["mobileDestination"] = saved.get<String>("mobileLedgerReturn") ?: MobilePage.Ledger.name
             else -> select(null)
         }
@@ -360,7 +434,7 @@ class MobileViewModel @JvmOverloads constructor(
     }
     fun login(password: String) = online("正在登入…") {
         automaticProgress.sessionChanged()
-        clearNativeScope(); appUpdater.sessionChanged(); spendingController.sessionChanged(); insightController.accountChanged(); priceController.accountChanged()
+        cancelPhotoWork(); clearNativeScope(); appUpdater.sessionChanged(); spendingController.sessionChanged(); insightController.accountChanged(); priceController.accountChanged()
         repository.login(password)
         signedInMutable.value = true
         verifyNativeScope()
@@ -372,7 +446,7 @@ class MobileViewModel @JvmOverloads constructor(
     }
     fun logout() = online("正在登出…") {
         automaticProgress.stop()
-        clearNativeScope(); appUpdater.sessionChanged(); spendingController.sessionChanged(); insightController.accountChanged(); priceController.accountChanged()
+        cancelPhotoWork(); clearNativeScope(); appUpdater.sessionChanged(); spendingController.sessionChanged(); insightController.accountChanged(); priceController.accountChanged()
         try {
             val revoked = repository.logout()
             messageMutable.value = if (revoked) "已登出；照片與待傳資料保留。" else "已清除本機登入；中央撤銷尚未確認，請在網頁的裝置管理撤銷此裝置。"

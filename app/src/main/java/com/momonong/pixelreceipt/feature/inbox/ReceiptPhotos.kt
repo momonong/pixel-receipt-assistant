@@ -36,11 +36,12 @@ internal fun PhotoChoices(assets: List<EvidenceAsset>, selected: String?, choose
 
 @Composable
 internal fun EvidencePhoto(hash: String, images: ImageStore, modifier: Modifier, zoomable: Boolean = false) {
-    var bitmap by remember(hash) { mutableStateOf<ImageBitmap?>(null) }
-    var failed by remember(hash) { mutableStateOf(false) }
+    val revision by images.changes.collectAsState()
+    var bitmap by remember(hash, revision) { mutableStateOf<ImageBitmap?>(null) }
+    var failed by remember(hash, revision) { mutableStateOf(false) }
     var scale by remember(hash) { mutableFloatStateOf(1f) }
     var offset by remember(hash) { mutableStateOf(Offset.Zero) }
-    LaunchedEffect(hash) {
+    LaunchedEffect(hash, revision) {
         try { bitmap = withContext(Dispatchers.IO) { images.preview(hash)?.asImageBitmap() }; failed = bitmap == null }
         catch (error: Exception) { if (error is CancellationException) throw error; failed = true }
     }

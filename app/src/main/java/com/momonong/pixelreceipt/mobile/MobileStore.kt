@@ -42,7 +42,16 @@ class MobileStore(private val root: File, private val beforeWrite: () -> Unit = 
                     check((review.originalSlots.filterNotNull() + review.selectedHashes + review.previousHashes).all { it.matches(Regex("[0-9a-f]{64}")) })
                 }
                 batch.frozen?.let { check(sha256(it.body.toByteArray(Charsets.UTF_8)) == it.bodySha256) }
+                batch.parentBatchId?.let { check(validUuid(it) && it != batch.id) }
+                batch.receiptIds?.let { ids -> check(ids.size in 1..100 && ids.distinct().size == ids.size && ids.all(::validUuid)) }
+                batch.receiptInfo?.let(::validateReceiptInfo)
                 batch.review?.let(::validateReview)
+            }
+            state.batches.forEach { batch ->
+                batch.parentBatchId?.let { parentId ->
+                    check(state.batches.any { it.id == parentId && batch.id in it.receiptIds.orEmpty() })
+                }
+                batch.receiptIds.orEmpty().forEach { childId -> check(state.batches.any { it.id == childId && it.parentBatchId == batch.id }) }
             }
             state.mutations.orEmpty().forEach(::validateMutation)
             state.overviewJson?.let(::overviewObject)
@@ -102,7 +111,7 @@ class MobileStore(private val root: File, private val beforeWrite: () -> Unit = 
                 error = "尚未入帳：請先核對補充敘述與用途，再確認。"))
         }
     }
-    private fun updateLocked(state: MobileState, id: String, expectedRevision: Long?, acceptIdentical: Boolean = false, rejectedConfirmation: FrozenConfirmation? = null, transform: (MobileBatch) -> MobileBatch): MobileBatch {
+    private fun updateLocked(state: MobileState, id: String, expectedRevision: Long?, acceptIdentical: Boolean = false, rejectedConfirmation: FrozenConfirmation? = null, linkedBatches: List<MobileBatch> = state.batches, transform: (MobileBatch) -> MobileBatch): MobileBatch {
         val old = state.batches.firstOrNull { it.id == id } ?: throw MobileFailure("找不到這筆本機收件。")
         if (expectedRevision != null && old.revision != expectedRevision && acceptIdentical && transform(old).copy(revision = old.revision) == old) {
             mutable.value = state
@@ -126,16 +135,49 @@ class MobileStore(private val root: File, private val beforeWrite: () -> Unit = 
         if (state.pendingMutation(id) != null) check(next.images == old.images && next.userNotes == old.userNotes && next.review?.editorJson == old.review?.editorJson) { "Pending receipt action cannot edit original content" }
         if (old.deleted) check(next.deleted && next.deletedAt == old.deletedAt && next.status == old.status && next.draftStatus == old.draftStatus)
         next.review?.let(::validateReview)
-        val mutations = if (next.deleted) state.mutations?.map { attempt ->
-            val matches = attempt.batchId == id && ((attempt.kind == "intake_delete" && attempt.targetId == next.intakeId) || (attempt.kind == "draft_delete" && attempt.targetId == next.draftId))
+        val batches = linkedBatches.map { if (it.id == id) next else it }
+        val deletedBatches = batches.filter { it.deleted }.associateBy { it.id }
+        val mutations = state.mutations?.map { attempt ->
+            val target = deletedBatches[attempt.batchId]
+            val matches = target != null && ((attempt.kind == "intake_delete" && attempt.targetId == target.intakeId) || (attempt.kind == "draft_delete" && attempt.targetId == target.draftId))
             if (matches && attempt.phase == "pending") attempt.copy(phase = "completed", error = null) else attempt
-        } else state.mutations
-        val ledgerChanged = next.ledgerStatus != old.ledgerStatus
-        write(state.copy(batches = state.batches.map { if (it.id == id) next else it }, mutations = mutations,
+        }
+        val previousById = state.batches.associateBy { it.id }
+        val ledgerChanged = batches.any { it.ledgerStatus != previousById[it.id]?.ledgerStatus }
+        write(state.copy(batches = batches, mutations = mutations,
             accountingStale = if (ledgerChanged) true else state.accountingStale,
             accountingError = if (ledgerChanged) "中央帳目狀態已更新，帳本與統計尚未同步。" else state.accountingError))
         return next
     }
+    /** One AtomicFile commit links the parent and children; polling never replaces editors or write journals. */
+    internal fun applyIntake(id: String, result: ServerIntake): MobileBatch = locked {
+        val state = read()
+        val parent = state.batches.first { it.id == id }
+        check(parent.intakeId == null || parent.intakeId == result.id)
+        if (parent.deleted) return@locked parent
+        val linked = state.batches.toMutableList()
+        val ids = result.receipts.map { receipt ->
+            validateReceiptInfo(receipt.info)
+            check(receipt.info.regions.all { it.imagePosition <= parent.images.size })
+            check(receipt.intakeId != result.id)
+            val existing = linked.firstOrNull { it.intakeId == receipt.intakeId }
+            check(existing == null || (existing.parentBatchId == id && existing.receiptInfo?.receiptId == receipt.info.receiptId))
+            val child = existing ?: MobileBatch(id = receipt.intakeId, createdAt = parent.createdAt,
+                images = parent.images, userNotes = parent.userNotes, purpose = parent.purpose, engine = parent.engine,
+                importComplete = true, uploadedHashes = parent.uploadedHashes, intakeId = receipt.intakeId, parentBatchId = id)
+            check(linked.none { it.id == child.id && it.intakeId != receipt.intakeId })
+            val projected = projectIntake(child, receipt.asIntake()).copy(receiptInfo = receipt.info)
+            if (existing == null) linked.add(projected) else linked[linked.indexOf(existing)] =
+                if (projected == existing) existing else projected.copy(revision = existing.revision + 1)
+            child.id
+        }
+        check(linked.size <= 1000) { "本機收件索引已達容量上限；原資料保留。" }
+        // Keep already known members even if a stale/partial response omits them.
+        val members = (ids + parent.receiptIds.orEmpty()).distinct().takeIf { it.isNotEmpty() }
+        check(members == null || members.size <= 100)
+        updateLocked(state, id, parent.revision, linkedBatches = linked) { old -> projectIntake(old, result).copy(receiptIds = members) }
+    }
+
     /** Match, validate the displayed decision and freeze atomically with all local batch changes. */
     internal fun freezeForSubmission(id: String, expectedRevision: Long?, approval: DuplicateShareApproval?): MobileBatch = locked {
         val state = read()

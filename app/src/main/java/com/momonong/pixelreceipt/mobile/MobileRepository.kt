@@ -36,6 +36,42 @@ class MobileRepository(
         else spendingCacheFile?.write(value, { spendingMarker(store.load()) }, stillCurrent) ?: false
     }
     private val operation = Mutex()
+    private val photoCache = MobilePhotoCache(images)
+    private fun photoSession(token: String) { if (vault.read() != token) throw MobileFailure("登入已變更，這次照片連線已停止。") }
+    internal fun localPhotoStorage(): PhotoStorageState {
+        val candidates = reclaimablePhotos(store.load())
+        return PhotoStorageState(photoCache.bytes(), candidates.sumOf { photoCache.localBytes(it) })
+    }
+    internal suspend fun centralPhotoStorage(): CentralPhotoStorage = withContext(Dispatchers.IO) {
+        val token = vault.read() ?: throw MobileApiFailure(401)
+        val response = authenticated { check(it == token); api.photoStorage(it) }
+        photoSession(token); parsePhotoStorage(response)
+    }
+    internal suspend fun reclaimPhotos(): Long = withContext(Dispatchers.IO) { operation.withLock {
+        val token = vault.read() ?: throw MobileApiFailure(401)
+        var reclaimed = 0L
+        for (image in reclaimablePhotos(store.load())) {
+            if (!images.file(image.hash).isFile) continue
+            photoSession(token)
+            reclaimed += photoCache.reclaim(image, { file -> authenticated { check(it == token); api.downloadPhoto(it, image, file) } }, {
+                vault.read() == token && reclaimablePhotos(store.load()).any { it == image }
+            })
+        }
+        reclaimed
+    } }
+    internal suspend fun recoverPhotos(batchId: String): Unit = withContext(Dispatchers.IO) { operation.withLock {
+        val token = vault.read() ?: throw MobileApiFailure(401)
+        val batch = store.batch(batchId)
+        // Missing unsent sources can never be replaced by an unconfirmed central association.
+        if (batch.intakeId == null) return@withLock
+        for (image in batch.images) {
+            photoSession(token)
+            photoCache.recover(image, { file -> authenticated { check(it == token); api.downloadPhoto(it, image, file) } }, {
+                vault.read() == token && store.batch(batchId).images.contains(image)
+            })
+        }
+    } }
+
     override suspend fun appRelease(): AppRelease = withContext(Dispatchers.IO) { authenticated { api.appRelease(it) } }
     override suspend fun downloadAppUpdate(release: AppRelease, file: File, progress: (Long) -> Unit): Unit = withContext(Dispatchers.IO) { authenticated { api.downloadAppUpdate(it, release, file, progress) } }
     suspend fun initialize(): Boolean = withContext(Dispatchers.IO) { store.load(); vault.read() != null }
@@ -366,18 +402,13 @@ class MobileRepository(
     private fun tombstone(id: String): MobileBatch = store.update(id) { old ->
         if (old.deleted) old else old.copy(deletedAt = System.currentTimeMillis(), status = "deleted", draftStatus = old.draftId?.let { "deleted" }, message = "收據已刪除；原圖與歷史資料保留。")
     }
-    private fun applyIntake(id: String, result: ServerIntake): MobileBatch = store.update(id) { old ->
-        if (old.deleted) old else old.copy(intakeId = result.id, status = result.status, draftId = result.draftId, serverJson = result.rawJson,
-            message = null, syncRetryable = false, syncRetryAt = null, syncFailures = 0,
-            draftStatus = if (old.draftStatus == "voided" || old.ledgerStatus == "voided") "voided" else if (old.ledgerId != null && result.ledgerId == null) old.draftStatus else result.draftStatus,
-            ledgerId = old.ledgerId ?: result.ledgerId, ledgerStatus = if (old.ledgerStatus == "voided") "voided" else result.ledgerStatus ?: old.ledgerStatus,
-            deletedAt = if (result.status == "deleted" || result.draftStatus == "deleted") System.currentTimeMillis() else old.deletedAt)
-    }
+    private fun applyIntake(id: String, result: ServerIntake): MobileBatch = store.applyIntake(id, result)
     /** Called only by an explicit, confirmed user action. A pending intent always wins over new text. */
     suspend fun deleteBatch(id: String, reason: String = "未註明"): Unit = withContext(Dispatchers.IO) {
         operation.withLock {
             val batch = store.batch(id)
             val pending = store.load().pendingMutation(id)
+            if (batch.isReceiptGroup && pending == null) throw MobileFailure(GROUP_DELETE_EXPLANATION)
             if (batch.deleted) {
                 if (pending != null) store.finishMutation(pending.key, "completed")
                 refreshAfterReceiptAction()
@@ -396,6 +427,7 @@ class MobileRepository(
             val attempt = pending ?: run {
                 val intake = batch.intakeId?.let { authenticated { token -> api.status(token, it) } }
                 if (intake != null) applyIntake(id, intake)
+                if (!intake?.receipts.isNullOrEmpty()) throw MobileFailure(GROUP_DELETE_EXPLANATION)
                 if (intake?.status == "deleted") { refreshAfterReceiptAction(); return@withLock }
                 if (intake?.ledgerId != null) throw MobileFailure("這筆已在中央入帳；請更新後使用作廢帳目。")
                 val draftId = intake?.draftId ?: batch.draftId
@@ -475,6 +507,10 @@ class MobileRepository(
             when (attempt.kind) {
                 "intake_delete" -> {
                     val current = authenticated { api.status(it, attempt.targetId) }
+                    if (current.status != "deleted" && current.receipts.isNotEmpty()) {
+                        applyIntake(attempt.batchId!!, current)
+                        throw MobileFailure(GROUP_DELETE_EXPLANATION)
+                    }
                     val result = if (current.status == "deleted") current else authenticated { api.deleteIntake(it, attempt.targetId, attempt) }
                     check(result.status == "deleted"); applyIntake(attempt.batchId!!, result); tombstone(attempt.batchId)
                 }
@@ -568,6 +604,7 @@ internal fun mobileError(error: Exception): String = when (error) {
         403 -> "此裝置需要重新登入，才能在 App 內核對與入帳。"
         409 -> "中央版本或狀態已改變；資料已保留，請更新並檢查目前內容後再操作。"
         413 -> "圖片或說明超過中央限制；資料仍在本機。"
+        507 -> "中央磁碟可用空間不足；照片與原請求保留，請稍後重試或聯絡維護者。"
         415 -> "中央不接受此圖片格式。"
         422 -> "中央無法接受這批資料；原請求已保留，請聯絡維護者核對。"
         429 -> "登入嘗試過多，請稍後再試。"

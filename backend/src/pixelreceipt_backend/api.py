@@ -188,6 +188,10 @@ def create_app(
     def health():
         return {"status": "ok", "scope": "central_ledger", "schema_version": SCHEMA_VERSION}
 
+    @api.get("/v1/storage")
+    def storage_usage():
+        return store.storage_usage()
+
     @api.post("/v1/evidence")
     async def upload(request: Request):
         media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()

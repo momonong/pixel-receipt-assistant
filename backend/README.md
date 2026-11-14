@@ -70,6 +70,7 @@ repo 根目錄的 [ingest CLI](../scripts/receipt_api.py) 只有 health／原檔
 | `POST /v1/intakes`、`GET /v1/intakes`、`/{id}` | 不可變收件／查詢；recognition status 與正式 draft_status、ledger_id、ledger_status 分開 |
 | `POST /v1/intakes/{id}/delete` | reviewer、Idempotency-Key；必填 expected_draft_revision（整數或 null）及 reason；回完整 deleted intake；[schema](delete-intake.schema.json) |
 | `GET /v1/recognition` | 已配置辨識來源的可用狀態，不代表辨識品質 |
+| `GET /v1/storage` | 認證容量摘要：原圖數量／bytes／上限、DB bytes、磁碟可用量與壓力提示；不包含路徑 |
 | `GET /v1/mobile/release`、`/apk` | 認證 metadata／APK 下載，未配置時404 |
 | `POST /v1/evidence` | 原始 JPEG／PNG／WebP／PDF binary body；不是 multipart、URL 或伺服器任意路徑；回 SHA-256／大小／頁數／尺寸 |
 | `GET /v1/evidence/{sha256}`、`.../content` | metadata／hash 驗證後的原 bytes attachment |

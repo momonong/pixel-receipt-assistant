@@ -10,6 +10,7 @@ internal enum class ReceiptStatus(
     val key: String, val label: String, ink: Long, background: Long,
     val normal: Boolean = true, val attention: Boolean = false,
 ) {
+    GroupIncomplete("group_incomplete", "分張處理未全數入帳", 0xFF6E4920, 0xFFFFF0DC, attention = true),
     Completed("completed", "已完成", 0xFF1F6542, 0xFFE8F4EB),
     NeedsReview("review", "待核對", 0xFF7A5310, 0xFFFFF2D5),
     Processing("processing", "中央處理中", 0xFF235BA7, 0xFFE8F0FD),

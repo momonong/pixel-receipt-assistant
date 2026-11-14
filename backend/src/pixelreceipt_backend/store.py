@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
 import tempfile
 import time
@@ -25,7 +26,7 @@ from .ledger_models import (
 from .models import LONG_MAX, Candidate, CreateDraft, DeleteDraft, ReviewDraft
 from .note_review import build_note_review
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 INTAKE_DELETE_JOURNAL_SCHEMA = "pixelreceipt-delete-intake-journal-1"
 MAX_STORED_BYTES = 1024 * 1024 * 1024
 
@@ -80,7 +81,17 @@ def private_directory(directory: Path, *, blobs=False) -> Path:
 
 
 class Store:
-    def __init__(self, data_dir: Path):
+    def __init__(
+        self, data_dir: Path, *, evidence_limit_bytes=None, disk_reserve_bytes=512 * 1024**2
+    ):
+        if evidence_limit_bytes is None:
+            evidence_limit_bytes = MAX_STORED_BYTES
+        if type(evidence_limit_bytes) is not int or not 1 <= evidence_limit_bytes <= 1024**4:
+            raise ValueError("evidence_limit_bytes must be 1..1TiB")
+        if type(disk_reserve_bytes) is not int or not 0 <= disk_reserve_bytes <= 1024**4:
+            raise ValueError("disk_reserve_bytes must be 0..1TiB")
+        self.evidence_limit_bytes = evidence_limit_bytes
+        self.disk_reserve_bytes = disk_reserve_bytes
         self.data_dir = private_directory(data_dir)
         self.blobs = private_directory(self.data_dir / "blobs", blobs=True)
         self.database = self.data_dir / "drafts.sqlite3"
@@ -127,6 +138,9 @@ class Store:
             if version == 4:
                 self._migrate_v4(connection)
                 version = 5
+            if version == 5:
+                self._migrate_v5(connection)
+                version = 6
             if version != SCHEMA_VERSION:
                 raise RuntimeError(f"unsupported database version {version}; migration required")
             self.ledger_id(connection)
@@ -357,6 +371,52 @@ class Store:
             "INSERT INTO ledger_metadata VALUES ('ledger_id', ?)", (str(uuid.uuid4()),)
         )
 
+    @staticmethod
+    def _migrate_v5(connection):
+        expected = {
+            "evidence",
+            "drafts",
+            "reviews",
+            "ledger",
+            "ledger_events",
+            "mutations",
+            "sessions",
+            "products",
+            "price_reviews",
+            "price_review_history",
+            "device_sessions",
+            "intakes",
+            "ledger_metadata",
+            "insight_annotations",
+            "insight_history",
+        }
+        actual = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+        if actual != expected or connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+            raise RuntimeError("invalid v5 schema; migration refused")
+        if connection.execute("PRAGMA foreign_key_check").fetchall():
+            raise RuntimeError("invalid v5 foreign keys; migration refused")
+        for statement in (
+            """CREATE TABLE receipt_groups (
+                intake_id TEXT PRIMARY KEY REFERENCES intakes(id), plan TEXT NOT NULL,
+                created_at TEXT NOT NULL)""",
+            """CREATE TABLE receipt_regions (
+                parent_id TEXT NOT NULL REFERENCES receipt_groups(intake_id),
+                receipt_id TEXT NOT NULL, ordinal INTEGER NOT NULL,
+                child_intake_id TEXT NOT NULL UNIQUE REFERENCES intakes(id),
+                specification TEXT NOT NULL, PRIMARY KEY(parent_id,receipt_id),
+                UNIQUE(parent_id,ordinal))""",
+            """CREATE TABLE receipt_attempts (
+                owner_id TEXT PRIMARY KEY REFERENCES intakes(id),
+                intake_id TEXT NOT NULL UNIQUE REFERENCES intakes(id), action TEXT NOT NULL)""",
+            "PRAGMA user_version = 6",
+        ):
+            connection.execute(statement)
+
     def ledger_id(self, connection=None) -> str:
         """Read the database's non-secret identity; never derive it from credentials."""
         if connection is None:
@@ -426,8 +486,10 @@ class Store:
             total = connection.execute(
                 "SELECT COALESCE(SUM(size_bytes), 0) FROM evidence"
             ).fetchone()[0]
-            if total + len(content) > MAX_STORED_BYTES:
+            if total + len(content) > self.evidence_limit_bytes:
                 raise StoreError(507, "evidence_storage_limit")
+            if shutil.disk_usage(self.data_dir).free - len(content) < self.disk_reserve_bytes:
+                raise StoreError(507, "evidence_disk_reserve")
             descriptor, temporary = tempfile.mkstemp(prefix="upload-", dir=self.data_dir)
             try:
                 with os.fdopen(descriptor, "wb") as stream:
@@ -454,6 +516,42 @@ class Store:
                 "SELECT * FROM evidence WHERE sha256 = ?", (sha256,)
             ).fetchone()
             return self._evidence(row)
+
+    def storage_usage(self) -> dict:
+        with self.connection() as connection:
+            count, used = connection.execute(
+                "SELECT COUNT(*),COALESCE(SUM(size_bytes),0) FROM evidence"
+            ).fetchone()
+        database_bytes = 0
+        for path in (
+            self.database,
+            self.database.with_name(self.database.name + "-wal"),
+            self.database.with_name(self.database.name + "-shm"),
+        ):
+            try:
+                database_bytes += path.stat().st_size
+            except FileNotFoundError:
+                # SQLite can remove WAL/SHM after the last connection closes.
+                continue
+        available = shutil.disk_usage(self.data_dir).free
+        warning = (
+            "low_disk"
+            if available <= self.disk_reserve_bytes
+            else "full"
+            if used >= self.evidence_limit_bytes
+            else "near_limit"
+            if used * 5 >= self.evidence_limit_bytes * 4
+            else "ok"
+        )
+        return {
+            "schema": "pixelreceipt-storage-1",
+            "evidence_bytes": used,
+            "evidence_count": count,
+            "evidence_limit_bytes": self.evidence_limit_bytes,
+            "database_bytes": database_bytes,
+            "filesystem_available_bytes": available,
+            "warning": warning,
+        }
 
     @staticmethod
     def _evidence(row) -> dict:
@@ -807,7 +905,7 @@ class Store:
     @staticmethod
     def _note_review(connection, draft):
         row = connection.execute(
-            "SELECT input,result FROM intakes WHERE draft_id=?", (draft["id"],)
+            "SELECT id,input,result FROM intakes WHERE draft_id=?", (draft["id"],)
         ).fetchone()
         if row is None:
             return None
@@ -822,6 +920,9 @@ class Store:
             candidate = Candidate.model_validate(draft["candidate"])
             notes = [body.user_notes, *(entry.notes for entry in body.evidence)]
             review = build_note_review(candidate, notes, model_review)
+            from .receipt_agent import retain_group_ambiguity
+
+            review = retain_group_ambiguity(connection, row["id"], review)
         except (ValueError, TypeError):
             return {
                 "status": "needs_review",

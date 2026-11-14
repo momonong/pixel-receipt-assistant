@@ -2,6 +2,7 @@
 """Local private snapshot/verify/restore; never manages services or remote machines."""
 
 import argparse
+import errno
 import hashlib
 import json
 import os
@@ -23,7 +24,7 @@ LIVE_FILES = AUTH_FILES | {
 }
 SNAPSHOT_FILES = AUTH_FILES | {"drafts.sqlite3", "blobs", "snapshot.json"}
 HASH = re.compile(r"[0-9a-f]{64}\Z")
-SUPPORTED_VERSIONS = {1, 2, 3, 4, 5}
+SUPPORTED_VERSIONS = {1, 2, 3, 4, 5, 6}
 SESSION_TABLES = ("sessions", "device_sessions")
 
 
@@ -168,10 +169,15 @@ def sync_directory(path):
         os.close(descriptor)
 
 
-def snapshot(source, destination):
+def snapshot(source, destination, *, previous=None):
     source = private_directory(source)
     validate_entries(source, LIVE_FILES, live=True)
     private_directory(source / "blobs")
+    if previous is not None:
+        previous = private_directory(previous)
+        if previous == source or source in previous.parents:
+            fail("previous_must_be_independent_snapshot")
+        verify(previous)
     destination = reserve_destination(destination)
     database = destination / "drafts.sqlite3"
     # SQLite backup incorporates committed WAL pages. Never copy only the main DB.
@@ -189,8 +195,26 @@ def snapshot(source, destination):
         target.execute("PRAGMA journal_mode = DELETE")
     database.chmod(0o600)
     version, rows = database_manifest(database)
-    for sha256, _ in rows:
-        copy_private(source / "blobs" / sha256, destination / "blobs" / sha256)
+    reused = 0
+    for sha256, expected_size in rows:
+        prior = previous / "blobs" / sha256 if previous else None
+        target = destination / "blobs" / sha256
+        if prior is not None and prior.exists():
+            if os.path.samefile(prior, source / "blobs" / sha256):
+                fail("previous_links_live_evidence")
+            if file_digest(prior) != (sha256, expected_size):
+                fail("previous_evidence_integrity_failure")
+            try:
+                # Never link the live source. Only already verified, immutable
+                # snapshot blobs may share an inode; DB/auth are always copied.
+                os.link(prior, target, follow_symlinks=False)
+                regular_file(target, private=True)
+                reused += 1
+                continue
+            except OSError as error:
+                if error.errno != errno.EXDEV:
+                    raise
+        copy_private(source / "blobs" / sha256, target)
     # Immutable/no-GC blobs make the DB snapshot + later blob copy consistent.
     # Live auth changes are outside that invariant; operators must pause rotation.
     auth_names = []
@@ -209,6 +233,7 @@ def snapshot(source, destination):
         "auth_files": auth_names,
         "unreferenced_or_later_blobs_not_copied": max(skipped, 0),
         "sessions_in_snapshot": "invalidated_on_restore",
+        "reused_blobs": reused,
     }
     descriptor = os.open(
         destination / "snapshot.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
@@ -228,6 +253,7 @@ def snapshot(source, destination):
         "status": "snapshot_verified",
         "database_version": version,
         "evidence_count": len(rows),
+        "reused_blobs": reused,
     }
 
 
@@ -311,6 +337,8 @@ def main(argv=None):
     for action in ("snapshot", "verify", "restore"):
         command = commands.add_parser(action)
         command.add_argument("--source", type=Path, required=True)
+        if action == "snapshot":
+            command.add_argument("--previous", type=Path, help="optional verified snapshot for immutable blob reuse")
         if action != "verify":
             command.add_argument(
                 "--destination",
@@ -323,9 +351,10 @@ def main(argv=None):
     try:
         if args.command == "verify":
             result = verify(args.source)
+        elif args.command == "snapshot":
+            result = snapshot(args.source, args.destination, previous=args.previous)
         else:
-            operation = snapshot if args.command == "snapshot" else restore
-            result = operation(args.source, args.destination)
+            result = restore(args.source, args.destination)
         print(json.dumps(result))
         return 0
     except (BackupError, OSError, sqlite3.Error, ValueError, TypeError) as error:

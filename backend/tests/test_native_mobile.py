@@ -270,7 +270,7 @@ def test_intake_accounting_projection_tracks_review_confirm_void_without_recogni
         assert final[key] == succeeded[key]
     assert len(store.list_ledger(100, 0)) == 1
     with store.connection() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
     reopened = Store(store.data_dir)
     assert IntakeStore(reopened).get(initial["id"])["ledger_status"] == "voided"
 

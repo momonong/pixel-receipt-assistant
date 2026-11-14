@@ -131,8 +131,8 @@ def test_corrupt_or_symlink_blob_never_overwritten_or_attached(client, store, bo
     assert destination.read_bytes() == png
 
 
-def test_store_limit_and_no_path_or_url_ingestion(client, png, monkeypatch):
-    monkeypatch.setattr("pixelreceipt_backend.store.MAX_STORED_BYTES", len(png) - 1)
+def test_store_limit_and_no_path_or_url_ingestion(client, store, png, monkeypatch):
+    monkeypatch.setattr(store, "evidence_limit_bytes", len(png) - 1)
     assert upload(client, png, "image/png").status_code == 507
     assert client.post("/v1/evidence", json={"path": "/etc/passwd"}).status_code == 415
     assert client.post("/v1/evidence", json={"url": "http://127.0.0.1/"}).status_code == 415

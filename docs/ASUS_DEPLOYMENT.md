@@ -40,7 +40,7 @@ python3 deploy/receipt_backup.py restore \
 ```
 
 - SQLite backup API 保存包含已提交 WAL 的一致快照，再複製快照引用的 immutable blobs，逐筆核對 SHA-256／大小；不在服務運作時只複製主 DB。
-- `integrity_check`、`foreign_key_check`、支援的 `user_version`（1–4）、DB checksum 及 evidence inventory 均須通過。草稿、帳本、事件、價格歷史、收件與冪等紀錄保留。
+- `integrity_check`、`foreign_key_check`、支援的 `user_version`（1–6）、DB checksum 及 evidence inventory 均須通過。草稿、帳本、事件、價格歷史、收件與冪等紀錄保留。
 - 備份依賴原圖不改寫、沒有 GC 的契約；未引用 blob 留在來源，不自動刪除。新增 GC 或原圖改寫前須先調整備份協調。
 - 備份包含私人資料及認證檔，並非加密檔；僅放私有儲存，搬到異機或雲端前另定加密、金鑰與保留政策。備份期間不輪替認證檔，manifest 不包含秘密內容或認證 checksum。
 - 失敗保留已建立的目錄與 `INCOMPLETE` marker，不啟用、不自動清理或 fallback。
@@ -48,6 +48,10 @@ python3 deploy/receipt_backup.py restore \
 - 工具不切換 live dir、不改 owner／unit、不啟動 app。先用隔離資料與 loopback 驗證，再停止專屬寫入者、保留舊資料與相容 release，核對 owner／權限後才切換。
 
 快照頻率、保留份數與異機備份須依實際容量決定；本文件不建立 timer、排程或自動刪除政策。
+
+0.8.0 可在 `snapshot` 加上 `--previous /absolute/private-backups/previous-snapshot`。工具先驗證該快照，再以 hardlink 共用其中內容不變的照片；不與 live 原圖連結，DB 與認證檔仍獨立複製。跨檔案系統會複製照片。每份快照可單獨還原，刪除舊快照的檔名不破壞新快照；但共用同一 inode 仍有相同磁碟故障風險，不能代替異機備份。本功能不刪除任何歷史快照。
+
+中央可設定 `--evidence-limit-bytes`（預設 1 GiB）與 `--disk-reserve-bytes`（預設 512 MiB）。正式 0.8.0 的規劃上限是 10 GiB；需以部署證據確認現場值。上傳新內容觸及限制會回 HTTP 507，既有相同 hash 仍可重用，已保存照片與帳目仍可讀取。認證 `GET /v1/storage` 回傳容量與壓力提示，不暴露檔案路徑。
 
 ## 發布驗證與回復
 

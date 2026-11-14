@@ -505,7 +505,8 @@ class MobileRenderingTest {
         val state = MobileUiState(signedIn = true, page = MobilePage.Settings,
             engines = mapOf("broker" to EngineAvailability(true, null), "local" to EngineAvailability(false, "recognition_not_configured")))
         render(state, "settings-840")
-        ui.onNodeWithText("中央尚未啟用").assertExists()
+        ui.onNodeWithTag("mobile-settings-page").performScrollToNode(hasText("中央尚未啟用"))
+        ui.onNodeWithText("中央尚未啟用").assertIsDisplayed()
         ui.onNodeWithTag("mobile-settings-page").performScrollToNode(hasTestTag("legacy-ledger-entry"))
         ui.onNodeWithTag("legacy-ledger-entry").performScrollTo().assertIsDisplayed()
         ui.onNodeWithText("本機帳本（此 App）").assertIsDisplayed()

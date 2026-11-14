@@ -42,6 +42,7 @@ internal data class MobileUiState(
     val appUpdate: AppUpdateState = AppUpdateState(),
     val spending: SpendingUiState = SpendingUiState(),
     val insight: InsightUiState = InsightUiState(),
+    val photoStorage: PhotoStorageState = PhotoStorageState(),
     val autoProgress: Boolean = false,
     val autoProgressPaused: Set<String> = emptySet(),
 ) {
@@ -68,6 +69,7 @@ internal class MobileActions(
     val stop: () -> Unit = {},
     val legacy: () -> Unit = {},
     val dashboard: (String?) -> Unit = {},
+    val openReceipt: (String) -> Unit = {},
     val help: () -> Unit = {},
     val ledger: () -> Unit = {},
     val ledgerDetail: (String) -> Unit = {},
@@ -99,11 +101,15 @@ internal class MobileActions(
     val retryInsightWrite: () -> Unit = {},
     val prices: (String?) -> Unit = {},
     val recoverInsightPending: () -> Unit = {},
+    val refreshPhotoStorage: () -> Unit = {},
+    val reclaimPhotos: () -> Unit = {},
+    val recoverPhotos: (String) -> Unit = {},
 )
 
 @Composable
 fun MobileScreen(viewModel: MobileViewModel) {
     MobileSystemBars()
+    val photoStorage by viewModel.photoStorage.collectAsStateWithLifecycle()
     val update by viewModel.appUpdate.collectAsStateWithLifecycle()
     val insight by viewModel.insightState.collectAsStateWithLifecycle()
     val price by viewModel.priceController.state.collectAsStateWithLifecycle()
@@ -138,15 +144,20 @@ fun MobileScreen(viewModel: MobileViewModel) {
     val state = MobileUiState(persisted != null, persisted?.batches.orEmpty(), selected,
         if (settings) MobilePage.Settings else MobilePage.valueOf(destination),
         signedIn, busy, message, engines, writable, edits, reviewer, persisted?.ledgerJson, persisted?.ledgerUpdatedAt, selectedLedger, savingReview, reviewEdits.keys, persisted?.ledgerDetailsJson, persisted?.mutations.orEmpty(), persisted?.overviewJson, persisted?.accountingStale == true, persisted?.accountingError, duplicate, update, spending, insight,
-        autoProgress = autoProgress && signedIn && writable, autoProgressPaused = autoProgressPaused)
+        photoStorage = photoStorage, autoProgress = autoProgress && signedIn && writable, autoProgressPaused = autoProgressPaused)
+    val recoveryBatchId = if (state.page == MobilePage.LedgerDetail) state.batches.firstOrNull { it.ledgerId == state.selectedLedgerId }?.id else state.selectedId
+    LaunchedEffect(state.page, recoveryBatchId, state.ready, signedIn) {
+        viewModel.photoPageChanged(state.page, recoveryBatchId)
+    }
     val actions = MobileActions(
+        refreshPhotoStorage = viewModel::refreshPhotoStorage, reclaimPhotos = viewModel::reclaimPhotos, recoverPhotos = viewModel::recoverPhotos,
         checkAppUpdate = viewModel::checkAppUpdate, downloadAppUpdate = viewModel::downloadAppUpdate,
         installAppUpdate = viewModel::installAppUpdate, cancelAppUpdate = viewModel::cancelAppUpdate,
         select = viewModel::select, settings = { viewModel.openSettings(true) }, back = viewModel::back,
         pick = { id -> viewModel.pickerTarget(id); picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
         edit = viewModel::edit, login = viewModel::login, logout = viewModel::logout, refresh = viewModel::refreshEngines,
         sync = viewModel::sync, retrySave = viewModel::retrySave, confirmImport = viewModel::confirmImport, stop = viewModel::stopNetwork, legacy = { viewModel.openLegacy(true) },
-        dashboard = viewModel::openAccounting, help = viewModel::help, ledger = viewModel::ledger,
+        dashboard = viewModel::openAccounting, openReceipt = viewModel::openReceipt, help = viewModel::help, ledger = viewModel::ledger,
         ledgerDetail = viewModel::openLedger, refreshLedger = viewModel::refreshLedger,
         editReview = viewModel::editReview, saveReview = viewModel::saveReview, confirmReview = viewModel::confirmReview,
         compareReview = viewModel::compareReview, resolveReview = viewModel::resolveReview, deleteBatch = viewModel::deleteBatch, voidEntry = viewModel::voidEntry, updateItemNames = viewModel::updateItemNames,

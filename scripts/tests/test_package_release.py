@@ -92,6 +92,8 @@ class ReleasePackagingTests(unittest.TestCase):
                 "docs/ASUS_DEPLOYMENT.md",
                 "docs/DOT_INTEGRATION.md",
                 "docs/RELEASE_v0.5.0.md",
+                "docs/RELEASE_v0.8.0.md",
+                "docs/MULTI_RECEIPT_AGENT.md",
                 "CHANGELOG.md",
             },
         )

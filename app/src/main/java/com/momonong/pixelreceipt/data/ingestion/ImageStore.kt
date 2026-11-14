@@ -21,6 +21,10 @@ data class StoredImage(val hash: String, val bytes: Long, val mime: String, val 
 
 /** Only the ingestion coordinator may mutate this directory; it serializes publication and GC. */
 class ImageStore(private val root: File) {
+    private val photoChanges = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    val changes: kotlinx.coroutines.flow.StateFlow<Long> = photoChanges
+    fun photosChanged() { photoChanges.value += 1 }
+
     companion object {
         const val MAX_IMAGES = 20
         const val MAX_BYTES = 20L * 1024 * 1024
@@ -35,7 +39,7 @@ class ImageStore(private val root: File) {
         return File(root, hash)
     }
 
-    suspend fun copy(open: () -> InputStream?, remainingBytes: Long): StoredImage {
+    suspend fun copy(open: () -> InputStream?, remainingBytes: Long, beforePublication: () -> Unit = {}): StoredImage {
         val temp = File(root, "${UUID.randomUUID()}.part")
         try {
             val digest = MessageDigest.getInstance("SHA-256")
@@ -74,6 +78,7 @@ class ImageStore(private val root: File) {
             decode(temp, 1024)?.recycle() ?: throw ImportFailure("圖片已損壞，無法解碼。")
             currentCoroutineContext().ensureActive()
             val hash = digest.digest().joinToString("") { "%02x".format(it) }
+            beforePublication()
             val destination = file(hash)
             if (destination.exists()) {
                 val existingDigest = MessageDigest.getInstance("SHA-256")

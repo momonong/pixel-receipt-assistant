@@ -40,7 +40,14 @@ def test_ledger_identity_is_read_only_stable_and_independent_of_credentials(
 
 def test_migrating_v4_allocates_scope_once_without_changing_legacy_records(store):
     with store.connection(write=True) as connection:
-        for table in ("ledger_metadata", "insight_history", "insight_annotations"):
+        for table in (
+            "receipt_attempts",
+            "receipt_regions",
+            "receipt_groups",
+            "ledger_metadata",
+            "insight_history",
+            "insight_annotations",
+        ):
             connection.execute(f"DROP TABLE IF EXISTS {table}")
         connection.execute("PRAGMA user_version=4")
         tables = [

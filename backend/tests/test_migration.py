@@ -78,7 +78,7 @@ def test_v1_migration_preserves_original_revisions_source_evidence_and_bytes(sto
     assert reopened.history(draft["id"]) == history
     assert reopened.get_evidence(evidence["sha256"], content=True)[1] == png
     with reopened.connection() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert not connection.execute("PRAGMA foreign_key_check").fetchall()
 
@@ -110,6 +110,9 @@ def test_v2_to_v3_preserves_confirmed_ledger_history_and_sessions(client, body, 
     previous_history = store.history(ledger["draft_id"])
     with store.connection(write=True) as connection:
         for table in (
+            "receipt_attempts",
+            "receipt_regions",
+            "receipt_groups",
             "ledger_metadata",
             "insight_history",
             "insight_annotations",
@@ -127,6 +130,6 @@ def test_v2_to_v3_preserves_confirmed_ledger_history_and_sessions(client, body, 
     assert reopened.history(ledger["draft_id"]) == previous_history
     assert reopened.get_session("synthetic-existing-session")["csrf_token"] == "synthetic-csrf"
     with reopened.connection() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
         assert connection.execute("SELECT COUNT(*) FROM products").fetchone()[0] == 0
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"

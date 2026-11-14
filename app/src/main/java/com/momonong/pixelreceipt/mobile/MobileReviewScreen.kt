@@ -98,6 +98,7 @@ internal fun MobileReviewScreen(state: MobileUiState, images: ImageStore, action
     var preview by rememberSaveable(batch.id) { mutableStateOf<String?>(null) }
     fun change(block: (JsonObject) -> Unit) = actions.editReview(batch.id, block)
     LazyColumn(modifier.testTag("native-review"), state = list, contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (state.photoStorage.message != null) item { PhotoRecoveryNotice(state, actions) }
         item { OutlinedButton(onClick = { batch.draftId?.let { actions.editInsight(it, false, batch.draftStatus == "voided") } }, enabled = batch.draftId != null && state.signedIn, modifier = Modifier.heightIn(min = 48.dp).testTag("review-insight-edit")) { Text("分析標籤（選填）") } }
         item(key = "receipt") {
             ReviewCard {
@@ -177,7 +178,7 @@ internal fun MobileReviewScreen(state: MobileUiState, images: ImageStore, action
                         TextButton(onClick = { preview = image.hash }, modifier = Modifier.heightIn(min = 48.dp).testTag("review-photo-$index")) { Text("原圖 ${index + 1}・放大") }
                     }
                 }
-                if (batch.userNotes.isNotBlank()) Text("送出備註 · ${batch.userNotes}", style = MaterialTheme.typography.bodySmall, color = MobileMuted)
+                if (batch.userNotes.isNotBlank()) Text("${if (batch.parentBatchId == null) "送出備註" else "整批原始備註"} · ${batch.userNotes}", style = MaterialTheme.typography.bodySmall, color = MobileMuted)
             }
         }
         if (review.error != null) item(key = "error") { MobileNotice(review.error) }
@@ -359,6 +360,8 @@ internal fun removeReviewAdjustment(editor: JsonObject, index: Int) {
     editor.add("adjustment_decisions", JsonArray().apply { editor.array("adjustment_decisions").filter { it.asJsonObject["adjustment_position"].asInt != index }.forEach { value -> val decision = value.asJsonObject; if (decision["adjustment_position"].asInt > index) decision.addProperty("adjustment_position", decision["adjustment_position"].asInt - 1); add(decision) } })
 }
 @Composable internal fun NativeOriginalDialog(hash: String, images: ImageStore, note: String = "", close: () -> Unit) {
+    val photoRevision by images.changes.collectAsState()
+    val available = remember(hash, photoRevision) { images.file(hash).isFile }
     Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(color = MobileGround, modifier = Modifier.fillMaxSize()) {
             Column(Modifier.safeDrawingPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -368,7 +371,7 @@ internal fun removeReviewAdjustment(editor: JsonObject, index: Int) {
                         Text("照片備註 · $note", style = MaterialTheme.typography.bodyMedium, color = MobileMuted)
                     }
                 }
-                if (images.file(hash).isFile) EvidencePhoto(hash, images, Modifier.weight(1f).fillMaxWidth(), zoomable = true)
+                if (available) EvidencePhoto(hash, images, Modifier.weight(1f).fillMaxWidth(), zoomable = true)
                 else Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Text("此裝置未保存原圖。帳目與核對內容仍可在 App 查看。", color = MobileMuted) }
                 OutlinedButton(onClick = close, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), shape = RoundedCornerShape(10.dp)) { Text("返回核對") }
             }

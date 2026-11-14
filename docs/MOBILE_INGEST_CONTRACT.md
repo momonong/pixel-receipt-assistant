@@ -1,6 +1,14 @@
 # PixelReceipt 手機收件與原生核對契約
 
-收件 schema：`pixelreceipt-mobile-ingest-1`。Android 0.5.0 提供收件與原生核對，ASUS 為中央資料來源；API Quota Broker 為預設來源，已配置的本機模型可另行選用。所有路徑相對既有 HTTPS API 根 `https://momonong.me/receipts/`。APK 只連中央後端，不取得 Broker／模型憑證。
+收件 schema：`pixelreceipt-mobile-ingest-1`。Android 提供收件與原生核對，現行中央服務由 HP 承接；API Quota Broker 為預設來源，已配置的本機模型可另行選用。所有路徑相對既有 HTTPS API 根 `https://momonong.me/receipts/`。APK 只連中央後端，不取得 Broker／模型憑證。
+
+## 0.8.0 相容擴充
+
+新 App 只在首次凍結收件時加入 `capabilities: ["receipt_groups_v1"]`，讓已啟用 `receipt_agent` 的中央回傳多收據群組。省略或空陣列序列化仍與舊版相同，已凍結收件不補寫能力欄位、key 或 payload；舊版保持單收據路徑。群組 DTO、個別核對、缺漏與用途界線見 [多收據契約](MULTI_RECEIPT_AGENT.md)。Schema 6 只增加關聯工作表，原始收件及舊帳目保留。
+
+認證 `GET /v1/storage` 回 `schema=pixelreceipt-storage-1`、`evidence_bytes`、`evidence_count`、`evidence_limit_bytes`、`database_bytes`、`filesystem_available_bytes`、`warning`（`ok|near_limit|full|low_disk`）。數值是查詢時的容量快照，不保留空間。容量或磁碟預留不足時，新原圖上傳回 507；重用既有相同內容不受新增容量限制。
+
+原圖恢復使用既有 `GET /v1/evidence/{sha256}/content`，Bearer 放 header。App 僅接受固定來源、無 redirect、大小及 MIME 相符、完整 SHA-256 相符的 bytes；在暫存檔驗證後才 atomic 發布。回收手機副本也先驗證中央原圖；未知結果、未完成收件及仍被保護收件共用的 hash 不回收。中央原圖沒有 GC。
 
 ## 登入與權限
 
