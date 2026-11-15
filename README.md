@@ -44,6 +44,7 @@ PixelReceipt **0.8.0／code 18** 是原生 Android 收件與記帳 App。正式�
 - [手機收件／原生核對契約](docs/MOBILE_INGEST_CONTRACT.md)
 - [商品價格與折扣契約](docs/PRICE_ANALYSIS_CONTRACT.md)
 - [部署與備份契約](docs/ASUS_DEPLOYMENT.md)
+- [pCloud 加密備份與保留政策](docs/PCLOUD_BACKUP.md)
 - [Ingest CLI（歷史 dot 入口）](docs/DOT_INTEGRATION.md)
 
 ## 建置與測試

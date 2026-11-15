@@ -47,7 +47,7 @@ python3 deploy/receipt_backup.py restore \
 - 還原先驗證快照，只寫全新 private dir，清空 `sessions` 與 `device_sessions`，使備份前手機及瀏覽器登入失效。它不自動輪替 API token／密碼。
 - 工具不切換 live dir、不改 owner／unit、不啟動 app。先用隔離資料與 loopback 驗證，再停止專屬寫入者、保留舊資料與相容 release，核對 owner／權限後才切換。
 
-快照頻率、保留份數與異機備份須依實際容量決定；本文件不建立 timer、排程或自動刪除政策。
+本機快照工具不建立排程或清理歷史副本。已核定的每日異機備份、加密、最新一份保留與新目錄還原流程見 [pCloud 備份政策](PCLOUD_BACKUP.md)；主機專用執行器與實際部署證據仍保存在私人維運目錄。
 
 0.8.0 可在 `snapshot` 加上 `--previous /absolute/private-backups/previous-snapshot`。工具先驗證該快照，再以 hardlink 共用其中內容不變的照片；不與 live 原圖連結，DB 與認證檔仍獨立複製。跨檔案系統會複製照片。每份快照可單獨還原，刪除舊快照的檔名不破壞新快照；但共用同一 inode 仍有相同磁碟故障風險，不能代替異機備份。本功能不刪除任何歷史快照。
 
