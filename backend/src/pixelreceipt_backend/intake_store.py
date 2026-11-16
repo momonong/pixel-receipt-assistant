@@ -284,7 +284,7 @@ class IntakeStore:
             identifier = row["id"] if row else None
         return self.raw(identifier) if identifier else None
 
-    def update(self, identifier, **fields):
+    def update(self, identifier, *, expected_job_key=None, **fields):
         allowed = {
             "status",
             "error_code",
@@ -305,15 +305,97 @@ class IntakeStore:
                 from .payload_media import compact_payload
 
                 fields["payload"] = compact_payload(self.store, connection, fields["payload"])
+            guard = " AND job_key=? AND status!='succeeded'" if expected_job_key else ""
+            parameters = (*fields.values(), identifier)
+            if expected_job_key:
+                parameters += (expected_job_key,)
             changed = connection.execute(
                 f"UPDATE intakes SET {','.join(k + '=?' for k in fields)} "
-                "WHERE id=? AND status != 'deleted'",
-                (*fields.values(), identifier),
+                "WHERE id=? AND status != 'deleted'" + guard,
+                parameters,
             ).rowcount
             from .receipt_agent import refresh_parent
 
-            refresh_parent(connection, identifier)
+            if changed:
+                refresh_parent(connection, identifier)
             return changed == 1
+
+    def record_result(self, expected, result):
+        """Fence stale readers before they can overwrite a successor attempt."""
+        with self.store.connection(write=True) as connection:
+            row = connection.execute(
+                "SELECT * FROM intakes WHERE id=?", (expected["id"],)
+            ).fetchone()
+            if (
+                row is None
+                or row["status"] in {"deleted", "succeeded"}
+                or row["job_key"] != expected["job_key"]
+                or row["execution_key"] != expected["execution_key"]
+            ):
+                return False
+            if row["result"] and json.loads(row["result"])["raw_outcome"] != result["raw_outcome"]:
+                raise StoreError(409, "stored_result_integrity_failure")
+            connection.execute(
+                "UPDATE intakes SET result=?,updated_at=? WHERE id=?",
+                (canonical(result), timestamp(), expected["id"]),
+            )
+            return True
+
+    def defer_preflight_retry(self, expected, outcome, delay):
+        """Archive a proven rejected preflight and schedule its bounded successor atomically."""
+        from .preflight_retry import RETRY_DELAYS, retryable_preflight
+        from .receipt_agent import refresh_parent
+
+        with self.store.connection(write=True) as connection:
+            row = connection.execute(
+                "SELECT * FROM intakes WHERE id=?", (expected["id"],)
+            ).fetchone()
+            if (
+                row is None
+                or row["status"] in {"deleted", "succeeded"}
+                or row["draft_id"] is not None
+                or row["job_key"] != expected["job_key"]
+                or row["execution_key"] != expected["execution_key"]
+            ):
+                return False
+            snapshot = json.loads(row["config_snapshot"])
+            history = snapshot.get("preflight_rejections", [])
+            if (
+                not retryable_preflight(outcome, snapshot)
+                or not row["result"]
+                or json.loads(row["result"])["raw_outcome"] != outcome
+                or len(history) >= len(RETRY_DELAYS)
+                or delay != RETRY_DELAYS[len(history)]
+            ):
+                raise StoreError(409, "preflight_retry_proof_invalid")
+            retry_at = int(time.time()) + delay
+            history = [
+                *history,
+                {
+                    "job_key": row["job_key"],
+                    "execution_key": row["execution_key"],
+                    "payload": json.loads(row["payload"]),
+                    "config_snapshot": {
+                        k: v for k, v in snapshot.items() if k != "preflight_rejections"
+                    },
+                    "raw_outcome": outcome,
+                    "retry_at": retry_at,
+                },
+            ]
+            snapshot["preflight_rejections"] = history
+            key = (
+                "pixelreceipt-"
+                + uuid.uuid5(uuid.UUID(row["id"]), "preflight-retry-" + str(len(history))).hex
+            )
+            connection.execute(
+                """UPDATE intakes SET job_key=?,execution_key=NULL,result=NULL,payload=NULL,
+                config_snapshot=?,status='queued',error_code='broker_admission_waiting',
+                next_poll_at=?,monitor_until=0,poll_attempts=0,polling_finished=0,updated_at=?
+                WHERE id=?""",
+                (key, canonical(snapshot), retry_at, timestamp(), row["id"]),
+            )
+            refresh_parent(connection, row["id"])
+            return True
 
     def complete(self, identifier, candidate, result):
         # The deletion check, derived-key draft creation and FK link share one write

@@ -1,4 +1,4 @@
-"""One durable queue adapter. Only proven pre-admission busy rejections can retry."""
+"""Durable queue adapter; retries require explicit evidence no generation was dispatched."""
 
 import asyncio
 import base64
@@ -23,6 +23,7 @@ from .insight_models import RecognitionAnalysisContext
 from .intake_store import IntakeStore
 from .models import Candidate
 from .note_review import build_note_review
+from .preflight_retry import RETRY_DELAYS, retryable_preflight
 from .receipt_agent import (
     LAYOUT_VERSION,
     READ_VERSION,
@@ -900,6 +901,9 @@ class RecognitionWorker:
             "transport_document": transport_document,
             "payload_sha256": hashlib.sha256(canonical(payload).encode()).hexdigest(),
         }
+        previous = json.loads(row["config_snapshot"]) if row["config_snapshot"] else {}
+        if "preflight_rejections" in previous:
+            snapshot["preflight_rejections"] = previous["preflight_rejections"]
         # This unsent preparation may be rebuilt while admission is paused. The
         # final deadline/body/hash are frozen together immediately before queue POST.
         await self.update(
@@ -983,7 +987,7 @@ class RecognitionWorker:
         # Persist raw content immediately before interpretation and before TTL can expire.
         if row["result"] and json.loads(row["result"])["raw_outcome"] != outcome:
             raise RecognitionError("stored_result_integrity_failure")
-        if not self.intakes.update(row["id"], result=canonical(result)):
+        if not self.intakes.record_result(row, result):
             return
         payload = json.loads(row["payload"])
         if (
@@ -993,11 +997,21 @@ class RecognitionWorker:
             or outcome.get("request_key") != row["execution_key"]
         ):
             raise RecognitionError("stored_job_integrity_failure")
+        if outcome.get("state") not in {"completed", "completed_usage_unknown"}:
+            if retryable_preflight(outcome, snapshot):
+                if self.config is None or any(
+                    snapshot.get(key) != value for key, value in self.config.snapshot().items()
+                ):
+                    raise RecognitionError("broker_config_changed")
+                previous = snapshot.get("preflight_rejections", [])
+                if len(previous) >= len(RETRY_DELAYS):
+                    raise RecognitionError("broker_preflight_rate_limit_exhausted")
+                self.intakes.defer_preflight_retry(row, outcome, RETRY_DELAYS[len(previous)])
+                return
+            raise RecognitionError("broker_outcome_not_completed")
         for key in ("provider", "model"):
             if snapshot.get(key) is not None and outcome.get(key) != snapshot[key]:
                 raise RecognitionError("broker_source_mismatch")
-        if outcome.get("state") not in {"completed", "completed_usage_unknown"}:
-            raise RecognitionError("broker_outcome_not_completed")
         if outcome.get("response_truncated") is not False or outcome.get("finish_reason") != "stop":
             raise RecognitionError("model_output_incomplete")
         value = outcome.get("result")
@@ -1008,7 +1022,7 @@ class RecognitionWorker:
                 raise RecognitionError("broker_source_unknown")
         normalized, removed = normalize_candidate_text(value.get("text"))
         result["candidate_parser"].update(json_fence_removed=removed, attempted=True)
-        if not self.intakes.update(row["id"], result=canonical(result)):
+        if not self.intakes.record_result(row, result):
             return
         if snapshot["prompt_version"] == LAYOUT_VERSION:
             try:
@@ -1159,6 +1173,13 @@ class RecognitionWorker:
         if row["status"] == "deleted":
             return
         body = json.loads(row["input"])
+        saved_config = json.loads(row["config_snapshot"]) if row["config_snapshot"] else {}
+        if saved_config.get("preflight_rejections") and (
+            self.config is None
+            or any(saved_config.get(key) != value for key, value in self.config.snapshot().items())
+        ):
+            await self.update(identifier, status="unknown", error_code="broker_config_changed")
+            return
         if row["result"]:
             if await self.advance_agent(row):
                 return
@@ -1246,6 +1267,7 @@ class RecognitionWorker:
         attempts = row["poll_attempts"] + 1
         await self.update(
             identifier,
+            expected_job_key=row["job_key"],
             poll_attempts=attempts,
             next_poll_at=int(time.time()) + min(60, 5 * 2 ** min(attempts, 4)),
         )
@@ -1272,21 +1294,36 @@ class RecognitionWorker:
                 )
             except (ValueError, TypeError, OverflowError):
                 raise RecognitionError("broker_expiry_unknown") from None
-        await self.update(identifier, **fields)
         execution_key = metadata.get("execution_key")
         if row["execution_key"] and execution_key != row["execution_key"]:
             raise RecognitionError("broker_execution_identity_mismatch")
         if isinstance(execution_key, str) and 1 <= len(execution_key) <= 128:
-            await self.update(identifier, execution_key=execution_key)
+            fields["execution_key"] = execution_key
+        # Metadata and execution identity must commit together to the same job.
+        await self.update(identifier, expected_job_key=row["job_key"], **fields)
         if metadata.get("result_available") is True:
+            # Keep the identity of THIS GET. A concurrent recovery may rotate the
+            # job while its response is in flight; record_result then fences it.
+            result_row = await asyncio.to_thread(self.intakes.raw, identifier)
+            if (
+                result_row["job_key"] != row["job_key"]
+                or result_row["execution_key"] != execution_key
+            ):
+                return
             outcome = await self.http.request("GET", path + "/result")
-            row = await asyncio.to_thread(self.intakes.raw, identifier)
-            await asyncio.to_thread(self.accept_result, row, outcome)
+            await asyncio.to_thread(self.accept_result, result_row, outcome)
         elif metadata.get("state") in {"failed", "cancelled", "expired"}:
-            await self.update(identifier, status="failed", error_code="broker_" + metadata["state"])
+            await self.update(
+                identifier,
+                expected_job_key=row["job_key"],
+                status="failed",
+                error_code="broker_" + metadata["state"],
+            )
         else:
             status = "unknown" if metadata.get("state") == "unknown" else "processing"
-            await self.update(identifier, status=status, error_code=None)
+            await self.update(
+                identifier, expected_job_key=row["job_key"], status=status, error_code=None
+            )
 
     async def run_once(self):
         row = await asyncio.to_thread(self.intakes.pending)

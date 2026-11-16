@@ -198,3 +198,28 @@ separate milestones; build evidence alone is not an OTA release or human accepta
 
 Design follows the user's accepted direction; details above are implementation
 choices. No additional approval loop is needed for the authorized scope.
+
+## CountTokens 429 recovery (2026-11-16)
+
+A Broker job can finish with `token_preflight_rejected` before a generation is
+sent. Previously its null provider/model fields were misreported as a source
+mismatch, leaving one receipt failed even when its sibling had succeeded.
+
+The backend now checks terminal outcome state before completed-answer provenance.
+Only an explicit HTTP 429 from the pinned model/target's token preflight, with
+complete evidence of no reservation, dispatch, provider attempt, usage, or answer,
+may schedule a successor. The same logical intake keeps its original images and
+notes. The old job key, execution key, compact payload, snapshot, and raw refusal
+are archived atomically in `preflight_rejections`; no Broker tombstone is removed.
+Two retries are allowed, after 60 and 180 seconds. Repeated refusals then stop with
+`broker_preflight_rate_limit_exhausted`. Unknown generation results, incomplete
+proof, authentication failures, and changed Broker configuration do not retry.
+
+Pending retry state survives process restarts. Metadata/result writes are fenced
+by the original job identity, including responses arriving after a successor is
+created. Successful sibling receipts and ledger entries are not reprocessed.
+The existing App reads the same intake and receipt IDs; no APK change is needed.
+
+Validation: 543 backend tests pass, including 18 rate-limit, restart, refusal,
+configuration-change, and late-response regressions; Ruff and diff checks pass.
+Production recovery and human review remain separate from these offline tests.
